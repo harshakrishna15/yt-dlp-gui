@@ -31,5 +31,14 @@ Convenience scripts are provided:
 
 - macOS: `scripts/setup_mac.sh`
 - Windows: `scripts/setup_windows.bat`
+- Linux: create a venv, install `python3-tk`, then `pip install -r requirements.txt`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+sudo apt-get install -y python3-tk
+pip install -r requirements.txt
+python run_gui.py
+```
 
 They create a venv and install requirements. You may still need to install a Tk-enabled Python if your current one lacks Tk.
