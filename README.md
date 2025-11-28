@@ -1,14 +1,15 @@
 ## yt-dlp GUI
 
-A lightweight Tkinter interface for `yt-dlp` that handles installs and downloads for you—no command line needed.
+A lightweight Tkinter interface for `yt-dlp` that handles installs and downloads for you without a command line.
 
 ### Quick start
 
-1) Install Python with Tk support  
-   - python.org builds include Tk.  
+1. Install Python with Tk support
+
+   - python.org builds include Tk.
    - Homebrew users: `brew install python-tk@3.12`.
 
-2) Create a virtual environment and install dependencies:
+2. Create a virtual environment and install dependencies:
 
 ```bash
 python3 -m venv .venv
@@ -16,7 +17,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3) Launch the app:
+3. Launch the app:
 
 ```bash
 python gui/app.py
