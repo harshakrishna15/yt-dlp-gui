@@ -96,16 +96,19 @@ class YtDlpGui:
         main.columnconfigure(1, weight=1)
 
         header = ttk.Frame(main, padding=8, style="Card.TFrame")
-        header.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 6))
+        header.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 4))
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text="yt-dlp-gui", style="Title.TLabel", font=fonts["title"]).grid(
             column=0, row=0, sticky="w"
         )
 
+        sep1 = ttk.Separator(main, orient="horizontal")
+        sep1.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(2, 2))
+
         options = ttk.Frame(main, padding=8, style="Card.TFrame")
-        options.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(0, 6))
+        options.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(0, 4))
         options.columnconfigure(1, weight=1)
-        ttk.Label(options, text="Download options", style="Subheader.TLabel", font=fonts["subheader"]).grid(
+        ttk.Label(options, text="Download Options", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, columnspan=2, sticky="w", pady=(0, 4)
         )
 
@@ -117,26 +120,26 @@ class YtDlpGui:
         url_frame.columnconfigure(0, weight=1)
         url_entry = ttk.Entry(url_frame, textvariable=self.url_var, width=60, style="Dark.TEntry")
         url_entry.grid(column=0, row=0, sticky="ew")
-        ttk.Button(url_frame, text="Paste", command=self._paste_url, style="Accent.TButton").grid(
+        ttk.Button(url_frame, text="Paste", command=self._paste_url).grid(
             column=1, row=0, padx=(8, 0)
         )
         url_entry.focus()
 
         type_row = ttk.Frame(options)
         type_row.grid(column=0, row=2, columnspan=2, sticky="w", pady=4)
-        ttk.Label(type_row, text="Type").grid(column=0, row=0, sticky="w", padx=(0, 8))
+        ttk.Label(type_row, text="Content Type").grid(column=0, row=0, sticky="w", padx=(0, 8))
         mode_frame = ttk.Frame(type_row)
         mode_frame.grid(column=1, row=0, sticky="w")
         ttk.Radiobutton(
             mode_frame,
-            text="Video + audio",
+            text="Video and Audio",
             variable=self.mode_var,
             value="video",
             command=self._on_mode_change,
         ).grid(column=0, row=0, padx=(0, 12))
         ttk.Radiobutton(
             mode_frame,
-            text="Audio only",
+            text="Audio Only",
             variable=self.mode_var,
             value="audio",
             command=self._on_mode_change,
@@ -205,13 +208,16 @@ class YtDlpGui:
             style="OutputPath.TLabel",
         ).grid(column=0, row=0, sticky="ew")
         ttk.Button(
-            output_frame, text="Browse...", command=self._pick_folder, style="Link.TButton"
+            output_frame, text="Browse...", command=self._pick_folder
         ).grid(column=1, row=0, padx=(8, 0), sticky="e")
 
+        sep2 = ttk.Separator(main, orient="horizontal")
+        sep2.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(2, 2))
+
         controls = ttk.Frame(main, padding=8, style="Card.TFrame")
-        controls.grid(column=0, row=2, columnspan=2, sticky="ew", pady=4)
+        controls.grid(column=0, row=4, columnspan=2, sticky="ew", pady=4)
         controls.columnconfigure(0, weight=1)
-        ttk.Label(controls, text="Control", style="Subheader.TLabel", font=fonts["subheader"]).grid(
+        ttk.Label(controls, text="Controls", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, columnspan=2, sticky="w", pady=(0, 4)
         )
         ttk.Label(controls, textvariable=self.status_var).grid(
@@ -229,7 +235,7 @@ class YtDlpGui:
         progress_frame = ttk.Frame(controls, padding=4, style="Card.TFrame")
         progress_frame.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(6, 0))
         progress_frame.columnconfigure(0, weight=1)
-        ttk.Label(progress_frame, text="Progress details", style="Subheader.TLabel", font=fonts["subheader"]).grid(
+        ttk.Label(progress_frame, text="Progress Details", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, sticky="w", pady=(0, 4)
         )
         self.progress_text = tk.Text(
@@ -247,13 +253,16 @@ class YtDlpGui:
         )
         self.progress_text.grid(column=0, row=1, sticky="ew")
 
+        sep3 = ttk.Separator(main, orient="horizontal")
+        sep3.grid(column=0, row=5, columnspan=2, sticky="ew", pady=(2, 2))
+
         log_frame = ttk.Frame(main, padding=8, style="Card.TFrame")
-        log_frame.grid(column=0, row=3, columnspan=2, sticky="nsew", pady=(4, 0))
+        log_frame.grid(column=0, row=6, columnspan=2, sticky="nsew", pady=(4, 0))
         log_frame.columnconfigure(0, weight=1)
         ttk.Label(log_frame, text="Log", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, sticky="w", pady=(0, 4)
         )
-        main.rowconfigure(3, weight=1)
+        main.rowconfigure(6, weight=1)
 
         self.log_text = tk.Text(
             log_frame,

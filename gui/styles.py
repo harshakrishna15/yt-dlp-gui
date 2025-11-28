@@ -11,7 +11,7 @@ def apply_theme(root: tk.Tk) -> dict[str, str]:
         pass
 
     base_bg = "#f6f1e8"
-    panel_bg = "#fdfaf5"
+    panel_bg = base_bg
     accent = "#2b4c7e"
     text_fg = "#2a2a2a"
     entry_bg = "#fefbf5"
@@ -31,6 +31,8 @@ def apply_theme(root: tk.Tk) -> dict[str, str]:
     style.configure("Header.TLabel", font=header_font, foreground=accent, background=base_bg)
     style.configure("Subheader.TLabel", font=subheader_font, foreground=text_fg, background=base_bg)
     style.configure("Muted.TLabel", foreground="#94a3b8", background=base_bg)
+    style.configure("TRadiobutton", background=base_bg, foreground=text_fg, font=base_font)
+    style.configure("TCheckbutton", background=base_bg, foreground=text_fg, font=base_font)
 
     style.configure(
         "TButton",
@@ -93,9 +95,9 @@ def apply_theme(root: tk.Tk) -> dict[str, str]:
     style.configure(
         "Card.TFrame",
         background=panel_bg,
-        borderwidth=1,
-        relief="solid",
-        padding=8,
+        borderwidth=0,
+        relief="flat",
+        padding=6,
     )
     style.configure(
         "Link.TButton",
