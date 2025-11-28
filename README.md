@@ -1,11 +1,14 @@
 ## yt-dlp GUI
 
-A small Tkinter GUI for yt-dlp. It installs yt-dlp from PyPI (`yt-dlp[default]`) and lets you download without the command line.
+A lightweight Tkinter interface for `yt-dlp` that handles installs and downloads for you—no command line needed.
 
-### Run it
+### Quick start
 
-1. From the repository root, ensure you have a Python build with Tk installed (python.org installers include Tk; Homebrew users can `brew install python-tk@3.12`).
-2. Create/activate a venv and install deps:
+1) Install Python with Tk support  
+   - python.org builds include Tk.  
+   - Homebrew users: `brew install python-tk@3.12`.
+
+2) Create a virtual environment and install dependencies:
 
 ```bash
 python3 -m venv .venv
@@ -13,25 +16,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Launch the GUI:
+3) Launch the app:
 
 ```bash
 python gui/app.py
 ```
 
-Use the UI to paste a URL, select container/codec, pick a format, and choose an output folder. Progress and errors appear in the app. Keep the window open until downloads finish.
+Paste a video URL, choose container/codec, select a format, and pick an output folder. Keep the window open until downloads finish; progress and errors are shown in the UI.
 
-### Fonts
-
-The UI uses IBM Plex Mono if installed; otherwise it will fall back to a system mono font. You do not need to install the font for the app to work.
-
-### Quick setup scripts
-
-Convenience scripts are provided:
+### Convenience scripts
 
 - macOS: `scripts/setup_mac.sh`
 - Windows: `scripts/setup_windows.bat`
-- Linux: create a venv, install `python3-tk`, then `pip install -r requirements.txt`:
+- Linux: create a venv, install Tk, then install requirements:
 
 ```bash
 python3 -m venv .venv
@@ -41,4 +38,8 @@ pip install -r requirements.txt
 python run_gui.py
 ```
 
-They create a venv and install requirements. You may still need to install a Tk-enabled Python if your current one lacks Tk.
+The scripts set up a venv and install dependencies. If your Python build lacks Tk, install a Tk-enabled build first.
+
+### Fonts
+
+The UI prefers IBM Plex Mono when available and otherwise falls back to your system monospace font. The font is optional; the app works without it.
