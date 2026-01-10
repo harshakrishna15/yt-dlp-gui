@@ -1,6 +1,7 @@
 import queue
 import threading
 import time
+import os
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -22,7 +23,7 @@ class YtDlpGui:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("yt-dlp GUI")
-        self.root.minsize(840, 680)
+        self.root.minsize(520, 520)
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.download_thread: threading.Thread | None = None
         self.is_downloading = False
@@ -62,6 +63,50 @@ class YtDlpGui:
         self._update_controls_state()
         self._poll_log_queue()
 
+    class _Scrollable(ttk.Frame):
+        def __init__(self, parent: tk.Widget, *, padding: int = 0) -> None:
+            super().__init__(parent)
+            self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+            self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+            self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+            self.content = ttk.Frame(self.canvas, padding=padding)
+            self._window_id = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
+
+            self.canvas.grid(column=0, row=0, sticky="nsew")
+            self.scrollbar.grid(column=1, row=0, sticky="ns")
+            self.columnconfigure(0, weight=1)
+            self.rowconfigure(0, weight=1)
+
+            self.content.bind("<Configure>", self._on_content_configure)
+            self.canvas.bind("<Configure>", self._on_canvas_configure)
+            self._bind_mousewheel(self.canvas)
+
+        def _on_content_configure(self, _event: tk.Event) -> None:
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+        def _on_canvas_configure(self, event: tk.Event) -> None:
+            self.canvas.itemconfigure(self._window_id, width=event.width)
+
+        def _bind_mousewheel(self, widget: tk.Widget) -> None:
+            def on_mousewheel(event: tk.Event) -> str:
+                if getattr(event, "delta", 0):
+                    widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    return "break"
+                return ""
+
+            def on_button4(_event: tk.Event) -> str:
+                widget.yview_scroll(-1, "units")
+                return "break"
+
+            def on_button5(_event: tk.Event) -> str:
+                widget.yview_scroll(1, "units")
+                return "break"
+
+            widget.bind_all("<MouseWheel>", on_mousewheel)
+            widget.bind_all("<Button-4>", on_button4)
+            widget.bind_all("<Button-5>", on_button5)
+
     def _init_visibility_helpers(self) -> None:
         # Cache grid info for widgets we may hide/show.
         self._widget_grid_info = {}
@@ -83,16 +128,30 @@ class YtDlpGui:
             widget.grid(**info)
 
     def _build_ui(self) -> None:
-        palette = styles.apply_theme(self.root)
+        require_plex = os.getenv("YTDLP_GUI_REQUIRE_PLEX_MONO") == "1"
+        warn_missing_font = os.getenv("YTDLP_GUI_WARN_MISSING_FONT") == "1"
+        try:
+            palette = styles.apply_theme(self.root, require_plex_mono=require_plex)
+        except RuntimeError as exc:
+            messagebox.showerror("Font required", str(exc))
+            raise SystemExit(1) from exc
+
+        if warn_missing_font and not palette.get("using_plex_mono", False):
+            messagebox.showwarning(
+                "Font not installed",
+                "IBM Plex Mono is not installed (or not visible to Tk). "
+                "The UI will use a fallback monospace font.",
+            )
         text_fg = palette["text_fg"]
         fonts = palette["fonts"]
         accent = palette["accent"]
         entry_border = palette["entry_border"]
 
-        main = ttk.Frame(self.root, padding=6)
-        main.grid(column=0, row=0, sticky="nsew")
+        scroll = self._Scrollable(self.root, padding=6)
+        scroll.grid(column=0, row=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        main = scroll.content
         main.columnconfigure(1, weight=1)
 
         header = ttk.Frame(main, padding=8, style="Card.TFrame")
@@ -118,7 +177,7 @@ class YtDlpGui:
         url_frame = ttk.Frame(options)
         url_frame.grid(column=1, row=1, sticky="ew", pady=4)
         url_frame.columnconfigure(0, weight=1)
-        url_entry = ttk.Entry(url_frame, textvariable=self.url_var, width=60, style="Dark.TEntry")
+        url_entry = ttk.Entry(url_frame, textvariable=self.url_var, style="Dark.TEntry")
         url_entry.grid(column=0, row=0, sticky="ew")
         ttk.Button(url_frame, text="Paste", command=self._paste_url).grid(
             column=1, row=0, padx=(8, 0)
@@ -257,12 +316,11 @@ class YtDlpGui:
         sep3.grid(column=0, row=5, columnspan=2, sticky="ew", pady=(2, 2))
 
         log_frame = ttk.Frame(main, padding=8, style="Card.TFrame")
-        log_frame.grid(column=0, row=6, columnspan=2, sticky="nsew", pady=(4, 0))
+        log_frame.grid(column=0, row=6, columnspan=2, sticky="ew", pady=(4, 0))
         log_frame.columnconfigure(0, weight=1)
         ttk.Label(log_frame, text="Log", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, sticky="w", pady=(0, 4)
         )
-        main.rowconfigure(6, weight=1)
 
         self.log_text = tk.Text(
             log_frame,

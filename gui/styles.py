@@ -1,8 +1,43 @@
 import tkinter as tk
+import os
 from tkinter import ttk
+from tkinter import font as tkfont
 
 
-def apply_theme(root: tk.Tk) -> dict[str, str]:
+def _set_named_fonts(root: tk.Tk, family: str, size: int) -> None:
+    for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont"):
+        try:
+            tkfont.nametofont(name).configure(family=family, size=size)
+        except tk.TclError:
+            continue
+
+
+def _pick_font_family(root: tk.Tk) -> tuple[str, bool]:
+    override = os.getenv("YTDLP_GUI_FONT_FAMILY")
+    preferred = override or "IBM Plex Mono"
+    if not override and preferred == "IBM Plex Mono":
+        try:
+            from . import font_loader
+        except Exception:
+            try:
+                import importlib
+
+                font_loader = importlib.import_module("font_loader")
+            except Exception:
+                font_loader = None
+        if font_loader is not None:
+            try:
+                font_loader.ensure_ibm_plex_mono(root)
+            except Exception:
+                pass
+    families = set(tkfont.families(root))
+    if preferred in families:
+        return preferred, preferred == "IBM Plex Mono"
+    fallback = tkfont.nametofont("TkFixedFont").actual().get("family", "monospace")
+    return fallback, False
+
+
+def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, str]:
     """Configure ttk styles and return the palette used."""
     style = ttk.Style()
     try:
@@ -17,10 +52,18 @@ def apply_theme(root: tk.Tk) -> dict[str, str]:
     entry_bg = "#fefbf5"
     entry_border = "#cbbd9f"
 
-    base_font = ("IBM Plex Mono", 12)
-    header_font = ("IBM Plex Mono", 32, "bold")
-    subheader_font = ("IBM Plex Mono", 22, "bold")
-    title_font = ("IBM Plex Mono", 40, "bold")
+    font_family, using_plex_mono = _pick_font_family(root)
+    if require_plex_mono and not using_plex_mono:
+        raise RuntimeError(
+            "IBM Plex Mono is not installed (or not visible to Tk). "
+            "Install it, or set YTDLP_GUI_FONT_FAMILY to a different family."
+        )
+
+    _set_named_fonts(root, font_family, 12)
+    base_font = (font_family, 12)
+    header_font = (font_family, 32, "bold")
+    subheader_font = (font_family, 22, "bold")
+    title_font = (font_family, 40, "bold")
     root.option_add("*Font", base_font)
 
     style.configure(".", background=base_bg, foreground=text_fg)
@@ -139,5 +182,7 @@ def apply_theme(root: tk.Tk) -> dict[str, str]:
             "subheader": subheader_font,
             "title": title_font,
         },
+        "font_family": font_family,
+        "using_plex_mono": using_plex_mono,
         "accent": accent,
     }

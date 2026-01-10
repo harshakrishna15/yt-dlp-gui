@@ -43,4 +43,12 @@ The scripts set up a venv and install dependencies. If your Python build lacks T
 
 ### Fonts
 
-The UI prefers IBM Plex Mono when available and otherwise falls back to your system monospace font. The font is optional; the app works without it.
+The app ships with IBM Plex Mono in `IBM_Plex_Mono/` and will try to register it at runtime so the UI looks consistent even on systems where it isn’t installed.
+
+- Enforce IBM Plex Mono: run with `YTDLP_GUI_REQUIRE_PLEX_MONO=1` (the app will exit with an error if Tk can’t find the font).
+- Show a warning when missing: run with `YTDLP_GUI_WARN_MISSING_FONT=1`.
+- Override the family entirely: `YTDLP_GUI_FONT_FAMILY="Menlo"` (or any font family visible to Tk).
+
+- Enforce IBM Plex Mono: run with `YTDLP_GUI_REQUIRE_PLEX_MONO=1` (the app will exit with an error if Tk can’t find the font).
+- Show a one-time warning when missing: run with `YTDLP_GUI_WARN_MISSING_FONT=1`.
+- Override the family entirely: `YTDLP_GUI_FONT_FAMILY="Menlo"` (or any font family visible to Tk).
