@@ -24,6 +24,10 @@ class YtDlpGui:
         self.root = tk.Tk()
         self.root.title("yt-dlp GUI")
         self.root.minsize(520, 520)
+        self._layout_anim_after_id: str | None = None
+        self._layout_target: tuple[int, int, int] | None = None  # wraplength, progress_lines, log_lines
+        self._layout_current: list[float] | None = None  # wraplength, progress_lines, log_lines (floats for easing)
+        self._layout_last_applied: tuple[int, int, int] | None = None
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.download_thread: threading.Thread | None = None
         self.is_downloading = False
@@ -147,35 +151,35 @@ class YtDlpGui:
         accent = palette["accent"]
         entry_border = palette["entry_border"]
 
-        scroll = self._Scrollable(self.root, padding=6)
+        scroll = self._Scrollable(self.root, padding=4)
         scroll.grid(column=0, row=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main = scroll.content
         main.columnconfigure(1, weight=1)
 
-        header = ttk.Frame(main, padding=8, style="Card.TFrame")
-        header.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 4))
+        header = ttk.Frame(main, padding=6, style="Card.TFrame")
+        header.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 3))
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text="yt-dlp-gui", style="Title.TLabel", font=fonts["title"]).grid(
             column=0, row=0, sticky="w"
         )
 
         sep1 = ttk.Separator(main, orient="horizontal")
-        sep1.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(2, 2))
+        sep1.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(1, 1))
 
-        options = ttk.Frame(main, padding=8, style="Card.TFrame")
-        options.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(0, 4))
+        options = ttk.Frame(main, padding=6, style="Card.TFrame")
+        options.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(0, 3))
         options.columnconfigure(1, weight=1)
         ttk.Label(options, text="Download Options", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, columnspan=2, sticky="w", pady=(0, 4)
+            column=0, row=0, columnspan=2, sticky="w", pady=(0, 3)
         )
 
         ttk.Label(options, text="Video URL").grid(
-            column=0, row=1, sticky="w", padx=(0, 8), pady=4
+            column=0, row=1, sticky="w", padx=(0, 8), pady=2
         )
         url_frame = ttk.Frame(options)
-        url_frame.grid(column=1, row=1, sticky="ew", pady=4)
+        url_frame.grid(column=1, row=1, sticky="ew", pady=2)
         url_frame.columnconfigure(0, weight=1)
         url_entry = ttk.Entry(url_frame, textvariable=self.url_var, style="Dark.TEntry")
         url_entry.grid(column=0, row=0, sticky="ew")
@@ -185,7 +189,8 @@ class YtDlpGui:
         url_entry.focus()
 
         type_row = ttk.Frame(options)
-        type_row.grid(column=0, row=2, columnspan=2, sticky="w", pady=4)
+        type_row.grid(column=0, row=2, columnspan=2, sticky="ew", pady=2)
+        type_row.columnconfigure(1, weight=1)
         ttk.Label(type_row, text="Content Type").grid(column=0, row=0, sticky="w", padx=(0, 8))
         mode_frame = ttk.Frame(type_row)
         mode_frame.grid(column=1, row=0, sticky="w")
@@ -205,7 +210,7 @@ class YtDlpGui:
         ).grid(column=1, row=0)
 
         self.container_label = ttk.Label(options, text="Container")
-        self.container_label.grid(column=0, row=3, sticky="w", padx=(0, 8), pady=4)
+        self.container_label.grid(column=0, row=3, sticky="w", padx=(0, 8), pady=2)
         self.container_combo = ttk.Combobox(
             options,
             textvariable=self.format_filter_var,
@@ -213,14 +218,14 @@ class YtDlpGui:
             state="readonly",
             width=10,
         )
-        self.container_combo.grid(column=1, row=3, sticky="w", pady=4)
+        self.container_combo.grid(column=1, row=3, sticky="ew", pady=2)
         self.format_filter_var.trace_add(
             "write",
             lambda *_: (self._apply_mode_formats(), self._update_controls_state()),
         )
 
         self.codec_label = ttk.Label(options, text="Codec")
-        self.codec_label.grid(column=0, row=4, sticky="w", padx=(0, 8), pady=4)
+        self.codec_label.grid(column=0, row=4, sticky="w", padx=(0, 8), pady=2)
         self.codec_combo = ttk.Combobox(
             options,
             textvariable=self.codec_filter_var,
@@ -228,7 +233,7 @@ class YtDlpGui:
             state="readonly",
             width=15,
         )
-        self.codec_combo.grid(column=1, row=4, sticky="w", pady=4)
+        self.codec_combo.grid(column=1, row=4, sticky="ew", pady=2)
         self.codec_filter_var.trace_add(
             "write",
             lambda *_: (self._apply_mode_formats(), self._update_controls_state()),
@@ -239,23 +244,23 @@ class YtDlpGui:
             text="Convert WebM to MP4 after download (re-encode; slower, lossy)",
             variable=self.convert_to_mp4_var,
         )
-        self.convert_mp4_check.grid(column=1, row=5, sticky="w", pady=4)
+        self.convert_mp4_check.grid(column=0, row=5, columnspan=2, sticky="ew", pady=2)
 
         self.format_label = ttk.Label(options, text="Format")
-        self.format_label.grid(column=0, row=6, sticky="w", padx=(0, 8), pady=4)
+        self.format_label.grid(column=0, row=6, sticky="w", padx=(0, 8), pady=2)
         self.format_combo = ttk.Combobox(
             options,
             textvariable=self.format_var,
             values=self.format_labels,
             state="readonly",
         )
-        self.format_combo.grid(column=1, row=6, sticky="ew", pady=4)
+        self.format_combo.grid(column=1, row=6, sticky="ew", pady=2)
 
         ttk.Label(options, text="Output folder").grid(
-            column=0, row=7, sticky="w", padx=(0, 8), pady=4
+            column=0, row=7, sticky="w", padx=(0, 8), pady=2
         )
         output_frame = ttk.Frame(options)
-        output_frame.grid(column=1, row=7, sticky="ew", pady=(2, 0))
+        output_frame.grid(column=1, row=7, sticky="ew", pady=(1, 0))
         output_frame.columnconfigure(0, weight=1)
         pill = ttk.Frame(output_frame, style="OutputPath.TFrame", padding=4)
         pill.grid(column=0, row=0, sticky="ew")
@@ -271,13 +276,13 @@ class YtDlpGui:
         ).grid(column=1, row=0, padx=(8, 0), sticky="e")
 
         sep2 = ttk.Separator(main, orient="horizontal")
-        sep2.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(2, 2))
+        sep2.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(1, 1))
 
-        controls = ttk.Frame(main, padding=8, style="Card.TFrame")
-        controls.grid(column=0, row=4, columnspan=2, sticky="ew", pady=4)
+        controls = ttk.Frame(main, padding=6, style="Card.TFrame")
+        controls.grid(column=0, row=4, columnspan=2, sticky="ew", pady=3)
         controls.columnconfigure(0, weight=1)
         ttk.Label(controls, text="Controls", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, columnspan=2, sticky="w", pady=(0, 4)
+            column=0, row=0, columnspan=2, sticky="w", pady=(0, 3)
         )
         ttk.Label(controls, textvariable=self.status_var).grid(
             column=0, row=1, sticky="w"
@@ -289,13 +294,13 @@ class YtDlpGui:
         self.progress = ttk.Progressbar(
             controls, variable=self.progress_var, maximum=100, mode="determinate"
         )
-        self.progress.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(6, 0))
+        self.progress.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(4, 0))
 
-        progress_frame = ttk.Frame(controls, padding=4, style="Card.TFrame")
-        progress_frame.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(6, 0))
+        progress_frame = ttk.Frame(controls, padding=3, style="Card.TFrame")
+        progress_frame.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(4, 0))
         progress_frame.columnconfigure(0, weight=1)
         ttk.Label(progress_frame, text="Progress Details", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, sticky="w", pady=(0, 4)
+            column=0, row=0, sticky="w", pady=(0, 3)
         )
         self.progress_text = tk.Text(
             progress_frame,
@@ -313,13 +318,13 @@ class YtDlpGui:
         self.progress_text.grid(column=0, row=1, sticky="ew")
 
         sep3 = ttk.Separator(main, orient="horizontal")
-        sep3.grid(column=0, row=5, columnspan=2, sticky="ew", pady=(2, 2))
+        sep3.grid(column=0, row=5, columnspan=2, sticky="ew", pady=(1, 1))
 
-        log_frame = ttk.Frame(main, padding=8, style="Card.TFrame")
-        log_frame.grid(column=0, row=6, columnspan=2, sticky="ew", pady=(4, 0))
+        log_frame = ttk.Frame(main, padding=6, style="Card.TFrame")
+        log_frame.grid(column=0, row=6, columnspan=2, sticky="ew", pady=(3, 0))
         log_frame.columnconfigure(0, weight=1)
         ttk.Label(log_frame, text="Log", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, sticky="w", pady=(0, 4)
+            column=0, row=0, sticky="w", pady=(0, 3)
         )
 
         self.log_text = tk.Text(
@@ -344,7 +349,81 @@ class YtDlpGui:
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(1, weight=1)
 
+        self.root.bind("<Configure>", self._on_root_configure, add=True)
+        self._on_root_configure(tk.Event())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_root_configure(self, _event: tk.Event) -> None:
+        if getattr(_event, "widget", self.root) is not self.root:
+            return
+
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+
+        try:
+            from tkinter import font as tkfont
+
+            line_px = tkfont.nametofont("TkFixedFont").metrics("linespace") or 16
+        except Exception:
+            line_px = 16
+
+        compact = height < 720
+        wraplength = max(260, width - 120)
+        progress_target_px = int(height * (0.10 if compact else 0.12))
+        log_target_px = int(height * (0.25 if compact else 0.33))
+        progress_max = 4 if compact else 6
+        log_min = 4 if compact else 6
+        log_max = 12 if compact else 18
+        progress_lines = max(2, min(progress_max, max(1, progress_target_px // line_px)))
+        log_lines = max(log_min, min(log_max, max(1, log_target_px // line_px)))
+        self._layout_target = (wraplength, progress_lines, log_lines)
+        if self._layout_anim_after_id is None:
+            self._layout_tick()
+
+    def _layout_tick(self) -> None:
+        if not self._layout_target:
+            self._layout_anim_after_id = None
+            return
+
+        if self._layout_current is None:
+            self._layout_current = [float(v) for v in self._layout_target]
+
+        # Easing factor: higher = snappier, lower = smoother.
+        ease = 0.35
+        done = True
+        for idx, target in enumerate(self._layout_target):
+            current = self._layout_current[idx]
+            delta = float(target) - current
+            if abs(delta) > 0.01:
+                self._layout_current[idx] = current + (delta * ease)
+                done = False
+
+        wraplength = int(round(self._layout_current[0]))
+        progress_lines = int(round(self._layout_current[1]))
+        log_lines = int(round(self._layout_current[2]))
+
+        applied = (wraplength, progress_lines, log_lines)
+        if applied != self._layout_last_applied:
+            self._layout_last_applied = applied
+            try:
+                self.convert_mp4_check.configure(wraplength=wraplength, justify="left")
+            except tk.TclError:
+                pass
+            try:
+                self.progress_text.configure(height=progress_lines)
+                self.log_text.configure(height=log_lines)
+            except tk.TclError:
+                pass
+
+        if done:
+            self._layout_current = None
+            self._layout_anim_after_id = None
+            return
+
+        # ~60fps.
+        self._layout_anim_after_id = self.root.after(16, self._layout_tick)
 
     def _pick_folder(self) -> None:
         chosen = filedialog.askdirectory()

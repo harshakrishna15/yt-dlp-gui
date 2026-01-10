@@ -59,11 +59,18 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
             "Install it, or set YTDLP_GUI_FONT_FAMILY to a different family."
         )
 
-    _set_named_fonts(root, font_family, 12)
-    base_font = (font_family, 12)
-    header_font = (font_family, 32, "bold")
-    subheader_font = (font_family, 22, "bold")
-    title_font = (font_family, 40, "bold")
+    # Keep the UI compact enough to fit on smaller laptop screens (e.g. 13" MacBooks)
+    # without requiring fullscreen.
+    base_size = 11
+    title_size = 26
+    header_size = 22
+    subheader_size = 16
+
+    _set_named_fonts(root, font_family, base_size)
+    base_font = (font_family, base_size)
+    header_font = (font_family, header_size, "bold")
+    subheader_font = (font_family, subheader_size, "bold")
+    title_font = (font_family, title_size, "bold")
     root.option_add("*Font", base_font)
 
     style.configure(".", background=base_bg, foreground=text_fg)
@@ -79,7 +86,7 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
 
     style.configure(
         "TButton",
-        padding=(6, 4),
+        padding=(6, 3),
         background=accent,
         foreground="#fdfaf5",
         borderwidth=1,
@@ -119,7 +126,7 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         "Accent.TButton",
         foreground="#fdfaf5",
         background=accent,
-        padding=(10, 6),
+        padding=(8, 4),
         borderwidth=1,
     )
     style.map(
@@ -140,7 +147,7 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         background=panel_bg,
         borderwidth=0,
         relief="flat",
-        padding=6,
+        padding=4,
     )
     style.configure(
         "Link.TButton",
