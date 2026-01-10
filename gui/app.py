@@ -1,4 +1,5 @@
 import queue
+import re
 import threading
 import time
 import os
@@ -28,6 +29,9 @@ class YtDlpGui:
         self._layout_target: tuple[int, int, int] | None = None  # wraplength, progress_lines, log_lines
         self._layout_current: list[float] | None = None  # wraplength, progress_lines, log_lines (floats for easing)
         self._layout_last_applied: tuple[int, int, int] | None = None
+        self._progress_anim_after_id: str | None = None
+        self._progress_pct_target = 0.0
+        self._progress_pct_display = 0.0
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.download_thread: threading.Thread | None = None
         self.is_downloading = False
@@ -59,6 +63,9 @@ class YtDlpGui:
         self.format_var = tk.StringVar()
         self.output_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.status_var = tk.StringVar(value="Idle")
+        self.progress_pct_var = tk.StringVar(value="0.0%")
+        self.progress_speed_var = tk.StringVar(value="—")
+        self.progress_eta_var = tk.StringVar(value="—")
 
         self._build_ui()
         self._init_visibility_helpers()
@@ -297,9 +304,18 @@ class YtDlpGui:
         ttk.Label(progress_frame, text="Progress Details", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, sticky="w", pady=(0, 3)
         )
+        summary = ttk.Frame(progress_frame, padding=0, style="Card.TFrame")
+        summary.grid(column=0, row=1, sticky="ew", pady=(0, 3))
+        ttk.Label(summary, text="Progress").grid(column=0, row=0, sticky="w", padx=(0, 6))
+        ttk.Label(summary, textvariable=self.progress_pct_var).grid(column=1, row=0, sticky="w")
+        ttk.Label(summary, text="Speed").grid(column=2, row=0, sticky="w", padx=(10, 6))
+        ttk.Label(summary, textvariable=self.progress_speed_var).grid(column=3, row=0, sticky="w")
+        ttk.Label(summary, text="ETA").grid(column=4, row=0, sticky="w", padx=(10, 6))
+        ttk.Label(summary, textvariable=self.progress_eta_var).grid(column=5, row=0, sticky="w")
+        summary.columnconfigure(5, weight=1)
         self.progress_text = tk.Text(
             progress_frame,
-            height=3,
+            height=2,
             wrap="word",
             state="disabled",
             background=palette["panel_bg"],
@@ -310,7 +326,7 @@ class YtDlpGui:
             highlightbackground=entry_border,
             highlightcolor=entry_border,
         )
-        self.progress_text.grid(column=0, row=1, sticky="ew")
+        self.progress_text.grid(column=0, row=2, sticky="ew")
 
         sep3 = ttk.Separator(main, orient="horizontal")
         sep3.grid(column=0, row=5, columnspan=2, sticky="ew", pady=(1, 1))
@@ -707,7 +723,13 @@ class YtDlpGui:
             pass
         self.root.after(100, self._poll_log_queue)
 
+    _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+    def _strip_ansi(self, text: str) -> str:
+        return self._ANSI_RE.sub("", text)
+
     def _append_log(self, message: str) -> None:
+        message = self._strip_ansi(message)
         # Route progress/start/done/time to the progress box; errors to log.
         progress_prefixes = ("[progress]", "[start]", "[done]", "[time]")
         if message.startswith(progress_prefixes):
@@ -726,8 +748,16 @@ class YtDlpGui:
         self.last_progress_index = None
 
     def _append_progress(self, message: str) -> None:
-        # Replace last line for progress updates; append for start/done/time.
-        replace_line = message.startswith("[progress]")
+        # Only append non-spammy events here; live progress numbers update separately.
+        replace_line = False
+        if message.startswith("[start]"):
+            message = "Start: " + message.removeprefix("[start]").strip()
+        elif message.startswith("[done]"):
+            message = "Done: " + message.removeprefix("[done]").strip()
+        elif message.startswith("[time]"):
+            message = message.removeprefix("[time]").strip()
+        elif message.startswith("[progress]"):
+            message = message.removeprefix("[progress]").strip()
         self.progress_text.configure(state="normal")
         if replace_line:
             try:
@@ -742,6 +772,48 @@ class YtDlpGui:
         self.progress_text.configure(state="normal")
         self.progress_text.delete("1.0", "end")
         self.progress_text.configure(state="disabled")
+        self.progress_pct_var.set("0.0%")
+        self.progress_speed_var.set("—")
+        self.progress_eta_var.set("—")
+        self._progress_pct_target = 0.0
+        self._progress_pct_display = 0.0
+        if self._progress_anim_after_id:
+            try:
+                self.root.after_cancel(self._progress_anim_after_id)
+            except Exception:
+                pass
+            self._progress_anim_after_id = None
+
+    def _on_progress_update(self, update: dict) -> None:
+        status = update.get("status")
+        if status == "downloading":
+            pct = update.get("percent")
+            if isinstance(pct, (int, float)):
+                self._progress_pct_target = float(max(0.0, min(100.0, pct)))
+                if self._progress_anim_after_id is None:
+                    self._progress_anim_tick()
+            speed = update.get("speed")
+            eta = update.get("eta")
+            if isinstance(speed, str):
+                self.progress_speed_var.set(speed or "—")
+            if isinstance(eta, str):
+                self.progress_eta_var.set(eta or "—")
+        elif status == "finished":
+            self._progress_pct_target = 100.0
+            if self._progress_anim_after_id is None:
+                self._progress_anim_tick()
+
+    def _progress_anim_tick(self) -> None:
+        ease = 0.22
+        delta = self._progress_pct_target - self._progress_pct_display
+        if abs(delta) < 0.05:
+            self._progress_pct_display = self._progress_pct_target
+            self.progress_pct_var.set(f"{self._progress_pct_display:.1f}%")
+            self._progress_anim_after_id = None
+            return
+        self._progress_pct_display += delta * ease
+        self.progress_pct_var.set(f"{self._progress_pct_display:.1f}%")
+        self._progress_anim_after_id = self.root.after(33, self._progress_anim_tick)
 
     def _on_start(self) -> None:
         if self.is_downloading:
@@ -787,7 +859,7 @@ class YtDlpGui:
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
             log=self._log,
-            update_progress=lambda _v: None,
+            update_progress=lambda u: self.root.after(0, lambda: self._on_progress_update(u)),
         )
         self.root.after(0, self._on_finish)
 

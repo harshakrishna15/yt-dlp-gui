@@ -13,7 +13,7 @@ def run_download(
     format_filter: str,
     convert_to_mp4: bool,
     log: Callable[[str], None],
-    update_progress: Callable[[float], None],
+    update_progress: Callable[[dict], None],
 ) -> None:
     """Run a yt-dlp download with progress callbacks."""
     fmt_id = fmt_info.get("format_id") if fmt_info else None
@@ -102,28 +102,60 @@ def run_download(
 
 
 def _progress_hook_factory(
-    log: Callable[[str], None], update_progress: Callable[[float], None]
+    log: Callable[[str], None], update_progress: Callable[[dict], None]
 ) -> Callable[[dict], None]:
     last_log = {"ts": 0.0}
 
+    def _format_speed(bytes_per_sec: float | None) -> str:
+        if not bytes_per_sec or bytes_per_sec <= 0:
+            return "—"
+        units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
+        value = float(bytes_per_sec)
+        unit_idx = 0
+        while value >= 1024 and unit_idx < len(units) - 1:
+            value /= 1024.0
+            unit_idx += 1
+        if unit_idx == 0:
+            return f"{value:.0f} {units[unit_idx]}"
+        return f"{value:.2f} {units[unit_idx]}"
+
+    def _format_eta(seconds: float | None) -> str:
+        if seconds is None:
+            return "—"
+        try:
+            seconds_i = int(max(0, seconds))
+        except Exception:
+            return "—"
+        m, s = divmod(seconds_i, 60)
+        h, m = divmod(m, 60)
+        if h:
+            return f"{h:d}:{m:02d}:{s:02d}"
+        return f"{m:d}:{s:02d}"
+
     def hook(status: dict) -> None:
         if status.get("status") == "downloading":
-            percent = status.get("_percent_str", "").strip()
-            speed = status.get("_speed_str", "").strip()
-            eta = status.get("_eta_str", "").strip()
-            try:
-                pct_val = float(percent.replace("%", ""))
-            except Exception:
-                pct_val = None
-            if pct_val is not None:
-                update_progress(pct_val)
             now = time.time()
             if now - last_log["ts"] >= 0.8:
                 last_log["ts"] = now
-                log(f"[progress] {percent} at {speed} (eta {eta})")
+                downloaded = status.get("downloaded_bytes")
+                total = status.get("total_bytes") or status.get("total_bytes_estimate")
+                try:
+                    pct_val = (float(downloaded) / float(total) * 100.0) if downloaded and total else None
+                except Exception:
+                    pct_val = None
+                speed_bps = status.get("speed")
+                eta_s = status.get("eta")
+                update_progress(
+                    {
+                        "status": "downloading",
+                        "percent": pct_val,
+                        "speed": _format_speed(speed_bps),
+                        "eta": _format_eta(eta_s),
+                    }
+                )
         elif status.get("status") == "finished":
             log("[progress] Download finished, post-processing...")
-            update_progress(100)
+            update_progress({"status": "finished"})
 
     return hook
 
