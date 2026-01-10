@@ -135,14 +135,6 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         foreground=[("disabled", "#8b8b8b")],
     )
     style.configure(
-        "Horizontal.TProgressbar",
-        troughcolor="#e5e2d8",
-        background=accent,
-        bordercolor="#e5e2d8",
-        lightcolor=accent,
-        darkcolor=accent,
-    )
-    style.configure(
         "Card.TFrame",
         background=panel_bg,
         borderwidth=0,

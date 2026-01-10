@@ -59,7 +59,6 @@ class YtDlpGui:
         self.format_var = tk.StringVar()
         self.output_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.status_var = tk.StringVar(value="Idle")
-        self.progress_var = tk.DoubleVar(value=0.0)
 
         self._build_ui()
         self._init_visibility_helpers()
@@ -291,13 +290,9 @@ class YtDlpGui:
             controls, text="Start download", command=self._on_start, style="Accent.TButton"
         )
         self.start_button.grid(column=1, row=1, sticky="e")
-        self.progress = ttk.Progressbar(
-            controls, variable=self.progress_var, maximum=100, mode="determinate"
-        )
-        self.progress.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(4, 0))
 
         progress_frame = ttk.Frame(controls, padding=3, style="Card.TFrame")
-        progress_frame.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(4, 0))
+        progress_frame.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(4, 0))
         progress_frame.columnconfigure(0, weight=1)
         ttk.Label(progress_frame, text="Progress Details", style="Subheader.TLabel", font=fonts["subheader"]).grid(
             column=0, row=0, sticky="w", pady=(0, 3)
@@ -748,9 +743,6 @@ class YtDlpGui:
         self.progress_text.delete("1.0", "end")
         self.progress_text.configure(state="disabled")
 
-    def _update_progress(self, value: float) -> None:
-        self.progress_var.set(max(0, min(100, value)))
-
     def _on_start(self) -> None:
         if self.is_downloading:
             return
@@ -771,7 +763,6 @@ class YtDlpGui:
         self.start_button.state(["disabled"])
         self._clear_log()
         self._clear_progress()
-        self._update_progress(0)
         self.download_start_time = time.time()
         self.download_thread = threading.Thread(
             target=self._run_download,
@@ -796,7 +787,7 @@ class YtDlpGui:
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
             log=self._log,
-            update_progress=lambda v: self.root.after(0, lambda: self._update_progress(v)),
+            update_progress=lambda _v: None,
         )
         self.root.after(0, self._on_finish)
 
@@ -804,7 +795,6 @@ class YtDlpGui:
         self.is_downloading = False
         self.status_var.set("Idle")
         self.start_button.state(["!disabled"])
-        self._update_progress(0)
         self.download_start_time = None
 
     def _on_close(self) -> None:
