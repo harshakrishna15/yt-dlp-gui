@@ -130,6 +130,18 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         borderwidth=1,
     )
     style.configure(
+        "Placeholder.Dark.TEntry",
+        fieldbackground=entry_bg,
+        background=entry_bg,
+        foreground="#94a3b8",
+        insertcolor="#94a3b8",
+        bordercolor=entry_border,
+        lightcolor=entry_border,
+        darkcolor=entry_border,
+        relief="solid",
+        borderwidth=1,
+    )
+    style.configure(
         "Accent.TButton",
         foreground="#fdfaf5",
         background=accent,

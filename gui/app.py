@@ -1,15 +1,20 @@
 import queue
 import re
 import threading
-import time
 import os
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+# Timing/layout constants (keep UI behavior consistent and readable).
+FETCH_DEBOUNCE_MS = 600
+LAYOUT_ANIM_MS = 16
+PROGRESS_ANIM_MS = 33
+SIDEBAR_ANIM_MS = 16
+
 # Support running as a script (python gui/app.py) or as a module (python -m gui.app).
 try:
-    from . import download, styles, yt_dlp_helpers as helpers
+    from . import download, styles, yt_dlp_helpers as helpers, widgets
 except ImportError:
     import importlib
     import sys
@@ -18,6 +23,7 @@ except ImportError:
     helpers = importlib.import_module("yt_dlp_helpers")
     download = importlib.import_module("download")
     styles = importlib.import_module("styles")
+    widgets = importlib.import_module("widgets")
 
 
 class YtDlpGui:
@@ -45,10 +51,7 @@ class YtDlpGui:
         self.is_fetching_formats = False
         self.last_fetched_url = ""
         self.format_fetch_after_id: str | None = None
-        self.last_progress_update = 0.0
-        self.last_progress_index: str | None = None
         self._last_codec_fallback_notice: tuple[str, str, str] | None = None
-        self.download_start_time: float | None = None
         self.last_fetch_failed = False
 
         self.url_var = tk.StringVar()
@@ -86,189 +89,6 @@ class YtDlpGui:
         self._update_controls_state()
         self._poll_log_queue()
 
-    class _Tooltip:
-        def __init__(self, root: tk.Tk, widget: tk.Widget, text: str, *, delay_ms: int = 450) -> None:
-            self.root = root
-            self.widget = widget
-            self.text = text
-            self.delay_ms = delay_ms
-            self._after_id: str | None = None
-            self._tip: tk.Toplevel | None = None
-            self._last_xy: tuple[int, int] | None = None
-
-            widget.bind("<Enter>", self._on_enter, add=True)
-            widget.bind("<Leave>", self._on_leave, add=True)
-            widget.bind("<Motion>", self._on_motion, add=True)
-
-        def _on_enter(self, event: tk.Event) -> None:
-            self._last_xy = (int(getattr(event, "x_root", 0)), int(getattr(event, "y_root", 0)))
-            self._schedule()
-
-        def _on_motion(self, event: tk.Event) -> None:
-            self._last_xy = (int(getattr(event, "x_root", 0)), int(getattr(event, "y_root", 0)))
-            if self._tip is not None:
-                self._position()
-
-        def _on_leave(self, _event: tk.Event) -> None:
-            self._cancel()
-            self._hide()
-
-        def _schedule(self) -> None:
-            self._cancel()
-            self._after_id = self.root.after(self.delay_ms, self._show)
-
-        def _cancel(self) -> None:
-            if self._after_id is None:
-                return
-            try:
-                self.root.after_cancel(self._after_id)
-            except Exception:
-                pass
-            self._after_id = None
-
-        def _position(self) -> None:
-            if self._tip is None:
-                return
-            x, y = self._last_xy or (0, 0)
-            # Offset from cursor.
-            x += 14
-            y += 14
-            self._tip.geometry(f"+{x}+{y}")
-
-        def _show(self) -> None:
-            self._after_id = None
-            if self._tip is not None:
-                return
-            self._tip = tk.Toplevel(self.root)
-            self._tip.wm_overrideredirect(True)
-            try:
-                self._tip.attributes("-topmost", True)
-            except Exception:
-                pass
-
-            label = tk.Label(
-                self._tip,
-                text=self.text,
-                justify="left",
-                background="#fff8dc",
-                foreground="#111827",
-                relief="solid",
-                borderwidth=1,
-                padx=8,
-                pady=6,
-            )
-            label.pack()
-            self._position()
-
-        def _hide(self) -> None:
-            if self._tip is None:
-                return
-            try:
-                self._tip.destroy()
-            except Exception:
-                pass
-            self._tip = None
-
-    class _Scrollable(ttk.Frame):
-        def __init__(
-            self, parent: tk.Widget, *, padding: int = 0, bg: str | None = None
-        ) -> None:
-            super().__init__(parent)
-            self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
-            if bg is not None:
-                self.canvas.configure(background=bg)
-            self.scrollbar = ttk.Scrollbar(
-                self, orient="vertical", command=self.canvas.yview
-            )
-            self._scrollbar_pad = 4
-            self._last_canvas_width: int | None = None
-            self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-            self.content = ttk.Frame(self.canvas, padding=padding)
-            self._window_id = self.canvas.create_window(
-                (0, 0), window=self.content, anchor="nw"
-            )
-
-            self.canvas.grid(column=0, row=0, sticky="nsew")
-            self.columnconfigure(0, weight=1)
-            self.rowconfigure(0, weight=1)
-
-            self.content.bind("<Configure>", self._on_content_configure)
-            self.canvas.bind("<Configure>", self._on_canvas_configure)
-            self._bind_mousewheel(self.canvas)
-            self._update_scrollbar_visibility()
-
-        def _on_content_configure(self, _event: tk.Event) -> None:
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-            self._update_scrollbar_visibility()
-
-        def _on_canvas_configure(self, event: tk.Event) -> None:
-            self._last_canvas_width = int(getattr(event, "width", 0) or 0)
-            self._update_content_width()
-            self._update_scrollbar_visibility()
-
-        def _update_content_width(self) -> None:
-            if not self._last_canvas_width or self._last_canvas_width <= 1:
-                return
-            width = self._last_canvas_width
-            if self.scrollbar.winfo_ismapped():
-                try:
-                    sb_w = self.scrollbar.winfo_reqwidth()
-                except tk.TclError:
-                    sb_w = 16
-                reserve = int(sb_w) + (int(self._scrollbar_pad) * 2)
-                width = max(1, width - reserve)
-            self.canvas.itemconfigure(self._window_id, width=width)
-
-        def _update_scrollbar_visibility(self) -> None:
-            try:
-                canvas_h = self.canvas.winfo_height()
-            except tk.TclError:
-                return
-            if canvas_h <= 1:
-                return
-            bbox = self.canvas.bbox(self._window_id) or self.canvas.bbox("all")
-            if not bbox:
-                return
-            content_h = int(bbox[3] - bbox[1])
-            should_show = content_h > (canvas_h + 2)
-            if should_show:
-                if not self.scrollbar.winfo_ismapped():
-                    # Overlay scrollbar so showing/hiding it doesn't reflow content.
-                    pad = int(self._scrollbar_pad)
-                    sb_height = max(1, canvas_h - (pad * 2))
-                    self.scrollbar.place(
-                        relx=1.0,
-                        x=-pad,
-                        y=pad,
-                        anchor="ne",
-                        height=sb_height,
-                    )
-                    self._update_content_width()
-            else:
-                if self.scrollbar.winfo_ismapped():
-                    self.scrollbar.place_forget()
-                    self._update_content_width()
-
-        def _bind_mousewheel(self, widget: tk.Widget) -> None:
-            def on_mousewheel(event: tk.Event) -> str:
-                if getattr(event, "delta", 0):
-                    widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                    return "break"
-                return ""
-
-            def on_button4(_event: tk.Event) -> str:
-                widget.yview_scroll(-1, "units")
-                return "break"
-
-            def on_button5(_event: tk.Event) -> str:
-                widget.yview_scroll(1, "units")
-                return "break"
-
-            widget.bind_all("<MouseWheel>", on_mousewheel)
-            widget.bind_all("<Button-4>", on_button4)
-            widget.bind_all("<Button-5>", on_button5)
-
     def _init_visibility_helpers(self) -> None:
         # Cache grid info for widgets we may hide/show.
         self._widget_grid_info = {}
@@ -283,6 +103,17 @@ class YtDlpGui:
             self.format_combo,
         ]:
             self._widget_grid_info[w] = w.grid_info()
+
+    def _set_combobox_enabled(self, combo: ttk.Combobox, enabled: bool) -> None:
+        combo.configure(state="readonly" if enabled else "disabled")
+
+    def _set_grid_mapped(self, widget: tk.Widget, mapped: bool) -> None:
+        if mapped:
+            if not widget.winfo_ismapped():
+                widget.grid()
+        else:
+            if widget.winfo_ismapped():
+                widget.grid_remove()
 
     def _set_widget_visible(self, widget: tk.Widget, show: bool) -> None:
         # Keep widgets laid out to avoid flicker; just ensure they are gridded once.
@@ -307,7 +138,6 @@ class YtDlpGui:
             )
         text_fg = palette["text_fg"]
         fonts = palette["fonts"]
-        accent = palette["accent"]
         entry_border = palette["entry_border"]
 
         self.header_bar = ttk.Frame(self.root, padding=6, style="Card.TFrame")
@@ -326,7 +156,7 @@ class YtDlpGui:
         self.header_sep = ttk.Separator(self.root, orient="horizontal")
         self.header_sep.grid(column=0, row=1, sticky="ew")
 
-        scroll = self._Scrollable(self.root, padding=4, bg=palette["base_bg"])
+        scroll = widgets.ScrollableFrame(self.root, padding=4, bg=palette["base_bg"])
         scroll.grid(column=0, row=2, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(2, weight=1)
@@ -359,9 +189,11 @@ class YtDlpGui:
         ttk.Label(options, text="Output title").grid(
             column=0, row=2, sticky="w", padx=(0, 8), pady=2
         )
-        ttk.Entry(
+        self.title_entry = ttk.Entry(
             options, textvariable=self.title_override_var, style="Dark.TEntry"
-        ).grid(column=1, row=2, sticky="ew", pady=2)
+        )
+        self.title_entry.grid(column=1, row=2, sticky="ew", pady=2)
+        self._init_title_placeholder()
 
         type_row = ttk.Frame(options)
         type_row.grid(column=0, row=3, columnspan=2, sticky="ew", pady=2)
@@ -408,7 +240,7 @@ class YtDlpGui:
         )
         self.convert_mp4_check.grid(column=2, row=0, sticky="e")
         # Tooltip: old inline explanation text from the previous layout.
-        self._Tooltip(
+        widgets.Tooltip(
             self.root,
             self.convert_mp4_check,
             "Convert WebM to MP4 after download (re-encode; slower, lossy)",
@@ -666,7 +498,7 @@ class YtDlpGui:
             self._log_sidebar_after_id = None
             return
 
-        self._log_sidebar_after_id = self.root.after(16, self._log_sidebar_tick)
+        self._log_sidebar_after_id = self.root.after(SIDEBAR_ANIM_MS, self._log_sidebar_tick)
 
     def _on_root_configure(self, _event: tk.Event) -> None:
         if getattr(_event, "widget", self.root) is not self.root:
@@ -744,12 +576,37 @@ class YtDlpGui:
             return
 
         # ~60fps.
-        self._layout_anim_after_id = self.root.after(16, self._layout_tick)
+        self._layout_anim_after_id = self.root.after(LAYOUT_ANIM_MS, self._layout_tick)
 
     def _pick_folder(self) -> None:
         chosen = filedialog.askdirectory()
         if chosen:
             self.output_dir_var.set(chosen)
+
+    def _init_title_placeholder(self) -> None:
+        self._title_placeholder_text = "Optional — leave blank for default title"
+        self._title_placeholder_active = False
+
+        def on_focus_in(_event: tk.Event) -> None:
+            if not self._title_placeholder_active:
+                return
+            self._title_placeholder_active = False
+            self.title_entry.configure(style="Dark.TEntry")
+            self.title_override_var.set("")
+
+        def on_focus_out(_event: tk.Event) -> None:
+            if (self.title_override_var.get() or "").strip():
+                return
+            self._title_placeholder_active = True
+            self.title_entry.configure(style="Placeholder.Dark.TEntry")
+            self.title_override_var.set(self._title_placeholder_text)
+
+        self.title_entry.bind("<FocusIn>", on_focus_in, add=True)
+        self.title_entry.bind("<FocusOut>", on_focus_out, add=True)
+
+        # Initialize placeholder if empty.
+        if not (self.title_override_var.get() or "").strip():
+            on_focus_out(tk.Event())
 
     def _on_status_change(self) -> None:
         value = (self.status_var.get() or "").strip()
@@ -789,7 +646,7 @@ class YtDlpGui:
         if force:
             self._start_fetch_formats(force=True)
         else:
-            self.format_fetch_after_id = self.root.after(600, self._start_fetch_formats)
+            self.format_fetch_after_id = self.root.after(FETCH_DEBOUNCE_MS, self._start_fetch_formats)
 
     def _start_fetch_formats(self, force: bool = False) -> None:
         url = self.url_var.get().strip()
@@ -969,10 +826,7 @@ class YtDlpGui:
         )
         self._set_widget_visible(self.container_label, show_container)
         self._set_widget_visible(self.container_combo, show_container)
-        if show_container:
-            self.container_combo.configure(state="readonly")
-        else:
-            self.container_combo.configure(state="disabled")
+        self._set_combobox_enabled(self.container_combo, show_container)
 
         # Codec chooser
         show_codec = (
@@ -983,10 +837,7 @@ class YtDlpGui:
         )
         self._set_widget_visible(self.codec_label, show_codec)
         self._set_widget_visible(self.codec_combo, show_codec)
-        if show_codec:
-            self.codec_combo.configure(state="readonly")
-        else:
-            self.codec_combo.configure(state="disabled")
+        self._set_combobox_enabled(self.codec_combo, show_codec)
 
         # Convert checkbox only relevant when container is webm.
         show_convert = (
@@ -996,18 +847,14 @@ class YtDlpGui:
             and self.format_filter_var.get() == "webm"
         )
         if show_convert:
-            if not self.convert_mp4_inline_label.winfo_ismapped():
-                self.convert_mp4_inline_label.grid()
-            if not self.convert_mp4_check.winfo_ismapped():
-                self.convert_mp4_check.grid()
+            self._set_grid_mapped(self.convert_mp4_inline_label, True)
+            self._set_grid_mapped(self.convert_mp4_check, True)
             self.convert_mp4_check.state(["!disabled"])
         else:
             self.convert_to_mp4_var.set(False)
             self.convert_mp4_check.state(["disabled"])
-            if self.convert_mp4_inline_label.winfo_ismapped():
-                self.convert_mp4_inline_label.grid_remove()
-            if self.convert_mp4_check.winfo_ismapped():
-                self.convert_mp4_check.grid_remove()
+            self._set_grid_mapped(self.convert_mp4_inline_label, False)
+            self._set_grid_mapped(self.convert_mp4_check, False)
 
         # Format dropdown
         if (
@@ -1024,10 +871,7 @@ class YtDlpGui:
             show_format = False
         self._set_widget_visible(self.format_label, show_format)
         self._set_widget_visible(self.format_combo, show_format)
-        if show_format:
-            self.format_combo.configure(state="readonly")
-        else:
-            self.format_combo.configure(state="disabled")
+        self._set_combobox_enabled(self.format_combo, show_format)
 
         # Start button
         if (
@@ -1069,7 +913,6 @@ class YtDlpGui:
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
-        self.last_progress_index = None
 
     def _reset_progress_summary(self) -> None:
         self.progress_pct_var.set("0.0%")
@@ -1113,7 +956,7 @@ class YtDlpGui:
             return
         self._progress_pct_display += delta * ease
         self.progress_pct_var.set(f"{self._progress_pct_display:.1f}%")
-        self._progress_anim_after_id = self.root.after(33, self._progress_anim_tick)
+        self._progress_anim_after_id = self.root.after(PROGRESS_ANIM_MS, self._progress_anim_tick)
 
     def _on_start(self) -> None:
         if self.is_downloading:
@@ -1136,7 +979,6 @@ class YtDlpGui:
         self.start_button.state(["disabled"])
         self._clear_log()
         self._reset_progress_summary()
-        self.download_start_time = time.time()
         self.download_thread = threading.Thread(
             target=self._run_download,
             kwargs={
@@ -1151,7 +993,10 @@ class YtDlpGui:
     def _run_download(self, url: str, output_dir: Path, fmt_label: str) -> None:
         fmt_info = self.format_lookup.get(fmt_label)
         format_filter = self.format_filter_var.get()
-        title_override = self.title_override_var.get().strip() or None
+        title_override_raw = self.title_override_var.get().strip()
+        if getattr(self, "_title_placeholder_active", False):
+            title_override_raw = ""
+        title_override = title_override_raw or None
 
         download.run_download(
             url=url,
@@ -1173,7 +1018,6 @@ class YtDlpGui:
         self.simple_state_var.set("Idle")
         self.status_var.set("Idle")
         self.start_button.state(["!disabled"])
-        self.download_start_time = None
         self._reset_progress_summary()
 
     def _on_close(self) -> None:
