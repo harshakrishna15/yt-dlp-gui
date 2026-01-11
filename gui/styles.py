@@ -110,6 +110,13 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         relief="solid",
         borderwidth=1,
     )
+    # Ensure readonly comboboxes don't look "disabled"/greyed out.
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
+        background=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
+        foreground=[("disabled", "#8b8b8b")],
+    )
     style.configure(
         "Dark.TEntry",
         fieldbackground=entry_bg,

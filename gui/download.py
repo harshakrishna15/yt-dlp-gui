@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from typing import Callable, Dict, Tuple
+import re
 
 from yt_dlp import YoutubeDL
 
@@ -12,6 +13,7 @@ def run_download(
     fmt_label: str,
     format_filter: str,
     convert_to_mp4: bool,
+    title_override: str | None,
     log: Callable[[str], None],
     update_progress: Callable[[dict], None],
 ) -> None:
@@ -75,8 +77,17 @@ def run_download(
         postprocessors = []
         pp_args = []
 
+    def _sanitize_filename_base(name: str) -> str:
+        cleaned = re.sub(r"[<>:\"/\\\\|?*]+", "_", name).strip()
+        cleaned = re.sub(r"\\s+", " ", cleaned).strip(" .")
+        return cleaned[:150] if cleaned else "video"
+
     opts = {
-        "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
+        "outtmpl": (
+            str(output_dir / f"{_sanitize_filename_base(title_override)}.%(ext)s")
+            if title_override
+            else str(output_dir / "%(title)s.%(ext)s")
+        ),
         "format": fmt,
         "progress_hooks": [
             _progress_hook_factory(log, update_progress),

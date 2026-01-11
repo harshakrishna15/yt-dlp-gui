@@ -27,7 +27,9 @@ class YtDlpGui:
         self.root.minsize(720, 550)
         self._layout_anim_after_id: str | None = None
         self._layout_target: tuple[int, int] | None = None  # wraplength, log_lines
-        self._layout_current: list[float] | None = None  # wraplength, log_lines (floats for easing)
+        self._layout_current: list[float] | None = (
+            None  # wraplength, log_lines (floats for easing)
+        )
         self._layout_last_applied: tuple[int, int] | None = None
         self._progress_anim_after_id: str | None = None
         self._progress_pct_target = 0.0
@@ -45,6 +47,7 @@ class YtDlpGui:
         self.format_fetch_after_id: str | None = None
         self.last_progress_update = 0.0
         self.last_progress_index: str | None = None
+        self._last_codec_fallback_notice: tuple[str, str, str] | None = None
         self.download_start_time: float | None = None
         self.last_fetch_failed = False
 
@@ -66,17 +69,105 @@ class YtDlpGui:
             value=False
         )  # convert WebM to MP4 after download (re-encode)
         self.format_var = tk.StringVar()
+        self.title_override_var = tk.StringVar(value="")
         self.output_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.status_var = tk.StringVar(value="Idle")
+        self._last_status_logged = self.status_var.get()
+        self.simple_state_var = tk.StringVar(value="Idle")
         self.progress_pct_var = tk.StringVar(value="0.0%")
         self.progress_speed_var = tk.StringVar(value="—")
         self.progress_eta_var = tk.StringVar(value="—")
+
+        self.status_var.trace_add("write", lambda *_: self._on_status_change())
 
         self._build_ui()
         self._init_visibility_helpers()
         self.url_var.trace_add("write", lambda *_: self._on_url_change())
         self._update_controls_state()
         self._poll_log_queue()
+
+    class _Tooltip:
+        def __init__(self, root: tk.Tk, widget: tk.Widget, text: str, *, delay_ms: int = 450) -> None:
+            self.root = root
+            self.widget = widget
+            self.text = text
+            self.delay_ms = delay_ms
+            self._after_id: str | None = None
+            self._tip: tk.Toplevel | None = None
+            self._last_xy: tuple[int, int] | None = None
+
+            widget.bind("<Enter>", self._on_enter, add=True)
+            widget.bind("<Leave>", self._on_leave, add=True)
+            widget.bind("<Motion>", self._on_motion, add=True)
+
+        def _on_enter(self, event: tk.Event) -> None:
+            self._last_xy = (int(getattr(event, "x_root", 0)), int(getattr(event, "y_root", 0)))
+            self._schedule()
+
+        def _on_motion(self, event: tk.Event) -> None:
+            self._last_xy = (int(getattr(event, "x_root", 0)), int(getattr(event, "y_root", 0)))
+            if self._tip is not None:
+                self._position()
+
+        def _on_leave(self, _event: tk.Event) -> None:
+            self._cancel()
+            self._hide()
+
+        def _schedule(self) -> None:
+            self._cancel()
+            self._after_id = self.root.after(self.delay_ms, self._show)
+
+        def _cancel(self) -> None:
+            if self._after_id is None:
+                return
+            try:
+                self.root.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+        def _position(self) -> None:
+            if self._tip is None:
+                return
+            x, y = self._last_xy or (0, 0)
+            # Offset from cursor.
+            x += 14
+            y += 14
+            self._tip.geometry(f"+{x}+{y}")
+
+        def _show(self) -> None:
+            self._after_id = None
+            if self._tip is not None:
+                return
+            self._tip = tk.Toplevel(self.root)
+            self._tip.wm_overrideredirect(True)
+            try:
+                self._tip.attributes("-topmost", True)
+            except Exception:
+                pass
+
+            label = tk.Label(
+                self._tip,
+                text=self.text,
+                justify="left",
+                background="#fff8dc",
+                foreground="#111827",
+                relief="solid",
+                borderwidth=1,
+                padx=8,
+                pady=6,
+            )
+            label.pack()
+            self._position()
+
+        def _hide(self) -> None:
+            if self._tip is None:
+                return
+            try:
+                self._tip.destroy()
+            except Exception:
+                pass
+            self._tip = None
 
     class _Scrollable(ttk.Frame):
         def __init__(
@@ -186,6 +277,7 @@ class YtDlpGui:
             self.container_combo,
             self.codec_label,
             self.codec_combo,
+            self.convert_mp4_inline_label,
             self.convert_mp4_check,
             self.format_label,
             self.format_combo,
@@ -227,7 +319,7 @@ class YtDlpGui:
             style="Title.TLabel",
             font=fonts["title"],
         ).grid(column=0, row=0, sticky="w")
-        ttk.Button(self.header_bar, text="Log", command=self._toggle_log_sidebar).grid(
+        ttk.Button(self.header_bar, text="Logs", command=self._toggle_log_sidebar).grid(
             column=1, row=0, sticky="e"
         )
 
@@ -264,8 +356,15 @@ class YtDlpGui:
         )
         url_entry.focus()
 
+        ttk.Label(options, text="Output title").grid(
+            column=0, row=2, sticky="w", padx=(0, 8), pady=2
+        )
+        ttk.Entry(
+            options, textvariable=self.title_override_var, style="Dark.TEntry"
+        ).grid(column=1, row=2, sticky="ew", pady=2)
+
         type_row = ttk.Frame(options)
-        type_row.grid(column=0, row=2, columnspan=2, sticky="ew", pady=2)
+        type_row.grid(column=0, row=3, columnspan=2, sticky="ew", pady=2)
         type_row.columnconfigure(1, weight=1)
         ttk.Label(type_row, text="Content Type").grid(
             column=0, row=0, sticky="w", padx=(0, 8)
@@ -288,22 +387,39 @@ class YtDlpGui:
         ).grid(column=1, row=0)
 
         self.container_label = ttk.Label(options, text="Container")
-        self.container_label.grid(column=0, row=3, sticky="w", padx=(0, 8), pady=2)
+        self.container_label.grid(column=0, row=4, sticky="w", padx=(0, 8), pady=2)
+        container_row = ttk.Frame(options)
+        container_row.grid(column=1, row=4, sticky="ew", pady=2)
+        container_row.columnconfigure(0, weight=1)
         self.container_combo = ttk.Combobox(
-            options,
+            container_row,
             textvariable=self.format_filter_var,
             values=["mp4", "webm"],
             state="readonly",
             width=10,
         )
-        self.container_combo.grid(column=1, row=3, sticky="ew", pady=2)
+        self.container_combo.grid(column=0, row=0, sticky="ew")
+        self.convert_mp4_inline_label = ttk.Label(container_row, text="Convert to MP4")
+        self.convert_mp4_inline_label.grid(column=1, row=0, padx=(12, 6), sticky="e")
+        self.convert_mp4_check = ttk.Checkbutton(
+            container_row,
+            text="",
+            variable=self.convert_to_mp4_var,
+        )
+        self.convert_mp4_check.grid(column=2, row=0, sticky="e")
+        # Tooltip: old inline explanation text from the previous layout.
+        self._Tooltip(
+            self.root,
+            self.convert_mp4_check,
+            "Convert WebM to MP4 after download (re-encode; slower, lossy)",
+        )
         self.format_filter_var.trace_add(
             "write",
             lambda *_: (self._apply_mode_formats(), self._update_controls_state()),
         )
 
         self.codec_label = ttk.Label(options, text="Codec")
-        self.codec_label.grid(column=0, row=4, sticky="w", padx=(0, 8), pady=2)
+        self.codec_label.grid(column=0, row=5, sticky="w", padx=(0, 8), pady=2)
         self.codec_combo = ttk.Combobox(
             options,
             textvariable=self.codec_filter_var,
@@ -311,18 +427,11 @@ class YtDlpGui:
             state="readonly",
             width=15,
         )
-        self.codec_combo.grid(column=1, row=4, sticky="ew", pady=2)
+        self.codec_combo.grid(column=1, row=5, sticky="ew", pady=2)
         self.codec_filter_var.trace_add(
             "write",
             lambda *_: (self._apply_mode_formats(), self._update_controls_state()),
         )
-
-        self.convert_mp4_check = ttk.Checkbutton(
-            options,
-            text="Convert WebM to MP4 after download (re-encode; slower, lossy)",
-            variable=self.convert_to_mp4_var,
-        )
-        self.convert_mp4_check.grid(column=0, row=5, columnspan=2, sticky="ew", pady=2)
 
         self.format_label = ttk.Label(options, text="Format")
         self.format_label.grid(column=0, row=6, sticky="w", padx=(0, 8), pady=2)
@@ -362,7 +471,7 @@ class YtDlpGui:
         ttk.Label(
             controls, text="Controls", style="Subheader.TLabel", font=fonts["subheader"]
         ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 3))
-        ttk.Label(controls, textvariable=self.status_var).grid(
+        ttk.Label(controls, textvariable=self.simple_state_var).grid(
             column=0, row=1, sticky="w"
         )
         self.start_button = ttk.Button(
@@ -423,7 +532,7 @@ class YtDlpGui:
         header.grid(column=0, row=0, sticky="ew", pady=(0, 6))
         header.columnconfigure(0, weight=1)
         ttk.Label(
-            header, text="Log", style="Subheader.TLabel", font=fonts["subheader"]
+            header, text="Logs", style="Subheader.TLabel", font=fonts["subheader"]
         ).grid(column=0, row=0, sticky="w")
 
         body = ttk.Frame(self.log_sidebar, style="Card.TFrame", padding=0)
@@ -447,12 +556,16 @@ class YtDlpGui:
             highlightcolor=entry_border,
         )
         scrollbar = ttk.Scrollbar(body, orient="vertical", command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=lambda f, l: self._autohide_text_scrollbar(scrollbar, f, l))
+        self.log_text.configure(
+            yscrollcommand=lambda f, l: self._autohide_text_scrollbar(scrollbar, f, l)
+        )
         self.log_text.grid(column=0, row=0, sticky="nsew")
         scrollbar.grid(column=1, row=0, sticky="ns")
         scrollbar.grid_remove()
 
-    def _autohide_text_scrollbar(self, scrollbar: ttk.Scrollbar, first: str, last: str) -> None:
+    def _autohide_text_scrollbar(
+        self, scrollbar: ttk.Scrollbar, first: str, last: str
+    ) -> None:
         """Proxy yscrollcommand that hides the scrollbar when not needed."""
         scrollbar.set(first, last)
         try:
@@ -621,10 +734,6 @@ class YtDlpGui:
         if applied != self._layout_last_applied:
             self._layout_last_applied = applied
             try:
-                self.convert_mp4_check.configure(wraplength=wraplength, justify="left")
-            except tk.TclError:
-                pass
-            try:
                 self.log_text.configure(height=log_lines)
             except tk.TclError:
                 pass
@@ -641,6 +750,13 @@ class YtDlpGui:
         chosen = filedialog.askdirectory()
         if chosen:
             self.output_dir_var.set(chosen)
+
+    def _on_status_change(self) -> None:
+        value = (self.status_var.get() or "").strip()
+        if not value or value == self._last_status_logged:
+            return
+        self._last_status_logged = value
+        self._log(f"[status] {value}")
 
     def _paste_url(self) -> None:
         try:
@@ -691,7 +807,7 @@ class YtDlpGui:
         self.last_fetch_failed = False
         self.status_var.set("Fetching formats...")
         self.start_button.state(["disabled"])
-        self.format_combo.state(["disabled"])
+        self.format_combo.configure(state="disabled")
         self.convert_to_mp4_var.set(False)
         threading.Thread(
             target=self._fetch_formats_worker, args=(url,), daemon=True
@@ -718,14 +834,14 @@ class YtDlpGui:
             if error:
                 self.last_fetched_url = ""
                 self.last_fetch_failed = True
-                self.status_var.set("Formats failed to load. Check URL or network.")
+                # self.status_var.set("Formats failed to load. Check URL or network.")
             self.video_format_labels = []
             self.video_format_lookup = {}
             self.audio_format_labels = []
             self.audio_format_lookup = {}
             self._apply_mode_formats()
-            if not error:
-                self.status_var.set("No formats found")
+            # if not error:
+            # self.status_var.set("No formats found")
             self._update_controls_state()
             return
 
@@ -784,7 +900,8 @@ class YtDlpGui:
             lookup = self.video_format_lookup
 
         filter_val = self.format_filter_var.get()
-        codec_val = self.codec_filter_var.get().lower()
+        codec_raw = self.codec_filter_var.get()
+        codec_val = codec_raw.lower()
         filtered_labels: list[str] = []
         filtered_lookup: dict[str, dict] = {}
 
@@ -820,9 +937,12 @@ class YtDlpGui:
             and not filtered_labels
         ):
             # If codec filter wipes all video entries, fall back to any codec for this container.
-            self.status_var.set(
-                "Chosen codec not available for this container; showing all formats in container"
-            )
+            msg = "Chosen codec not available for this container; showing all formats in container"
+            self.status_var.set(msg)
+            notice_key = (self.mode_var.get(), filter_val, codec_raw)
+            if notice_key != self._last_codec_fallback_notice:
+                self._last_codec_fallback_notice = notice_key
+                self._log(f"[info] {msg}")
             apply_filters(allow_any_codec=True)
 
         self.format_labels = filtered_labels
@@ -850,9 +970,9 @@ class YtDlpGui:
         self._set_widget_visible(self.container_label, show_container)
         self._set_widget_visible(self.container_combo, show_container)
         if show_container:
-            self.container_combo.state(["!disabled", "readonly"])
+            self.container_combo.configure(state="readonly")
         else:
-            self.container_combo.state(["disabled"])
+            self.container_combo.configure(state="disabled")
 
         # Codec chooser
         show_codec = (
@@ -864,9 +984,9 @@ class YtDlpGui:
         self._set_widget_visible(self.codec_label, show_codec)
         self._set_widget_visible(self.codec_combo, show_codec)
         if show_codec:
-            self.codec_combo.state(["!disabled", "readonly"])
+            self.codec_combo.configure(state="readonly")
         else:
-            self.codec_combo.state(["disabled"])
+            self.codec_combo.configure(state="disabled")
 
         # Convert checkbox only relevant when container is webm.
         show_convert = (
@@ -875,12 +995,19 @@ class YtDlpGui:
             and filter_chosen
             and self.format_filter_var.get() == "webm"
         )
-        self._set_widget_visible(self.convert_mp4_check, show_convert)
         if show_convert:
+            if not self.convert_mp4_inline_label.winfo_ismapped():
+                self.convert_mp4_inline_label.grid()
+            if not self.convert_mp4_check.winfo_ismapped():
+                self.convert_mp4_check.grid()
             self.convert_mp4_check.state(["!disabled"])
         else:
             self.convert_to_mp4_var.set(False)
             self.convert_mp4_check.state(["disabled"])
+            if self.convert_mp4_inline_label.winfo_ismapped():
+                self.convert_mp4_inline_label.grid_remove()
+            if self.convert_mp4_check.winfo_ismapped():
+                self.convert_mp4_check.grid_remove()
 
         # Format dropdown
         if (
@@ -898,9 +1025,9 @@ class YtDlpGui:
         self._set_widget_visible(self.format_label, show_format)
         self._set_widget_visible(self.format_combo, show_format)
         if show_format:
-            self.format_combo.state(["!disabled", "readonly"])
+            self.format_combo.configure(state="readonly")
         else:
-            self.format_combo.state(["disabled"])
+            self.format_combo.configure(state="disabled")
 
         # Start button
         if (
@@ -1004,6 +1131,7 @@ class YtDlpGui:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         self.is_downloading = True
+        self.simple_state_var.set("Downloading")
         self.status_var.set("Downloading...")
         self.start_button.state(["disabled"])
         self._clear_log()
@@ -1023,6 +1151,7 @@ class YtDlpGui:
     def _run_download(self, url: str, output_dir: Path, fmt_label: str) -> None:
         fmt_info = self.format_lookup.get(fmt_label)
         format_filter = self.format_filter_var.get()
+        title_override = self.title_override_var.get().strip() or None
 
         download.run_download(
             url=url,
@@ -1031,6 +1160,7 @@ class YtDlpGui:
             fmt_label=fmt_label,
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
+            title_override=title_override,
             log=self._log,
             update_progress=lambda u: self.root.after(
                 0, lambda: self._on_progress_update(u)
@@ -1040,6 +1170,7 @@ class YtDlpGui:
 
     def _on_finish(self) -> None:
         self.is_downloading = False
+        self.simple_state_var.set("Idle")
         self.status_var.set("Idle")
         self.start_button.state(["!disabled"])
         self.download_start_time = None
