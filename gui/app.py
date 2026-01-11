@@ -45,6 +45,7 @@ class YtDlpGui:
         self._log_sidebar_width_target = 0
         self._log_sidebar_width_current = 0.0
         self._log_sidebar_margin = 0
+        self._logs_unread = False
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.download_thread: threading.Thread | None = None
         self.is_downloading = False
@@ -149,8 +150,25 @@ class YtDlpGui:
             style="Title.TLabel",
             font=fonts["title"],
         ).grid(column=0, row=0, sticky="w")
-        ttk.Button(self.header_bar, text="Logs", command=self._toggle_log_sidebar).grid(
-            column=1, row=0, sticky="e"
+        logs_wrap = ttk.Frame(self.header_bar, style="Card.TFrame", padding=0)
+        logs_wrap.grid(column=1, row=0, sticky="e")
+        self.logs_button = ttk.Button(
+            logs_wrap, text="Logs", command=self._toggle_log_sidebar
+        )
+        self.logs_button.grid(column=0, row=0, sticky="e")
+        # Unread indicator (keeps its space so the button doesn't shift).
+        self._logs_dot = tk.Canvas(
+            logs_wrap,
+            width=10,
+            height=10,
+            highlightthickness=0,
+            borderwidth=0,
+            bd=0,
+            background=palette["base_bg"],
+        )
+        self._logs_dot.grid(column=1, row=0, padx=(6, 0), sticky="e")
+        self._logs_dot_item = self._logs_dot.create_oval(
+            2, 2, 8, 8, fill="#dc2626", outline="#dc2626", state="hidden"
         )
 
         self.header_sep = ttk.Separator(self.root, orient="horizontal")
@@ -402,6 +420,17 @@ class YtDlpGui:
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
+        self._set_logs_unread(False)
+
+    def _set_logs_unread(self, unread: bool) -> None:
+        self._logs_unread = unread
+        if not hasattr(self, "_logs_dot"):
+            return
+        state = "normal" if unread else "hidden"
+        try:
+            self._logs_dot.itemconfigure(self._logs_dot_item, state=state)
+        except Exception:
+            pass
 
     def _autohide_text_scrollbar(
         self, scrollbar: ttk.Scrollbar, first: str, last: str
@@ -442,6 +471,7 @@ class YtDlpGui:
             )
         # Keep the header (and Log button) above the overlay.
         self.header_bar.lift()
+        self._set_logs_unread(False)
         self._start_log_sidebar_animation()
 
     def _close_log_sidebar(self) -> None:
@@ -915,6 +945,8 @@ class YtDlpGui:
 
     def _append_log(self, message: str) -> None:
         message = self._strip_ansi(message)
+        if not self._log_sidebar_open:
+            self._set_logs_unread(True)
         # All output goes to the Log sidebar; progress numbers are shown above.
         self.log_text.configure(state="normal")
         self.log_text.insert("end", message + "\n")
