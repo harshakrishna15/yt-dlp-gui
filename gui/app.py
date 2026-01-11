@@ -24,14 +24,19 @@ class YtDlpGui:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("yt-dlp GUI")
-        self.root.minsize(520, 520)
+        self.root.minsize(720, 550)
         self._layout_anim_after_id: str | None = None
-        self._layout_target: tuple[int, int, int] | None = None  # wraplength, progress_lines, log_lines
-        self._layout_current: list[float] | None = None  # wraplength, progress_lines, log_lines (floats for easing)
-        self._layout_last_applied: tuple[int, int, int] | None = None
+        self._layout_target: tuple[int, int] | None = None  # wraplength, log_lines
+        self._layout_current: list[float] | None = None  # wraplength, log_lines (floats for easing)
+        self._layout_last_applied: tuple[int, int] | None = None
         self._progress_anim_after_id: str | None = None
         self._progress_pct_target = 0.0
         self._progress_pct_display = 0.0
+        self._log_sidebar_after_id: str | None = None
+        self._log_sidebar_open = False
+        self._log_sidebar_width_target = 0
+        self._log_sidebar_width_current = 0.0
+        self._log_sidebar_margin = 0
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.download_thread: threading.Thread | None = None
         self.is_downloading = False
@@ -74,29 +79,85 @@ class YtDlpGui:
         self._poll_log_queue()
 
     class _Scrollable(ttk.Frame):
-        def __init__(self, parent: tk.Widget, *, padding: int = 0) -> None:
+        def __init__(
+            self, parent: tk.Widget, *, padding: int = 0, bg: str | None = None
+        ) -> None:
             super().__init__(parent)
             self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
-            self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+            if bg is not None:
+                self.canvas.configure(background=bg)
+            self.scrollbar = ttk.Scrollbar(
+                self, orient="vertical", command=self.canvas.yview
+            )
+            self._scrollbar_pad = 4
+            self._last_canvas_width: int | None = None
             self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
             self.content = ttk.Frame(self.canvas, padding=padding)
-            self._window_id = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
+            self._window_id = self.canvas.create_window(
+                (0, 0), window=self.content, anchor="nw"
+            )
 
             self.canvas.grid(column=0, row=0, sticky="nsew")
-            self.scrollbar.grid(column=1, row=0, sticky="ns")
             self.columnconfigure(0, weight=1)
             self.rowconfigure(0, weight=1)
 
             self.content.bind("<Configure>", self._on_content_configure)
             self.canvas.bind("<Configure>", self._on_canvas_configure)
             self._bind_mousewheel(self.canvas)
+            self._update_scrollbar_visibility()
 
         def _on_content_configure(self, _event: tk.Event) -> None:
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            self._update_scrollbar_visibility()
 
         def _on_canvas_configure(self, event: tk.Event) -> None:
-            self.canvas.itemconfigure(self._window_id, width=event.width)
+            self._last_canvas_width = int(getattr(event, "width", 0) or 0)
+            self._update_content_width()
+            self._update_scrollbar_visibility()
+
+        def _update_content_width(self) -> None:
+            if not self._last_canvas_width or self._last_canvas_width <= 1:
+                return
+            width = self._last_canvas_width
+            if self.scrollbar.winfo_ismapped():
+                try:
+                    sb_w = self.scrollbar.winfo_reqwidth()
+                except tk.TclError:
+                    sb_w = 16
+                reserve = int(sb_w) + (int(self._scrollbar_pad) * 2)
+                width = max(1, width - reserve)
+            self.canvas.itemconfigure(self._window_id, width=width)
+
+        def _update_scrollbar_visibility(self) -> None:
+            try:
+                canvas_h = self.canvas.winfo_height()
+            except tk.TclError:
+                return
+            if canvas_h <= 1:
+                return
+            bbox = self.canvas.bbox(self._window_id) or self.canvas.bbox("all")
+            if not bbox:
+                return
+            content_h = int(bbox[3] - bbox[1])
+            should_show = content_h > (canvas_h + 2)
+            if should_show:
+                if not self.scrollbar.winfo_ismapped():
+                    # Overlay scrollbar so showing/hiding it doesn't reflow content.
+                    pad = int(self._scrollbar_pad)
+                    sb_height = max(1, canvas_h - (pad * 2))
+                    self.scrollbar.place(
+                        relx=1.0,
+                        x=-pad,
+                        y=pad,
+                        anchor="ne",
+                        height=sb_height,
+                    )
+                    self._update_content_width()
+            else:
+                if self.scrollbar.winfo_ismapped():
+                    self.scrollbar.place_forget()
+                    self._update_content_width()
 
         def _bind_mousewheel(self, widget: tk.Widget) -> None:
             def on_mousewheel(event: tk.Event) -> str:
@@ -157,29 +218,38 @@ class YtDlpGui:
         accent = palette["accent"]
         entry_border = palette["entry_border"]
 
-        scroll = self._Scrollable(self.root, padding=4)
-        scroll.grid(column=0, row=0, sticky="nsew")
+        self.header_bar = ttk.Frame(self.root, padding=6, style="Card.TFrame")
+        self.header_bar.grid(column=0, row=0, sticky="ew")
+        self.header_bar.columnconfigure(0, weight=1)
+        ttk.Label(
+            self.header_bar,
+            text="yt-dlp-gui",
+            style="Title.TLabel",
+            font=fonts["title"],
+        ).grid(column=0, row=0, sticky="w")
+        ttk.Button(self.header_bar, text="Log", command=self._toggle_log_sidebar).grid(
+            column=1, row=0, sticky="e"
+        )
+
+        self.header_sep = ttk.Separator(self.root, orient="horizontal")
+        self.header_sep.grid(column=0, row=1, sticky="ew")
+
+        scroll = self._Scrollable(self.root, padding=4, bg=palette["base_bg"])
+        scroll.grid(column=0, row=2, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        self.root.rowconfigure(2, weight=1)
         main = scroll.content
         main.columnconfigure(1, weight=1)
 
-        header = ttk.Frame(main, padding=6, style="Card.TFrame")
-        header.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 3))
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text="yt-dlp-gui", style="Title.TLabel", font=fonts["title"]).grid(
-            column=0, row=0, sticky="w"
-        )
-
-        sep1 = ttk.Separator(main, orient="horizontal")
-        sep1.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(1, 1))
-
         options = ttk.Frame(main, padding=6, style="Card.TFrame")
-        options.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(0, 3))
+        options.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 3))
         options.columnconfigure(1, weight=1)
-        ttk.Label(options, text="Download Options", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, columnspan=2, sticky="w", pady=(0, 3)
-        )
+        ttk.Label(
+            options,
+            text="Download Options",
+            style="Subheader.TLabel",
+            font=fonts["subheader"],
+        ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 3))
 
         ttk.Label(options, text="Video URL").grid(
             column=0, row=1, sticky="w", padx=(0, 8), pady=2
@@ -197,7 +267,9 @@ class YtDlpGui:
         type_row = ttk.Frame(options)
         type_row.grid(column=0, row=2, columnspan=2, sticky="ew", pady=2)
         type_row.columnconfigure(1, weight=1)
-        ttk.Label(type_row, text="Content Type").grid(column=0, row=0, sticky="w", padx=(0, 8))
+        ttk.Label(type_row, text="Content Type").grid(
+            column=0, row=0, sticky="w", padx=(0, 8)
+        )
         mode_frame = ttk.Frame(type_row)
         mode_frame.grid(column=1, row=0, sticky="w")
         ttk.Radiobutton(
@@ -277,69 +349,92 @@ class YtDlpGui:
             anchor="w",
             style="OutputPath.TLabel",
         ).grid(column=0, row=0, sticky="ew")
-        ttk.Button(
-            output_frame, text="Browse...", command=self._pick_folder
-        ).grid(column=1, row=0, padx=(8, 0), sticky="e")
+        ttk.Button(output_frame, text="Browse...", command=self._pick_folder).grid(
+            column=1, row=0, padx=(8, 0), sticky="e"
+        )
 
         sep2 = ttk.Separator(main, orient="horizontal")
-        sep2.grid(column=0, row=3, columnspan=2, sticky="ew", pady=(1, 1))
+        sep2.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(1, 1))
 
         controls = ttk.Frame(main, padding=6, style="Card.TFrame")
-        controls.grid(column=0, row=4, columnspan=2, sticky="ew", pady=3)
+        controls.grid(column=0, row=2, columnspan=2, sticky="ew", pady=3)
         controls.columnconfigure(0, weight=1)
-        ttk.Label(controls, text="Controls", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, columnspan=2, sticky="w", pady=(0, 3)
-        )
+        ttk.Label(
+            controls, text="Controls", style="Subheader.TLabel", font=fonts["subheader"]
+        ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 3))
         ttk.Label(controls, textvariable=self.status_var).grid(
             column=0, row=1, sticky="w"
         )
         self.start_button = ttk.Button(
-            controls, text="Start download", command=self._on_start, style="Accent.TButton"
+            controls,
+            text="Start download",
+            command=self._on_start,
+            style="Accent.TButton",
         )
         self.start_button.grid(column=1, row=1, sticky="e")
 
         progress_frame = ttk.Frame(controls, padding=3, style="Card.TFrame")
         progress_frame.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(4, 0))
-        progress_frame.columnconfigure(0, weight=1)
-        ttk.Label(progress_frame, text="Progress Details", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, sticky="w", pady=(0, 3)
-        )
-        summary = ttk.Frame(progress_frame, padding=0, style="Card.TFrame")
-        summary.grid(column=0, row=1, sticky="ew", pady=(0, 3))
-        ttk.Label(summary, text="Progress").grid(column=0, row=0, sticky="w", padx=(0, 6))
-        ttk.Label(summary, textvariable=self.progress_pct_var).grid(column=1, row=0, sticky="w")
-        ttk.Label(summary, text="Speed").grid(column=2, row=0, sticky="w", padx=(10, 6))
-        ttk.Label(summary, textvariable=self.progress_speed_var).grid(column=3, row=0, sticky="w")
-        ttk.Label(summary, text="ETA").grid(column=4, row=0, sticky="w", padx=(10, 6))
-        ttk.Label(summary, textvariable=self.progress_eta_var).grid(column=5, row=0, sticky="w")
-        summary.columnconfigure(5, weight=1)
-        self.progress_text = tk.Text(
+        ttk.Label(
             progress_frame,
-            height=2,
-            wrap="word",
-            state="disabled",
-            background=palette["panel_bg"],
-            foreground=text_fg,
-            relief="solid",
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground=entry_border,
-            highlightcolor=entry_border,
+            text="Progress",
+            style="Subheader.TLabel",
+            font=fonts["subheader"],
+        ).grid(column=0, row=0, sticky="w", pady=(0, 3))
+        summary = ttk.Frame(progress_frame, padding=0, style="Card.TFrame")
+        summary.grid(column=0, row=1, sticky="ew")
+        ttk.Label(summary, text="Progress").grid(
+            column=0, row=0, sticky="w", padx=(0, 6)
         )
-        self.progress_text.grid(column=0, row=2, sticky="ew")
-
-        sep3 = ttk.Separator(main, orient="horizontal")
-        sep3.grid(column=0, row=5, columnspan=2, sticky="ew", pady=(1, 1))
-
-        log_frame = ttk.Frame(main, padding=6, style="Card.TFrame")
-        log_frame.grid(column=0, row=6, columnspan=2, sticky="ew", pady=(3, 0))
-        log_frame.columnconfigure(0, weight=1)
-        ttk.Label(log_frame, text="Log", style="Subheader.TLabel", font=fonts["subheader"]).grid(
-            column=0, row=0, sticky="w", pady=(0, 3)
+        ttk.Label(summary, textvariable=self.progress_pct_var).grid(
+            column=1, row=0, sticky="w"
         )
+        ttk.Label(summary, text="Speed").grid(column=2, row=0, sticky="w", padx=(10, 6))
+        ttk.Label(summary, textvariable=self.progress_speed_var).grid(
+            column=3, row=0, sticky="w"
+        )
+        ttk.Label(summary, text="ETA").grid(column=4, row=0, sticky="w", padx=(10, 6))
+        ttk.Label(summary, textvariable=self.progress_eta_var).grid(
+            column=5, row=0, sticky="w"
+        )
+        summary.columnconfigure(5, weight=1)
+
+        self._build_log_sidebar(
+            palette=palette, text_fg=text_fg, entry_border=entry_border, fonts=fonts
+        )
+
+        self.root.bind("<Configure>", self._on_root_configure, add=True)
+        self._on_root_configure(tk.Event())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _build_log_sidebar(
+        self,
+        *,
+        palette: dict[str, str],
+        text_fg: str,
+        entry_border: str,
+        fonts: dict[str, tuple],
+    ) -> None:
+        # Use a bordered frame for separation (instead of a colored "shadow strip").
+        self.log_sidebar = ttk.Frame(self.root, style="OutputPath.TFrame", padding=6)
+        self.log_sidebar.place_forget()
+
+        header = ttk.Frame(self.log_sidebar, style="Card.TFrame", padding=0)
+        header.grid(column=0, row=0, sticky="ew", pady=(0, 6))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(
+            header, text="Log", style="Subheader.TLabel", font=fonts["subheader"]
+        ).grid(column=0, row=0, sticky="w")
+
+        body = ttk.Frame(self.log_sidebar, style="Card.TFrame", padding=0)
+        body.grid(column=0, row=1, sticky="nsew")
+        self.log_sidebar.columnconfigure(0, weight=1)
+        self.log_sidebar.rowconfigure(1, weight=1)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
 
         self.log_text = tk.Text(
-            log_frame,
+            body,
             height=12,
             wrap="word",
             state="disabled",
@@ -351,18 +446,114 @@ class YtDlpGui:
             highlightbackground=entry_border,
             highlightcolor=entry_border,
         )
-        scrollbar = ttk.Scrollbar(
-            log_frame, orient="vertical", command=self.log_text.yview
-        )
-        self.log_text.configure(yscrollcommand=scrollbar.set)
-        self.log_text.grid(column=0, row=1, sticky="nsew")
-        scrollbar.grid(column=1, row=1, sticky="ns")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(1, weight=1)
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=lambda f, l: self._autohide_text_scrollbar(scrollbar, f, l))
+        self.log_text.grid(column=0, row=0, sticky="nsew")
+        scrollbar.grid(column=1, row=0, sticky="ns")
+        scrollbar.grid_remove()
 
-        self.root.bind("<Configure>", self._on_root_configure, add=True)
-        self._on_root_configure(tk.Event())
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+    def _autohide_text_scrollbar(self, scrollbar: ttk.Scrollbar, first: str, last: str) -> None:
+        """Proxy yscrollcommand that hides the scrollbar when not needed."""
+        scrollbar.set(first, last)
+        try:
+            f = float(first)
+            l = float(last)
+        except Exception:
+            return
+        should_show = not (f <= 0.0 and l >= 1.0)
+        if should_show:
+            if not scrollbar.winfo_ismapped():
+                scrollbar.grid()
+        else:
+            if scrollbar.winfo_ismapped():
+                scrollbar.grid_remove()
+
+    def _toggle_log_sidebar(self) -> None:
+        if self._log_sidebar_open:
+            self._close_log_sidebar()
+        else:
+            self._open_log_sidebar()
+
+    def _open_log_sidebar(self) -> None:
+        self._log_sidebar_open = True
+        self._recompute_log_sidebar_target()
+        if not self.log_sidebar.winfo_ismapped():
+            y, h = self._log_sidebar_y_and_height()
+            self.log_sidebar.place(
+                relx=1.0,
+                x=-self._log_sidebar_margin,
+                y=y,
+                anchor="ne",
+                width=1,
+                height=h,
+            )
+        # Keep the header (and Log button) above the overlay.
+        self.header_bar.lift()
+        self._start_log_sidebar_animation()
+
+    def _close_log_sidebar(self) -> None:
+        self._log_sidebar_open = False
+        self._log_sidebar_width_target = 0
+        self._start_log_sidebar_animation()
+
+    def _recompute_log_sidebar_target(self) -> None:
+        width = self.root.winfo_width()
+        if width <= 1:
+            return
+        max_width = max(200, width - (self._log_sidebar_margin * 2))
+        self._log_sidebar_width_target = min(
+            420, max(260, min(max_width, int(width * 0.42)))
+        )
+
+    def _log_sidebar_y_and_height(self) -> tuple[int, int]:
+        root_h = self.root.winfo_height()
+        if root_h <= 1:
+            return (0, 1)
+        header_h = self.header_bar.winfo_height() if hasattr(self, "header_bar") else 0
+        sep_h = self.header_sep.winfo_height() if hasattr(self, "header_sep") else 0
+        y = int(header_h + sep_h + self._log_sidebar_margin)
+        y = max(0, min(root_h - 1, y))
+        h = max(1, root_h - y - self._log_sidebar_margin)
+        return (y, h)
+
+    def _start_log_sidebar_animation(self) -> None:
+        if self._log_sidebar_after_id is None:
+            self._log_sidebar_tick()
+
+    def _log_sidebar_tick(self) -> None:
+        target = float(self._log_sidebar_width_target)
+        # Ease width; right edge stays fixed (anchor="ne"), so it opens right-to-left.
+        ease = 0.28
+        delta = target - self._log_sidebar_width_current
+        if abs(delta) < 0.8:
+            self._log_sidebar_width_current = target
+        else:
+            self._log_sidebar_width_current += delta * ease
+
+        w = int(round(self._log_sidebar_width_current))
+        if w <= 0:
+            self.log_sidebar.place_forget()
+            self._log_sidebar_after_id = None
+            self._log_sidebar_width_current = 0.0
+            return
+
+        y, h = self._log_sidebar_y_and_height()
+        self.log_sidebar.place_configure(
+            relx=1.0,
+            x=-self._log_sidebar_margin,
+            y=y,
+            anchor="ne",
+            width=w,
+            height=h,
+        )
+        self.log_sidebar.lift()
+        self.header_bar.lift()
+
+        if w == int(round(target)):
+            self._log_sidebar_after_id = None
+            return
+
+        self._log_sidebar_after_id = self.root.after(16, self._log_sidebar_tick)
 
     def _on_root_configure(self, _event: tk.Event) -> None:
         if getattr(_event, "widget", self.root) is not self.root:
@@ -382,16 +573,28 @@ class YtDlpGui:
 
         compact = height < 720
         wraplength = max(260, width - 120)
-        progress_target_px = int(height * (0.10 if compact else 0.12))
         log_target_px = int(height * (0.25 if compact else 0.33))
-        progress_max = 4 if compact else 6
         log_min = 4 if compact else 6
         log_max = 12 if compact else 18
-        progress_lines = max(2, min(progress_max, max(1, progress_target_px // line_px)))
         log_lines = max(log_min, min(log_max, max(1, log_target_px // line_px)))
-        self._layout_target = (wraplength, progress_lines, log_lines)
+        self._layout_target = (wraplength, log_lines)
         if self._layout_anim_after_id is None:
             self._layout_tick()
+
+        if self._log_sidebar_open:
+            self._recompute_log_sidebar_target()
+            if self._log_sidebar_after_id is None:
+                # Update size immediately while dragging the window.
+                y, h = self._log_sidebar_y_and_height()
+                self.log_sidebar.place_configure(
+                    relx=1.0,
+                    x=-self._log_sidebar_margin,
+                    y=y,
+                    anchor="ne",
+                    width=self._log_sidebar_width_target,
+                    height=h,
+                )
+                self.header_bar.lift()
 
     def _layout_tick(self) -> None:
         if not self._layout_target:
@@ -412,10 +615,9 @@ class YtDlpGui:
                 done = False
 
         wraplength = int(round(self._layout_current[0]))
-        progress_lines = int(round(self._layout_current[1]))
-        log_lines = int(round(self._layout_current[2]))
+        log_lines = int(round(self._layout_current[1]))
 
-        applied = (wraplength, progress_lines, log_lines)
+        applied = (wraplength, log_lines)
         if applied != self._layout_last_applied:
             self._layout_last_applied = applied
             try:
@@ -423,7 +625,6 @@ class YtDlpGui:
             except tk.TclError:
                 pass
             try:
-                self.progress_text.configure(height=progress_lines)
                 self.log_text.configure(height=log_lines)
             except tk.TclError:
                 pass
@@ -476,11 +677,7 @@ class YtDlpGui:
 
     def _start_fetch_formats(self, force: bool = False) -> None:
         url = self.url_var.get().strip()
-        if (
-            not url
-            or self.is_downloading
-            or self.is_fetching_formats
-        ):
+        if not url or self.is_downloading or self.is_fetching_formats:
             return
         # Use cache if available.
         cached = self.format_cache.get(url)
@@ -647,7 +844,9 @@ class YtDlpGui:
         format_selected = bool(self.format_var.get())
 
         # Container chooser
-        show_container = url_present and has_formats_data and not self.is_fetching_formats
+        show_container = (
+            url_present and has_formats_data and not self.is_fetching_formats
+        )
         self._set_widget_visible(self.container_label, show_container)
         self._set_widget_visible(self.container_combo, show_container)
         if show_container:
@@ -657,7 +856,10 @@ class YtDlpGui:
 
         # Codec chooser
         show_codec = (
-            url_present and has_formats_data and filter_chosen and not self.is_fetching_formats
+            url_present
+            and has_formats_data
+            and filter_chosen
+            and not self.is_fetching_formats
         )
         self._set_widget_visible(self.codec_label, show_codec)
         self._set_widget_visible(self.codec_combo, show_codec)
@@ -730,12 +932,7 @@ class YtDlpGui:
 
     def _append_log(self, message: str) -> None:
         message = self._strip_ansi(message)
-        # Route progress/start/done/time to the progress box; errors to log.
-        progress_prefixes = ("[progress]", "[start]", "[done]", "[time]")
-        if message.startswith(progress_prefixes):
-            self._append_progress(message)
-            return
-
+        # All output goes to the Log sidebar; progress numbers are shown above.
         self.log_text.configure(state="normal")
         self.log_text.insert("end", message + "\n")
         self.log_text.see("end")
@@ -747,31 +944,7 @@ class YtDlpGui:
         self.log_text.configure(state="disabled")
         self.last_progress_index = None
 
-    def _append_progress(self, message: str) -> None:
-        # Only append non-spammy events here; live progress numbers update separately.
-        replace_line = False
-        if message.startswith("[start]"):
-            message = "Start: " + message.removeprefix("[start]").strip()
-        elif message.startswith("[done]"):
-            message = "Done: " + message.removeprefix("[done]").strip()
-        elif message.startswith("[time]"):
-            message = message.removeprefix("[time]").strip()
-        elif message.startswith("[progress]"):
-            message = message.removeprefix("[progress]").strip()
-        self.progress_text.configure(state="normal")
-        if replace_line:
-            try:
-                self.progress_text.delete("end-2l linestart", "end-1c")
-            except tk.TclError:
-                pass
-        self.progress_text.insert("end", message + "\n")
-        self.progress_text.see("end")
-        self.progress_text.configure(state="disabled")
-
-    def _clear_progress(self) -> None:
-        self.progress_text.configure(state="normal")
-        self.progress_text.delete("1.0", "end")
-        self.progress_text.configure(state="disabled")
+    def _reset_progress_summary(self) -> None:
         self.progress_pct_var.set("0.0%")
         self.progress_speed_var.set("—")
         self.progress_eta_var.set("—")
@@ -834,7 +1007,7 @@ class YtDlpGui:
         self.status_var.set("Downloading...")
         self.start_button.state(["disabled"])
         self._clear_log()
-        self._clear_progress()
+        self._reset_progress_summary()
         self.download_start_time = time.time()
         self.download_thread = threading.Thread(
             target=self._run_download,
@@ -859,7 +1032,9 @@ class YtDlpGui:
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
             log=self._log,
-            update_progress=lambda u: self.root.after(0, lambda: self._on_progress_update(u)),
+            update_progress=lambda u: self.root.after(
+                0, lambda: self._on_progress_update(u)
+            ),
         )
         self.root.after(0, self._on_finish)
 
@@ -868,6 +1043,7 @@ class YtDlpGui:
         self.status_var.set("Idle")
         self.start_button.state(["!disabled"])
         self.download_start_time = None
+        self._reset_progress_summary()
 
     def _on_close(self) -> None:
         if self.is_downloading:
@@ -875,6 +1051,21 @@ class YtDlpGui:
                 "Download running", "A download is in progress. Quit anyway?"
             ):
                 return
+        if self._layout_anim_after_id:
+            try:
+                self.root.after_cancel(self._layout_anim_after_id)
+            except Exception:
+                pass
+        if self._progress_anim_after_id:
+            try:
+                self.root.after_cancel(self._progress_anim_after_id)
+            except Exception:
+                pass
+        if self._log_sidebar_after_id:
+            try:
+                self.root.after_cancel(self._log_sidebar_after_id)
+            except Exception:
+                pass
         self.root.destroy()
 
 
