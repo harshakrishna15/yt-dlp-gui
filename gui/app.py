@@ -243,7 +243,7 @@ class YtDlpGui:
         widgets.Tooltip(
             self.root,
             self.convert_mp4_check,
-            "Convert WebM to MP4 after download (re-encode; slower, lossy)",
+            "Re-encodes WebM to MP4 after download (slower, lossy)",
         )
         self.format_filter_var.trace_add(
             "write",
@@ -366,6 +366,9 @@ class YtDlpGui:
         ttk.Label(
             header, text="Logs", style="Subheader.TLabel", font=fonts["subheader"]
         ).grid(column=0, row=0, sticky="w")
+        ttk.Button(header, text="Clear", command=self._clear_logs).grid(
+            column=1, row=0, sticky="e"
+        )
 
         body = ttk.Frame(self.log_sidebar, style="Card.TFrame", padding=0)
         body.grid(column=0, row=1, sticky="nsew")
@@ -394,6 +397,11 @@ class YtDlpGui:
         self.log_text.grid(column=0, row=0, sticky="nsew")
         scrollbar.grid(column=1, row=0, sticky="ns")
         scrollbar.grid_remove()
+
+    def _clear_logs(self) -> None:
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
     def _autohide_text_scrollbar(
         self, scrollbar: ttk.Scrollbar, first: str, last: str
@@ -498,7 +506,9 @@ class YtDlpGui:
             self._log_sidebar_after_id = None
             return
 
-        self._log_sidebar_after_id = self.root.after(SIDEBAR_ANIM_MS, self._log_sidebar_tick)
+        self._log_sidebar_after_id = self.root.after(
+            SIDEBAR_ANIM_MS, self._log_sidebar_tick
+        )
 
     def _on_root_configure(self, _event: tk.Event) -> None:
         if getattr(_event, "widget", self.root) is not self.root:
@@ -646,7 +656,9 @@ class YtDlpGui:
         if force:
             self._start_fetch_formats(force=True)
         else:
-            self.format_fetch_after_id = self.root.after(FETCH_DEBOUNCE_MS, self._start_fetch_formats)
+            self.format_fetch_after_id = self.root.after(
+                FETCH_DEBOUNCE_MS, self._start_fetch_formats
+            )
 
     def _start_fetch_formats(self, force: bool = False) -> None:
         url = self.url_var.get().strip()
@@ -956,7 +968,9 @@ class YtDlpGui:
             return
         self._progress_pct_display += delta * ease
         self.progress_pct_var.set(f"{self._progress_pct_display:.1f}%")
-        self._progress_anim_after_id = self.root.after(PROGRESS_ANIM_MS, self._progress_anim_tick)
+        self._progress_anim_after_id = self.root.after(
+            PROGRESS_ANIM_MS, self._progress_anim_tick
+        )
 
     def _on_start(self) -> None:
         if self.is_downloading:
