@@ -1,28 +1,40 @@
 import time
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Any, Callable
 import re
 
 from yt_dlp import YoutubeDL
 
+try:
+    from .shared_types import FormatInfo, ProgressUpdate
+except ImportError:  # Support running as a script (python gui/app.py)
+    from shared_types import FormatInfo, ProgressUpdate  # type: ignore
 
-def run_download(
+
+def _sanitize_filename_base(name: str) -> str:
+    cleaned = re.sub(r"[<>:\"/\\\\|?*]+", "_", name).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return cleaned[:150] if cleaned else "video"
+
+
+def build_ydl_opts(
+    *,
     url: str,
     output_dir: Path,
-    fmt_info: dict | None,
+    fmt_info: FormatInfo | None,
     fmt_label: str,
     format_filter: str,
     convert_to_mp4: bool,
     title_override: str | None,
     log: Callable[[str], None],
-    update_progress: Callable[[dict], None],
-) -> None:
-    """Run a yt-dlp download with progress callbacks."""
+    update_progress: Callable[[ProgressUpdate], None],
+) -> dict[str, Any]:
     fmt_id = fmt_info.get("format_id") if fmt_info else None
-    is_audio_only = fmt_info and (
-        fmt_info.get("vcodec") in (None, "none") or fmt_info.get("is_audio_only")
+    is_audio_only = bool(
+        fmt_info
+        and (fmt_info.get("vcodec") in (None, "none") or fmt_info.get("is_audio_only"))
     )
-    is_video_only = (
+    is_video_only = bool(
         fmt_info and fmt_info.get("acodec") in (None, "none") and not is_audio_only
     )
 
@@ -39,7 +51,7 @@ def run_download(
     fmt_ext = (fmt_info.get("ext") or "").lower() if fmt_info else ""
     target_container = selected_container or fmt_ext or None
 
-    postprocessors: list[dict] = []
+    postprocessors: list[dict[str, Any]] = []
     pp_args: list[str] = []
     merge_output_format = target_container if target_container in {"mp4", "webm"} else None
 
@@ -60,10 +72,7 @@ def run_download(
                 "preferedformat": "mp4",
             }
         ]
-        pp_args = [
-            "-movflags",
-            "+faststart",
-        ]
+        pp_args = ["-movflags", "+faststart"]
     elif target_container == "webm" and convert_to_mp4:
         merge_output_format = "mp4"
         postprocessors = [
@@ -73,32 +82,51 @@ def run_download(
             }
         ]
         pp_args = ["-movflags", "+faststart"]
-    else:
-        postprocessors = []
-        pp_args = []
 
-    def _sanitize_filename_base(name: str) -> str:
-        cleaned = re.sub(r"[<>:\"/\\\\|?*]+", "_", name).strip()
-        cleaned = re.sub(r"\\s+", " ", cleaned).strip(" .")
-        return cleaned[:150] if cleaned else "video"
+    outtmpl = (
+        str(output_dir / f"{_sanitize_filename_base(title_override)}.%(ext)s")
+        if title_override
+        else str(output_dir / "%(title)s.%(ext)s")
+    )
 
-    opts = {
-        "outtmpl": (
-            str(output_dir / f"{_sanitize_filename_base(title_override)}.%(ext)s")
-            if title_override
-            else str(output_dir / "%(title)s.%(ext)s")
-        ),
+    log(f"[start] {url}")
+    if fmt_label:
+        log(f"[format] {fmt_label}")
+
+    return {
+        "outtmpl": outtmpl,
         "format": fmt,
-        "progress_hooks": [
-            _progress_hook_factory(log, update_progress),
-        ],
+        "progress_hooks": [_progress_hook_factory(log, update_progress)],
         "noplaylist": False,
         "merge_output_format": merge_output_format,
         "postprocessors": postprocessors,
         "postprocessor_args": pp_args,
     }
 
-    log(f"[start] {url}")
+
+def run_download(
+    url: str,
+    output_dir: Path,
+    fmt_info: FormatInfo | None,
+    fmt_label: str,
+    format_filter: str,
+    convert_to_mp4: bool,
+    title_override: str | None,
+    log: Callable[[str], None],
+    update_progress: Callable[[ProgressUpdate], None],
+) -> None:
+    """Run a yt-dlp download with progress callbacks."""
+    opts = build_ydl_opts(
+        url=url,
+        output_dir=output_dir,
+        fmt_info=fmt_info,
+        fmt_label=fmt_label,
+        format_filter=format_filter,
+        convert_to_mp4=convert_to_mp4,
+        title_override=title_override,
+        log=log,
+        update_progress=update_progress,
+    )
     start_ts = time.time()
     try:
         with YoutubeDL(opts) as ydl:
@@ -113,7 +141,7 @@ def run_download(
 
 
 def _progress_hook_factory(
-    log: Callable[[str], None], update_progress: Callable[[dict], None]
+    log: Callable[[str], None], update_progress: Callable[[ProgressUpdate], None]
 ) -> Callable[[dict], None]:
     last_log = {"ts": 0.0}
 

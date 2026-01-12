@@ -1,4 +1,9 @@
-from typing import Dict, List, Tuple
+from typing import Any
+
+try:
+    from .shared_types import FormatInfo
+except ImportError:  # Support running as a script (python gui/app.py)
+    from shared_types import FormatInfo  # type: ignore
 
 try:
     import yt_dlp
@@ -18,8 +23,9 @@ def fetch_info(url: str) -> dict:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False, process=False)
 
-
-def split_and_filter_formats(formats: List[dict]) -> Tuple[List[dict], List[dict]]:
+def split_and_filter_formats(
+    formats: list[FormatInfo],
+) -> tuple[list[FormatInfo], list[FormatInfo]]:
     """Split formats into video and audio lists, trimming low-quality entries."""
     video_heights = [fmt.get("height") or 0 for fmt in formats if (fmt.get("vcodec") or "") != "none"]
     max_height = max(video_heights) if video_heights else 0
@@ -29,8 +35,8 @@ def split_and_filter_formats(formats: List[dict]) -> Tuple[List[dict], List[dict
     max_audio_br = max((f.get("abr") or f.get("tbr") or 0) for f in audio_formats) if audio_formats else 0
     audio_min_br = 0 if max_audio_br <= 128 else 128
 
-    video_list: List[dict] = []
-    audio_list: List[dict] = []
+    video_list: list[FormatInfo] = []
+    audio_list: list[FormatInfo] = []
     for fmt in formats:
         vcodec = fmt.get("vcodec") or ""
         height = fmt.get("height") or 0
@@ -46,9 +52,9 @@ def split_and_filter_formats(formats: List[dict]) -> Tuple[List[dict], List[dict
     return video_list, audio_list
 
 
-def collapse_formats(formats: List[dict]) -> List[dict]:
+def collapse_formats(formats: list[FormatInfo]) -> list[FormatInfo]:
     """Collapse near-duplicate formats (same container/codecs/resolution/fps), keep best bitrate."""
-    collapsed: Dict[tuple, dict] = {}
+    collapsed: dict[tuple, FormatInfo] = {}
     for fmt in formats:
         vcodec = fmt.get("vcodec") or ""
         acodec = fmt.get("acodec") or ""
@@ -71,8 +77,8 @@ def collapse_formats(formats: List[dict]) -> List[dict]:
     return list(collapsed.values())
 
 
-def sort_formats(formats: List[dict]) -> List[dict]:
-    def sort_key(fmt: dict) -> tuple:
+def sort_formats(formats: list[FormatInfo]) -> list[FormatInfo]:
+    def sort_key(fmt: FormatInfo) -> tuple:
         vcodec = fmt.get("vcodec") or ""
         ext = fmt.get("ext") or ""
         height = fmt.get("height") or 0
@@ -89,7 +95,7 @@ def sort_formats(formats: List[dict]) -> List[dict]:
     return sorted(formats, key=sort_key)
 
 
-def label_format(fmt: dict) -> str:
+def label_format(fmt: FormatInfo) -> str:
     fmt_id = fmt.get("format_id", "")
     ext = (fmt.get("ext") or "").upper()
     vcodec = fmt.get("vcodec") or ""
@@ -121,10 +127,10 @@ def label_format(fmt: dict) -> str:
     return f"{label} [{fmt_id}]"
 
 
-def build_labeled_formats(formats: List[dict]) -> List[tuple[str, dict]]:
+def build_labeled_formats(formats: list[FormatInfo]) -> list[tuple[str, FormatInfo]]:
     ordered = sort_formats(collapse_formats(formats))
     seen_labels = set()
-    labeled: List[tuple[str, dict]] = []
+    labeled: list[tuple[str, FormatInfo]] = []
     for fmt in ordered:
         fmt_id = fmt.get("format_id")
         if not fmt_id:
@@ -137,7 +143,7 @@ def build_labeled_formats(formats: List[dict]) -> List[tuple[str, dict]]:
     return labeled
 
 
-def pick_best_format(formats: List[dict]) -> dict | None:
+def pick_best_format(formats: list[FormatInfo]) -> FormatInfo | None:
     """Return the top-ranked format using the same ordering as labels."""
     ordered = sort_formats(collapse_formats(formats))
     return ordered[0] if ordered else None
