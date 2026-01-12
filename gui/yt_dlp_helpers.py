@@ -1,9 +1,6 @@
 from typing import Any
 
-try:
-    from .shared_types import FormatInfo
-except ImportError:  # Support running as a script (python gui/app.py)
-    from shared_types import FormatInfo  # type: ignore
+from .shared_types import FormatInfo
 
 try:
     import yt_dlp

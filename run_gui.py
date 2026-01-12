@@ -18,11 +18,11 @@ def main() -> None:
         repo_root / ".venv" / "Scripts" / "python.exe",
     ]
     python_bin = next((p for p in venv_candidates if p.exists()), Path(sys.executable))
-    app = repo_root / "gui" / "app.py"
-    if not app.exists():
-        sys.stderr.write("Could not find gui/app.py\n")
+    package_dir = repo_root / "gui"
+    if not package_dir.exists():
+        sys.stderr.write("Could not find gui/\n")
         sys.exit(1)
-    os.execv(str(python_bin), [str(python_bin), str(app)])
+    os.execv(str(python_bin), [str(python_bin), "-m", "gui"])
 
 
 if __name__ == "__main__":

@@ -8,25 +8,8 @@ from tkinter import filedialog, messagebox, ttk
 FETCH_DEBOUNCE_MS = 600
 PROGRESS_ANIM_MS = 33
 
-# Support running as a script (python gui/app.py) or as a module (python -m gui.app).
-try:
-    from . import (
-        download,
-        formats as formats_mod,
-        ui,
-        yt_dlp_helpers as helpers,
-    )
-    from .state import FormatState
-except ImportError:
-    import importlib
-    import sys
-
-    sys.path.append(str(Path(__file__).resolve().parent))
-    helpers = importlib.import_module("yt_dlp_helpers")
-    download = importlib.import_module("download")
-    formats_mod = importlib.import_module("formats")
-    ui = importlib.import_module("ui")
-    FormatState = importlib.import_module("state").FormatState
+from . import download, formats as formats_mod, ui, yt_dlp_helpers as helpers
+from .state import FormatState
 
 
 class YtDlpGui:

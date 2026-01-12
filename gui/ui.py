@@ -4,15 +4,8 @@ import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-try:
-    from . import styles, widgets
-    from .log_sidebar import LogSidebar
-except ImportError:  # Support running as a script (python gui/app.py)
-    import importlib
-
-    styles = importlib.import_module("styles")
-    widgets = importlib.import_module("widgets")
-    LogSidebar = importlib.import_module("log_sidebar").LogSidebar
+from . import styles, widgets
+from .log_sidebar import LogSidebar
 
 
 def init_title_placeholder(app: object) -> None:
@@ -20,7 +13,6 @@ def init_title_placeholder(app: object) -> None:
     title_override_var = getattr(app, "title_override_var")
 
     placeholder_text = "Optional — leave blank for default title"
-    setattr(app, "_title_placeholder_text", placeholder_text)
     setattr(app, "_title_placeholder_active", False)
 
     def on_focus_in(_event: tk.Event) -> None:
@@ -292,4 +284,3 @@ def build_ui(app: object) -> LogSidebar:
         entry_border=entry_border,
         fonts=fonts,
     )
-

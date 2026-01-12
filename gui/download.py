@@ -5,10 +5,7 @@ import re
 
 from yt_dlp import YoutubeDL
 
-try:
-    from .shared_types import FormatInfo, ProgressUpdate
-except ImportError:  # Support running as a script (python gui/app.py)
-    from shared_types import FormatInfo, ProgressUpdate  # type: ignore
+from .shared_types import FormatInfo, ProgressUpdate
 
 
 def _sanitize_filename_base(name: str) -> str:

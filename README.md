@@ -20,7 +20,7 @@ pip install -r requirements.txt
 3. Launch the app:
 
 ```bash
-python gui/app.py
+python -m gui
 ```
 
 Paste a video URL, choose container/codec, select a format, and pick an output folder. Keep the window open until downloads finish; progress and errors are shown in the UI.

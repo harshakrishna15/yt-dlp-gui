@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-try:
-    from .shared_types import FormatLookup, FormatsCacheEntry
-except ImportError:  # Support running as a script (python gui/app.py)
-    from shared_types import FormatLookup, FormatsCacheEntry  # type: ignore
+from .shared_types import FormatLookup, FormatsCacheEntry
 
 
 @dataclass(slots=True)
@@ -28,4 +25,3 @@ class FormatState:
 
     # Cache processed formats per URL to avoid repeated probes.
     cache: dict[str, FormatsCacheEntry] = field(default_factory=dict)
-
