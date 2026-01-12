@@ -15,17 +15,17 @@ def _set_named_fonts(root: tk.Tk, family: str, size: int) -> None:
 def _pick_font_family(root: tk.Tk) -> tuple[str, bool]:
     override = os.getenv("YTDLP_GUI_FONT_FAMILY")
     preferred = override or "IBM Plex Mono"
-    if not override and preferred == "IBM Plex Mono":
-        try:
-            from . import font_loader
-        except Exception:
-            try:
-                import importlib
+    try:
+        from . import font_loader
+    except Exception:
+        font_loader = None
 
-                font_loader = importlib.import_module("font_loader")
-            except Exception:
-                font_loader = None
-        if font_loader is not None:
+    if font_loader is not None:
+        try:
+            font_loader.ensure_bundled_fonts(root)
+        except Exception:
+            pass
+        if not override and preferred == "IBM Plex Mono":
             try:
                 font_loader.ensure_ibm_plex_mono(root)
             except Exception:

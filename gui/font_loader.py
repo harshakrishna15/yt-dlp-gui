@@ -17,7 +17,9 @@ def _repo_root() -> Path:
 
 
 def _bundled_font_dir() -> Path:
-    return _repo_root() / "IBM_Plex_Mono"
+    repo_root = _repo_root()
+    candidates = [repo_root / "font", repo_root / "IBM_Plex_Mono"]
+    return next((p for p in candidates if p.exists()), candidates[0])
 
 
 def _ttf_files(font_dir: Path) -> list[Path]:
@@ -59,6 +61,30 @@ def ensure_ibm_plex_mono(root: tk.Tk) -> bool:
 
     root.update_idletasks()
     return _is_family_available(root, family)
+
+
+def ensure_bundled_fonts(root: tk.Tk, font_dir: Path | None = None) -> None:
+    """Best-effort runtime registration of all bundled fonts in `font/`."""
+    font_dir = font_dir or _bundled_font_dir()
+    if not font_dir.exists():
+        return
+    ttf_files = _ttf_files(font_dir)
+    if not ttf_files:
+        return
+
+    system = platform.system()
+    if system == "Windows":
+        _register_windows_fonts(ttf_files)
+    elif system == "Darwin":
+        _register_macos_fonts(ttf_files)
+    else:
+        if not _register_linux_fontconfig_dir(font_dir):
+            _install_linux_user_fonts(font_dir)
+
+    try:
+        root.update_idletasks()
+    except Exception:
+        pass
 
 
 def _register_windows_fonts(ttf_files: Iterable[Path]) -> None:
@@ -157,7 +183,7 @@ def _register_linux_fontconfig_dir(font_dir: Path) -> bool:
 
 
 def _install_linux_user_fonts(font_dir: Path) -> None:
-    target_dir = Path.home() / ".local" / "share" / "fonts" / "yt-dlp-gui-ibm-plex-mono"
+    target_dir = Path.home() / ".local" / "share" / "fonts" / "yt-dlp-gui-fonts"
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
         for ttf in _ttf_files(font_dir):
@@ -169,4 +195,3 @@ def _install_linux_user_fonts(font_dir: Path) -> None:
         subprocess.run(["fc-cache", "-f"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
-

@@ -43,7 +43,7 @@ The scripts set up a venv and install dependencies. If your Python build lacks T
 
 ### Fonts
 
-The app ships with IBM Plex Mono in `IBM_Plex_Mono/` and will try to register it at runtime so the UI looks consistent even on systems where it isn’t installed.
+The app ships with IBM Plex Mono in `font/` and will try to register it at runtime so the UI looks consistent even on systems where it isn’t installed.
 
 - Enforce IBM Plex Mono: run with `YTDLP_GUI_REQUIRE_PLEX_MONO=1` (the app will exit with an error if Tk can’t find the font).
 - Show a warning when missing: run with `YTDLP_GUI_WARN_MISSING_FONT=1`.
