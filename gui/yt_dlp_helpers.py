@@ -138,9 +138,3 @@ def build_labeled_formats(formats: list[FormatInfo]) -> list[tuple[str, FormatIn
         seen_labels.add(label)
         labeled.append((label, fmt))
     return labeled
-
-
-def pick_best_format(formats: list[FormatInfo]) -> FormatInfo | None:
-    """Return the top-ranked format using the same ordering as labels."""
-    ordered = sort_formats(collapse_formats(formats))
-    return ordered[0] if ordered else None
