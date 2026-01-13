@@ -2,6 +2,12 @@
 
 A lightweight Tkinter interface for `yt-dlp` that handles installs and downloads for you without a command line.
 
+### Requirements
+
+- Python 3.10+ with Tk support (python.org builds include Tk)
+- `yt-dlp` (installed via `requirements.txt`)
+- FFmpeg (recommended; required for some merges/conversions)
+
 ### Quick start
 
 1. Install Python with Tk support
@@ -25,6 +31,19 @@ python -m gui
 
 Paste a video URL, choose container/codec, select a format, and pick an output folder. Keep the window open until downloads finish; progress and errors are shown in the UI.
 
+### FFmpeg
+
+`yt-dlp` can download many formats without FFmpeg, but FFmpeg is needed for some common operations:
+
+- Merging separate video+audio streams into a single file
+- Re-encoding WebM → MP4 when “Convert to MP4” is enabled
+- Some container conversions and post-processing steps
+
+Install FFmpeg and ensure it’s on your `PATH`:
+
+- macOS: `brew install ffmpeg`
+- Windows: install FFmpeg and add `ffmpeg.exe` to `PATH`
+
 ### Convenience scripts
 
 - macOS: `scripts/setup_mac.sh`
@@ -40,6 +59,14 @@ python run_gui.py
 ```
 
 The scripts set up a venv and install dependencies. If your Python build lacks Tk, install a Tk-enabled build first.
+
+### Running without activating the venv
+
+`run_gui.py` prefers the local `.venv` interpreter if present:
+
+```bash
+python run_gui.py
+```
 
 ### Fonts
 
