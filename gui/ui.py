@@ -150,7 +150,7 @@ def build_ui(app: object) -> LogSidebar:
     container_combo = ttk.Combobox(
         container_row,
         textvariable=getattr(app, "format_filter_var"),
-        values=["mp4", "webm"],
+        values=[],
         state="readonly",
         width=10,
     )
@@ -241,14 +241,25 @@ def build_ui(app: object) -> LogSidebar:
     ttk.Label(controls, textvariable=getattr(app, "simple_state_var")).grid(
         column=0, row=1, sticky="w"
     )
+    buttons = ttk.Frame(controls, style="Card.TFrame", padding=0)
+    buttons.grid(column=1, row=1, sticky="e")
+
     start_button = ttk.Button(
-        controls,
+        buttons,
         text="Start download",
         command=getattr(app, "_on_start"),
         style="Accent.TButton",
     )
-    start_button.grid(column=1, row=1, sticky="e")
+    start_button.grid(column=0, row=0, sticky="e")
     setattr(app, "start_button", start_button)
+
+    cancel_button = ttk.Button(
+        buttons,
+        text="Cancel",
+        command=getattr(app, "_on_cancel"),
+    )
+    cancel_button.grid(column=1, row=0, sticky="e", padx=(8, 0))
+    setattr(app, "cancel_button", cancel_button)
 
     progress_frame = ttk.Frame(controls, padding=3, style="Card.TFrame")
     progress_frame.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(4, 0))

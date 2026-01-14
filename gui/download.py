@@ -1,11 +1,15 @@
 import time
+import threading
 from pathlib import Path
 from typing import Any, Callable
 import re
 
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadCancelled
 
 from .shared_types import FormatInfo, ProgressUpdate
+
+AUDIO_OUTPUT_CODECS = {"m4a", "mp3", "opus", "wav", "flac"}
 
 
 def _sanitize_filename_base(name: str) -> str:
@@ -23,6 +27,7 @@ def build_ydl_opts(
     format_filter: str,
     convert_to_mp4: bool,
     title_override: str | None,
+    cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
 ) -> dict[str, Any]:
@@ -54,7 +59,10 @@ def build_ydl_opts(
 
     if is_audio_only or fmt == "bestaudio/best":
         merge_output_format = None
-        preferred_audio_codec = "opus" if target_container == "webm" else "m4a"
+        desired_audio = (format_filter or "").lower()
+        preferred_audio_codec = (
+            desired_audio if desired_audio in AUDIO_OUTPUT_CODECS else "m4a"
+        )
         postprocessors = [
             {
                 "key": "FFmpegExtractAudio",
@@ -93,7 +101,7 @@ def build_ydl_opts(
     return {
         "outtmpl": outtmpl,
         "format": fmt,
-        "progress_hooks": [_progress_hook_factory(log, update_progress)],
+        "progress_hooks": [_progress_hook_factory(log, update_progress, cancel_event)],
         "noplaylist": False,
         "merge_output_format": merge_output_format,
         "postprocessors": postprocessors,
@@ -109,6 +117,7 @@ def run_download(
     format_filter: str,
     convert_to_mp4: bool,
     title_override: str | None,
+    cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
 ) -> None:
@@ -121,6 +130,7 @@ def run_download(
         format_filter=format_filter,
         convert_to_mp4=convert_to_mp4,
         title_override=title_override,
+        cancel_event=cancel_event,
         log=log,
         update_progress=update_progress,
     )
@@ -128,6 +138,12 @@ def run_download(
     try:
         with YoutubeDL(opts) as ydl:
             ydl.download([url])
+    except DownloadCancelled:
+        log("[cancelled] Download cancelled.")
+        try:
+            update_progress({"status": "cancelled"})
+        except Exception:
+            pass
     except Exception as exc:  # broad to surface in UI
         log(f"[error] {exc}")
     else:
@@ -138,7 +154,9 @@ def run_download(
 
 
 def _progress_hook_factory(
-    log: Callable[[str], None], update_progress: Callable[[ProgressUpdate], None]
+    log: Callable[[str], None],
+    update_progress: Callable[[ProgressUpdate], None],
+    cancel_event: threading.Event | None,
 ) -> Callable[[dict], None]:
     last_log = {"ts": 0.0}
 
@@ -169,6 +187,9 @@ def _progress_hook_factory(
         return f"{m:d}:{s:02d}"
 
     def hook(status: dict) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise DownloadCancelled()
+
         if status.get("status") == "downloading":
             now = time.time()
             if now - last_log["ts"] >= 0.8:

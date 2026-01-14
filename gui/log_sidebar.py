@@ -12,6 +12,7 @@ SIDEBAR_ANIM_MS = 16
 
 class LogSidebar:
     _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+    _SIDEBAR_BORDER_WIDTH = 2
 
     def __init__(
         self,
@@ -39,6 +40,8 @@ class LogSidebar:
         self._log_sidebar_after_id: str | None = None
         self._log_sidebar_open = False
         self._log_sidebar_width_target = 0
+        # Visible width during slide animation; the sidebar widget itself keeps a fixed width
+        # to avoid internal layout reflow (which can cause button flicker/jank).
         self._log_sidebar_width_current = 0.0
         self._log_sidebar_margin = 0
         self._logs_unread = False
@@ -71,10 +74,27 @@ class LogSidebar:
         )
 
     def _build_sidebar(self) -> None:
-        self.sidebar = ttk.Frame(self.root, style="OutputPath.TFrame", padding=6)
+        # Use a Canvas so we can draw a rounded outline for the sidebar container.
+        self.sidebar = tk.Canvas(
+            self.root,
+            highlightthickness=0,
+            borderwidth=0,
+            bd=0,
+            background=self._palette["base_bg"],
+        )
         self.sidebar.place_forget()
 
-        header = ttk.Frame(self.sidebar, style="Card.TFrame", padding=0)
+        self._sidebar_fill_item: int | None = None
+        self._sidebar_outline_items: list[int] = []
+        self._sidebar_window_item: int | None = None
+
+        self._sidebar_content = ttk.Frame(self.sidebar, style="Card.TFrame", padding=6)
+        self._sidebar_window_item = self.sidebar.create_window(
+            0, 0, window=self._sidebar_content, anchor="nw"
+        )
+        self.sidebar.bind("<Configure>", self._on_sidebar_canvas_configure, add=True)
+
+        header = ttk.Frame(self._sidebar_content, style="Card.TFrame", padding=0)
         header.grid(column=0, row=0, sticky="ew", pady=(0, 6))
         header.columnconfigure(0, weight=1)
         ttk.Label(
@@ -87,10 +107,10 @@ class LogSidebar:
             column=1, row=0, sticky="e"
         )
 
-        body = ttk.Frame(self.sidebar, style="Card.TFrame", padding=0)
+        body = ttk.Frame(self._sidebar_content, style="Card.TFrame", padding=0)
         body.grid(column=0, row=1, sticky="nsew")
-        self.sidebar.columnconfigure(0, weight=1)
-        self.sidebar.rowconfigure(1, weight=1)
+        self._sidebar_content.columnconfigure(0, weight=1)
+        self._sidebar_content.rowconfigure(1, weight=1)
         body.columnconfigure(0, weight=1)
         body.rowconfigure(0, weight=1)
 
@@ -114,6 +134,88 @@ class LogSidebar:
         self.text.grid(column=0, row=0, sticky="nsew")
         scrollbar.grid(column=1, row=0, sticky="ns")
         scrollbar.grid_remove()
+
+    def _on_sidebar_canvas_configure(self, _event: tk.Event) -> None:
+        # Keep the inner content inset from the border, then redraw the rounded outline.
+        if self._sidebar_window_item is None:
+            return
+        try:
+            w = int(self.sidebar.winfo_width())
+            h = int(self.sidebar.winfo_height())
+        except Exception:
+            return
+        if w <= 1 or h <= 1:
+            return
+
+        bw = self._SIDEBAR_BORDER_WIDTH
+        inner_w = max(1, w - (bw * 2))
+        inner_h = max(1, h - (bw * 2))
+        self.sidebar.coords(self._sidebar_window_item, bw, bw)
+        self.sidebar.itemconfigure(self._sidebar_window_item, width=inner_w, height=inner_h)
+        self._redraw_sidebar_border(w, h)
+
+    def _redraw_sidebar_border(self, w: int, h: int) -> None:
+        bw = self._SIDEBAR_BORDER_WIDTH
+        # Use integer coordinates to avoid macOS/Tk anti-aliasing artifacts.
+        x1 = 0
+        y1 = 0
+        x2 = max(1, w - 1)
+        y2 = max(1, h - 1)
+
+        outline = self._entry_border
+        fill = self._palette["panel_bg"]
+
+        if self._sidebar_fill_item is not None:
+            try:
+                self.sidebar.delete(self._sidebar_fill_item)
+            except Exception:
+                pass
+            self._sidebar_fill_item = None
+        for item in self._sidebar_outline_items:
+            try:
+                self.sidebar.delete(item)
+            except Exception:
+                pass
+        self._sidebar_outline_items = []
+
+        self._sidebar_fill_item = self.sidebar.create_rectangle(
+            x1,
+            y1,
+            x2,
+            y2,
+            outline="",
+            fill=fill,
+            width=0,
+        )
+        self._sidebar_outline_items.append(
+            self.sidebar.create_rectangle(
+                x1,
+                y1,
+                x2,
+                y2,
+                outline=outline,
+                fill="",
+                width=bw,
+            )
+        )
+
+        try:
+            if self._sidebar_fill_item is not None:
+                self.sidebar.tag_lower(self._sidebar_fill_item)
+            if self._sidebar_window_item is not None:
+                self.sidebar.tag_raise(self._sidebar_window_item)
+            for item in self._sidebar_outline_items:
+                self.sidebar.tag_raise(item)
+        except Exception:
+            pass
+
+    def _raise_sidebar_widget(self) -> None:
+        # Canvas overrides lift/tkraise to operate on canvas items (requires a tag/id),
+        # so raise the widget via the Tk "raise" command instead.
+        try:
+            self.sidebar.tk.call("raise", self.sidebar._w)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     def _autohide_text_scrollbar(
         self, scrollbar: ttk.Scrollbar, first: str, last: str
@@ -149,26 +251,31 @@ class LogSidebar:
     def open(self) -> None:
         self._log_sidebar_open = True
         self._recompute_sidebar_target()
+        if self._log_sidebar_width_target <= 1:
+            self._log_sidebar_width_target = 320
         if not self.sidebar.winfo_ismapped():
             y, h = self._sidebar_y_and_height()
+            # Place fully off-screen and slide in by adjusting x, keeping width fixed.
+            self._log_sidebar_width_current = 0.0
             self.sidebar.place(
                 relx=1.0,
-                x=-self._log_sidebar_margin,
+                x=-self._log_sidebar_margin + self._log_sidebar_width_target,
                 y=y,
                 anchor="ne",
-                width=1,
+                width=self._log_sidebar_width_target,
                 height=h,
             )
+        self._raise_sidebar_widget()
         self.header_bar.lift()
         self._set_unread(False)
         self._start_sidebar_animation()
 
     def close(self) -> None:
         self._log_sidebar_open = False
-        self._log_sidebar_width_target = 0
         self._start_sidebar_animation()
 
     def _recompute_sidebar_target(self) -> None:
+        prev = self._log_sidebar_width_target
         width = self.root.winfo_width()
         if width <= 1:
             return
@@ -176,6 +283,10 @@ class LogSidebar:
         self._log_sidebar_width_target = min(
             420, max(260, min(max_width, int(width * 0.42)))
         )
+        if prev > 0 and self._log_sidebar_width_target > 0 and prev != self._log_sidebar_width_target:
+            # Preserve the current visible fraction during resizes.
+            frac = max(0.0, min(1.0, self._log_sidebar_width_current / float(prev)))
+            self._log_sidebar_width_current = frac * float(self._log_sidebar_width_target)
 
     def _sidebar_y_and_height(self) -> tuple[int, int]:
         root_h = self.root.winfo_height()
@@ -193,7 +304,8 @@ class LogSidebar:
             self._sidebar_tick()
 
     def _sidebar_tick(self) -> None:
-        target = float(self._log_sidebar_width_target)
+        full = float(self._log_sidebar_width_target)
+        target = full if self._log_sidebar_open else 0.0
         ease = 0.28
         delta = target - self._log_sidebar_width_current
         if abs(delta) < 0.8:
@@ -201,26 +313,27 @@ class LogSidebar:
         else:
             self._log_sidebar_width_current += delta * ease
 
-        w = int(round(self._log_sidebar_width_current))
-        if w <= 0:
+        visible = int(round(self._log_sidebar_width_current))
+        if visible <= 0:
             self.sidebar.place_forget()
             self._log_sidebar_after_id = None
             self._log_sidebar_width_current = 0.0
             return
 
         y, h = self._sidebar_y_and_height()
+        # Slide the fixed-width sidebar by shifting it right as it closes.
+        shift = int(round(float(self._log_sidebar_width_target) - self._log_sidebar_width_current))
+        shift = max(0, min(self._log_sidebar_width_target, shift))
         self.sidebar.place_configure(
             relx=1.0,
-            x=-self._log_sidebar_margin,
+            x=-self._log_sidebar_margin + shift,
             y=y,
             anchor="ne",
-            width=w,
+            width=self._log_sidebar_width_target,
             height=h,
         )
-        self.sidebar.lift()
-        self.header_bar.lift()
 
-        if w == int(round(target)):
+        if visible == int(round(target)):
             self._log_sidebar_after_id = None
             return
 
@@ -255,6 +368,7 @@ class LogSidebar:
             self._recompute_sidebar_target()
             if self._log_sidebar_after_id is None:
                 y, h = self._sidebar_y_and_height()
+                self._log_sidebar_width_current = float(self._log_sidebar_width_target)
                 self.sidebar.place_configure(
                     relx=1.0,
                     x=-self._log_sidebar_margin,
@@ -340,4 +454,3 @@ class LogSidebar:
             self.sidebar.place_forget()
         except Exception:
             pass
-

@@ -8,6 +8,9 @@ from tkinter import filedialog, messagebox, ttk
 FETCH_DEBOUNCE_MS = 600
 PROGRESS_ANIM_MS = 33
 
+VIDEO_CONTAINERS = ("mp4", "webm")
+AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
+
 from . import download, formats as formats_mod, ui, yt_dlp_helpers as helpers
 from .state import FormatState
 
@@ -22,11 +25,13 @@ class YtDlpGui:
         self._progress_pct_display = 0.0
         self.download_thread: threading.Thread | None = None
         self.is_downloading = False
+        self._cancel_event: threading.Event | None = None
+        self._cancel_requested = False
         self.formats = FormatState()
         self._normalizing_url = False
 
         self.url_var = tk.StringVar()
-        self.mode_var = tk.StringVar(value="video")  # "video" or "audio"
+        self.mode_var = tk.StringVar(value="")  # "video" or "audio"
         # These are filled after probing a URL.
         self.format_filter_var = tk.StringVar(value="")  # must choose mp4 or webm
         self.codec_filter_var = tk.StringVar(value="")  # must choose avc1 or av01
@@ -45,6 +50,7 @@ class YtDlpGui:
 
         self.logs = ui.build_ui(self)
         self._init_visibility_helpers()
+        self._refresh_container_choices()
         self.status_var.trace_add("write", lambda *_: self._on_status_change())
         self.url_var.trace_add("write", lambda *_: self._on_url_change())
         self._update_controls_state()
@@ -150,15 +156,44 @@ class YtDlpGui:
         self.logs.queue(message)
 
     def _on_mode_change(self) -> None:
+        self._refresh_container_choices()
         self._apply_mode_formats()
         self._update_controls_state()
+
+    def _refresh_container_choices(self) -> None:
+        mode = self.mode_var.get()
+        if mode == "audio":
+            containers = list(AUDIO_CONTAINERS)
+            if self.format_filter_var.get() not in containers:
+                self.format_filter_var.set(containers[0])
+            self.codec_filter_var.set("")
+        elif mode == "video":
+            containers = list(VIDEO_CONTAINERS)
+            if self.format_filter_var.get() not in containers:
+                self.format_filter_var.set("")
+        else:
+            containers = []
+            self.format_filter_var.set("")
+            self.codec_filter_var.set("")
+            self.format_var.set("")
+        self.container_combo.configure(values=containers)
+
+    def _reset_format_selections(self) -> None:
+        if self.mode_var.get() == "audio":
+            self.format_filter_var.set(AUDIO_CONTAINERS[0])
+            self.codec_filter_var.set("")
+        elif self.mode_var.get() == "video":
+            self.format_filter_var.set("")
+            self.codec_filter_var.set("")
+        else:
+            self.format_filter_var.set("")
+            self.codec_filter_var.set("")
+        self.format_var.set("")
 
     def _on_url_change(self, force: bool = False) -> None:
         self._normalize_url_var()
         # Debounce format fetching when the URL changes.
-        self.format_filter_var.set("")
-        self.codec_filter_var.set("")
-        self.format_var.set("")
+        self._reset_format_selections()
         self._update_controls_state()
         self._cancel_after("fetch_after_id", self.formats)
         if force:
@@ -247,9 +282,7 @@ class YtDlpGui:
         }
 
         # Require user to pick a container after formats load.
-        self.format_filter_var.set("")
-        self.codec_filter_var.set("")
-        self.format_var.set("")
+        self._reset_format_selections()
         self._apply_mode_formats()
         self.formats.last_fetch_failed = False
         self.status_var.set("Formats loaded")
@@ -261,17 +294,36 @@ class YtDlpGui:
         self.formats.video_lookup = cached.get("video_lookup", {})
         self.formats.audio_labels = cached.get("audio_labels", [])
         self.formats.audio_lookup = cached.get("audio_lookup", {})
-        self.format_filter_var.set("")
-        self.codec_filter_var.set("")
-        self.format_var.set("")
+        self._reset_format_selections()
         self._apply_mode_formats()
         self.status_var.set("Formats loaded (cached)")
         self._update_controls_state()
 
     def _apply_mode_formats(self) -> None:
-        if self.mode_var.get() == "audio":
+        mode = self.mode_var.get()
+        if mode not in {"audio", "video"}:
+            self.formats.filtered_labels = []
+            self.formats.filtered_lookup = {}
+            self.format_combo.configure(values=[])
+            self.format_var.set("")
+            self._update_controls_state()
+            return
+
+        if mode == "audio":
             labels = self.formats.audio_labels
             lookup = self.formats.audio_lookup
+            # For audio-only, container selection controls output post-processing, not
+            # which source formats are shown in the dropdown.
+            self.formats.filtered_labels = list(labels)
+            self.formats.filtered_lookup = {label: lookup.get(label) or {} for label in labels}
+            self.format_combo.configure(values=self.formats.filtered_labels)
+            if self.formats.filtered_labels:
+                if self.format_var.get() not in self.formats.filtered_labels:
+                    self.format_var.set(self.formats.filtered_labels[0])
+            else:
+                self.format_var.set("")
+            self._update_controls_state()
+            return
         else:
             labels = self.formats.video_labels
             lookup = self.formats.video_lookup
@@ -335,8 +387,14 @@ class YtDlpGui:
     def _update_controls_state(self) -> None:
         url_present = bool(self.url_var.get().strip())
         has_formats_data = bool(self.formats.video_labels or self.formats.audio_labels)
+        mode = self.mode_var.get()
+        is_audio_mode = mode == "audio"
+        is_video_mode = mode == "video"
+        mode_chosen = is_audio_mode or is_video_mode
         container_value = self.format_filter_var.get()
-        filter_chosen = container_value in {"mp4", "webm"}
+        filter_chosen = (
+            container_value in AUDIO_CONTAINERS if is_audio_mode else container_value in VIDEO_CONTAINERS
+        )
         codec_chosen = bool(self.codec_filter_var.get())
         format_available = bool(self.formats.filtered_labels)
         format_selected = bool(self.format_var.get())
@@ -345,6 +403,7 @@ class YtDlpGui:
             and has_formats_data
             and not self.formats.is_fetching
             and not self.is_downloading
+            and mode_chosen
         )
 
         # Keep all options visible; disable when not usable.
@@ -358,8 +417,8 @@ class YtDlpGui:
         self._configure_combobox(
             self.codec_label,
             self.codec_combo,
-            show=True,
-            enabled=base_ready and filter_chosen,
+            show=is_video_mode,
+            enabled=is_video_mode and base_ready and filter_chosen,
         )
 
         # Convert checkbox only relevant when container is webm.
@@ -378,14 +437,26 @@ class YtDlpGui:
             self.format_label,
             self.format_combo,
             show=True,
-            enabled=base_ready and filter_chosen and codec_chosen and format_available,
+            enabled=(
+                base_ready
+                and filter_chosen
+                and (format_available)
+                and (True if is_audio_mode else codec_chosen)
+            ),
         )
 
         # Start button
-        if base_ready and filter_chosen and codec_chosen and format_selected:
+        if base_ready and filter_chosen and format_selected and (is_audio_mode or codec_chosen):
             self.start_button.state(["!disabled"])
         else:
             self.start_button.state(["disabled"])
+
+        # Cancel button (visible always; only enabled while a download is running).
+        can_cancel = self.is_downloading and not self._cancel_requested
+        if can_cancel:
+            self.cancel_button.state(["!disabled"])
+        else:
+            self.cancel_button.state(["disabled"])
 
     def _reset_progress_summary(self) -> None:
         self.progress_pct_var.set("0.0%")
@@ -413,6 +484,8 @@ class YtDlpGui:
             self._progress_pct_target = 100.0
             if self._progress_anim_after_id is None:
                 self._progress_anim_tick()
+        elif status == "cancelled":
+            self._progress_pct_target = 0.0
 
     def _progress_anim_tick(self) -> None:
         ease = 0.22
@@ -444,11 +517,13 @@ class YtDlpGui:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         self.is_downloading = True
+        self._cancel_requested = False
+        self._cancel_event = threading.Event()
         self.simple_state_var.set("Downloading")
         self.status_var.set("Downloading...")
-        self.start_button.state(["disabled"])
         self.logs.clear()
         self._reset_progress_summary()
+        self._update_controls_state()
         self.download_thread = threading.Thread(
             target=self._run_download,
             kwargs={
@@ -459,6 +534,17 @@ class YtDlpGui:
             daemon=True,
         )
         self.download_thread.start()
+
+    def _on_cancel(self) -> None:
+        if not self.is_downloading or self._cancel_requested:
+            return
+        self._cancel_requested = True
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        self.simple_state_var.set("Cancelling…")
+        self.status_var.set("Cancelling download…")
+        self._log("[cancel] Cancellation requested.")
+        self._update_controls_state()
 
     def _run_download(self, url: str, output_dir: Path, fmt_label: str) -> None:
         fmt_info = self.formats.filtered_lookup.get(fmt_label)
@@ -476,6 +562,7 @@ class YtDlpGui:
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
             title_override=title_override,
+            cancel_event=self._cancel_event,
             log=self._log,
             update_progress=lambda u: self.root.after(
                 0, lambda: self._on_progress_update(u)
@@ -485,10 +572,12 @@ class YtDlpGui:
 
     def _on_finish(self) -> None:
         self.is_downloading = False
+        self._cancel_requested = False
+        self._cancel_event = None
         self.simple_state_var.set("Idle")
         self.status_var.set("Idle")
-        self.start_button.state(["!disabled"])
         self._reset_progress_summary()
+        self._update_controls_state()
 
     def _on_close(self) -> None:
         if self.is_downloading:
