@@ -4,6 +4,284 @@ from tkinter import ttk
 from tkinter import font as tkfont
 
 
+def _theme_image_cache(root: tk.Tk) -> list[tk.PhotoImage]:
+    cache = getattr(root, "_ytdlp_gui_theme_images", None)
+    if cache is None:
+        cache = []
+        setattr(root, "_ytdlp_gui_theme_images", cache)
+    return cache
+
+
+def _make_rect_border_image(
+    root: tk.Tk,
+    *,
+    fill: str,
+    border: str,
+    size: int = 7,
+) -> tk.PhotoImage:
+    """Create a simple solid rectangle with a 1px border (connected corners)."""
+    size = max(3, int(size))
+    img = tk.PhotoImage(master=root, width=size, height=size)
+    img.put(fill, to=(0, 0, size, size))
+    img.put(border, to=(0, 0, size, 1))  # top
+    img.put(border, to=(0, size - 1, size, size))  # bottom
+    img.put(border, to=(0, 0, 1, size))  # left
+    img.put(border, to=(size - 1, 0, size, size))  # right
+    return img
+
+
+def _pick_first_existing(candidates: tuple[str, ...], available: set[str]) -> str | None:
+    for name in candidates:
+        if name in available:
+            return name
+    return None
+
+
+def _apply_connected_corner_fields(
+    root: tk.Tk,
+    style: ttk.Style,
+    *,
+    fill: str,
+    border: str,
+    focus_border: str,
+    disabled_fill: str,
+    disabled_border: str,
+) -> None:
+    """Override Entry/Combobox field elements so rectangle corners join cleanly."""
+    available = set(style.element_names())
+
+    entry_padding = _pick_first_existing(("Entry.padding",), available)
+    entry_textarea = _pick_first_existing(("Entry.textarea",), available)
+    combo_padding = _pick_first_existing(("Combobox.padding",), available)
+    combo_textarea = _pick_first_existing(("Combobox.textarea",), available)
+    combo_arrow = _pick_first_existing(("Combobox.downarrow", "Combobox.arrow"), available)
+
+    if not all((entry_padding, entry_textarea, combo_padding, combo_textarea, combo_arrow)):
+        return
+
+    cache = _theme_image_cache(root)
+    normal_img = _make_rect_border_image(root, fill=fill, border=border)
+    focus_img = _make_rect_border_image(root, fill=fill, border=focus_border)
+    disabled_img = _make_rect_border_image(root, fill=disabled_fill, border=disabled_border)
+    cache.extend([normal_img, focus_img, disabled_img])
+
+    try:
+        style.element_create(
+            "Ytdlp.Entry.field",
+            "image",
+            normal_img,
+            ("focus", focus_img),
+            ("disabled", disabled_img),
+            border=1,
+            sticky="nsew",
+        )
+        style.element_create(
+            "Ytdlp.Combobox.field",
+            "image",
+            normal_img,
+            ("focus", focus_img),
+            ("disabled", disabled_img),
+            border=1,
+            sticky="nsew",
+        )
+    except tk.TclError:
+        # Element names can only be created once per interpreter; ignore duplicates.
+        pass
+
+    # Remove theme bevels and rely on the image element for a clean 1px rectangle.
+    style.configure("TCombobox", relief="flat", borderwidth=0)
+    style.configure("Dark.TEntry", relief="flat", borderwidth=0)
+    style.configure("Placeholder.Dark.TEntry", relief="flat", borderwidth=0)
+
+    style.layout(
+        "Dark.TEntry",
+        [
+            (
+                "Ytdlp.Entry.field",
+                {
+                    "sticky": "nsew",
+                    "children": [
+                        (
+                            entry_padding,
+                            {
+                                "sticky": "nsew",
+                                "children": [(entry_textarea, {"sticky": "nsew"})],
+                            },
+                        )
+                    ],
+                },
+            )
+        ],
+    )
+    style.layout(
+        "Placeholder.Dark.TEntry",
+        [
+            (
+                "Ytdlp.Entry.field",
+                {
+                    "sticky": "nsew",
+                    "children": [
+                        (
+                            entry_padding,
+                            {
+                                "sticky": "nsew",
+                                "children": [(entry_textarea, {"sticky": "nsew"})],
+                            },
+                        )
+                    ],
+                },
+            )
+        ],
+    )
+    style.layout(
+        "TCombobox",
+        [
+            (
+                "Ytdlp.Combobox.field",
+                {
+                    "sticky": "nsew",
+                    "children": [
+                        (combo_arrow, {"side": "right", "sticky": "ns"}),
+                        (
+                            combo_padding,
+                            {
+                                "sticky": "nsew",
+                                "children": [(combo_textarea, {"sticky": "nsew"})],
+                            },
+                        ),
+                    ],
+                },
+            )
+        ],
+    )
+
+
+def _apply_connected_corner_frames(
+    root: tk.Tk,
+    style: ttk.Style,
+    *,
+    fill: str,
+    border: str,
+) -> None:
+    """Make bordered frames draw as clean rectangles with 1px connected corners."""
+    available = set(style.element_names())
+    frame_padding = _pick_first_existing(("Frame.padding",), available)
+    if frame_padding is None:
+        return
+
+    cache = _theme_image_cache(root)
+    normal_img = _make_rect_border_image(root, fill=fill, border=border)
+    cache.append(normal_img)
+
+    try:
+        style.element_create(
+            "Ytdlp.Frame.border",
+            "image",
+            normal_img,
+            border=1,
+            sticky="nsew",
+        )
+    except tk.TclError:
+        pass
+
+    for frame_style in ("Accent.TFrame", "OutputPath.TFrame"):
+        style.configure(frame_style, relief="flat", borderwidth=0)
+        style.layout(
+            frame_style,
+            [
+                (
+                    "Ytdlp.Frame.border",
+                    {
+                        "sticky": "nsew",
+                        "children": [(frame_padding, {"sticky": "nsew"})],
+                    },
+                )
+            ],
+        )
+
+
+def _apply_connected_corner_buttons(
+    root: tk.Tk,
+    style: ttk.Style,
+    *,
+    border: str,
+    focus_border: str,
+    normal_fill: str,
+    active_fill: str,
+    pressed_fill: str,
+    disabled_fill: str,
+) -> None:
+    """Make buttons render as true rectangles with consistent connected corners."""
+    available = set(style.element_names())
+    button_padding = _pick_first_existing(("Button.padding",), available)
+    button_label = _pick_first_existing(("Button.label",), available)
+    if button_padding is None or button_label is None:
+        return
+
+    cache = _theme_image_cache(root)
+    normal_img = _make_rect_border_image(root, fill=normal_fill, border=border)
+    active_img = _make_rect_border_image(root, fill=active_fill, border=border)
+    pressed_img = _make_rect_border_image(root, fill=pressed_fill, border=border)
+    disabled_img = _make_rect_border_image(root, fill=disabled_fill, border=border)
+    focus_img = _make_rect_border_image(root, fill=normal_fill, border=focus_border)
+    active_focus_img = _make_rect_border_image(root, fill=active_fill, border=focus_border)
+    pressed_focus_img = _make_rect_border_image(root, fill=pressed_fill, border=focus_border)
+    cache.extend(
+        [
+            normal_img,
+            active_img,
+            pressed_img,
+            disabled_img,
+            focus_img,
+            active_focus_img,
+            pressed_focus_img,
+        ]
+    )
+
+    try:
+        style.element_create(
+            "Ytdlp.Button.border",
+            "image",
+            normal_img,
+            ("disabled", disabled_img),
+            ("pressed", pressed_img),
+            ("active", active_img),
+            ("focus", focus_img),
+            ("pressed", "focus", pressed_focus_img),
+            ("active", "focus", active_focus_img),
+            border=1,
+            sticky="nsew",
+        )
+    except tk.TclError:
+        pass
+
+    # Remove theme bevels and rely on our image for borders/corners.
+    style.configure("TButton", relief="flat", borderwidth=0)
+    style.configure("Accent.TButton", relief="flat", borderwidth=0)
+
+    for button_style in ("TButton", "Accent.TButton"):
+        style.layout(
+            button_style,
+            [
+                (
+                    "Ytdlp.Button.border",
+                    {
+                        "sticky": "nsew",
+                        "children": [
+                            (
+                                button_padding,
+                                {
+                                    "sticky": "nsew",
+                                    "children": [(button_label, {"sticky": "nsew"})],
+                                },
+                            )
+                        ],
+                    },
+                )
+            ],
+        )
+
+
 def _set_named_fonts(root: tk.Tk, family: str, size: int) -> None:
     for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont"):
         try:
@@ -186,6 +464,27 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         foreground=accent,
         padding=(0, 0),
         font=base_font,
+    )
+
+    _apply_connected_corner_fields(
+        root,
+        style,
+        fill=entry_bg,
+        border=entry_border,
+        focus_border=accent,
+        disabled_fill="#e5e7eb",
+        disabled_border="#d1d5db",
+    )
+    _apply_connected_corner_frames(root, style, fill=panel_bg, border=entry_border)
+    _apply_connected_corner_buttons(
+        root,
+        style,
+        border=entry_border,
+        focus_border=accent,
+        normal_fill=accent,
+        active_fill="#243c63",
+        pressed_fill="#243c63",
+        disabled_fill="#e5e7eb",
     )
 
     return {

@@ -478,8 +478,11 @@ class YtDlpGui:
             eta = update.get("eta")
             if isinstance(speed, str):
                 self.progress_speed_var.set(speed or "—")
+            # Hold last known ETA if the new value is blank/unknown.
             if isinstance(eta, str):
-                self.progress_eta_var.set(eta or "—")
+                eta_clean = eta.strip()
+                if eta_clean and eta_clean != "—":
+                    self.progress_eta_var.set(eta_clean)
         elif status == "finished":
             self._progress_pct_target = 100.0
             if self._progress_anim_after_id is None:
