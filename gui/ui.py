@@ -106,6 +106,13 @@ def build_ui(app: object) -> LogSidebar:
         url_frame, textvariable=getattr(app, "url_var"), style="Dark.TEntry"
     )
     url_entry.grid(column=0, row=0, sticky="ew")
+    def _select_all(_event: tk.Event) -> str:
+        url_entry.selection_range(0, "end")
+        url_entry.icursor("end")
+        return "break"
+
+    url_entry.bind("<Control-a>", _select_all, add=True)
+    url_entry.bind("<Command-a>", _select_all, add=True)
     ttk.Button(url_frame, text="Paste", command=getattr(app, "_paste_url")).grid(
         column=1, row=0, padx=(8, 0)
     )

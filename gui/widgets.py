@@ -177,21 +177,39 @@ class ScrollableFrame(ttk.Frame):
                 self._update_content_width()
 
     def _bind_mousewheel(self, widget: tk.Widget) -> None:
+        def can_scroll() -> bool:
+            try:
+                canvas_h = self.canvas.winfo_height()
+            except tk.TclError:
+                return False
+            if canvas_h <= 1:
+                return False
+            bbox = self.canvas.bbox(self._window_id) or self.canvas.bbox("all")
+            if not bbox:
+                return False
+            content_h = int(bbox[3] - bbox[1])
+            return content_h > (canvas_h + SCROLL_OVERFLOW_PX)
+
         def on_mousewheel(event: tk.Event) -> str:
+            if not can_scroll():
+                return ""
             if getattr(event, "delta", 0):
                 widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
                 return "break"
             return ""
 
         def on_button4(_event: tk.Event) -> str:
+            if not can_scroll():
+                return ""
             widget.yview_scroll(-1, "units")
             return "break"
 
         def on_button5(_event: tk.Event) -> str:
+            if not can_scroll():
+                return ""
             widget.yview_scroll(1, "units")
             return "break"
 
         widget.bind_all("<MouseWheel>", on_mousewheel)
         widget.bind_all("<Button-4>", on_button4)
         widget.bind_all("<Button-5>", on_button5)
-
