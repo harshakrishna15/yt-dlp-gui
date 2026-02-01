@@ -36,7 +36,7 @@ class YtDlpGui:
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value="")  # "video" or "audio"
-        self.playlist_enabled_var = tk.BooleanVar(value=False)
+        self.playlist_enabled_var = tk.BooleanVar(value=True)
         self.playlist_items_var = tk.StringVar(value="")
         # These are filled after probing a URL.
         self.format_filter_var = tk.StringVar(value="")  # must choose mp4 or webm
@@ -45,14 +45,14 @@ class YtDlpGui:
             value=False
         )  # convert WebM to MP4 after download (re-encode)
         self.format_var = tk.StringVar()
-        self.title_override_var = tk.StringVar(value="")
         self.output_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.status_var = tk.StringVar(value="Idle")
         self._last_status_logged = self.status_var.get()
         self.simple_state_var = tk.StringVar(value="Idle")
-        self.progress_pct_var = tk.StringVar(value="0.0%")
+        self.progress_pct_var = tk.StringVar(value="—")
         self.progress_speed_var = tk.StringVar(value="—")
         self.progress_eta_var = tk.StringVar(value="—")
+        self.progress_item_var = tk.StringVar(value="—")
 
         self.logs = ui.build_ui(self)
         self._init_visibility_helpers()
@@ -175,6 +175,18 @@ class YtDlpGui:
             return False
         return bool(query.get("v")) and bool(query.get("list"))
 
+    def _is_playlist_url(self, url: str) -> bool:
+        try:
+            parsed = urlparse(url)
+            query = parse_qs(parsed.query)
+        except Exception:
+            return False
+        if parsed.path.startswith("/playlist") and query.get("list"):
+            return True
+        if query.get("list") and not query.get("v"):
+            return True
+        return False
+
     def _strip_list_param(self, url: str) -> str:
         try:
             parsed = urlparse(url)
@@ -258,7 +270,6 @@ class YtDlpGui:
 
     def _on_url_change(self, force: bool = False) -> None:
         self._normalize_url_var()
-        self._set_playlist_ui(False)
         url = self.url_var.get().strip()
         if self._mixed_prompt_active and url == self._pending_mixed_url:
             return
@@ -266,6 +277,10 @@ class YtDlpGui:
         if url and self._is_mixed_url(url):
             self._show_mixed_prompt(url)
             return
+        if url and self._is_playlist_url(url):
+            self._set_playlist_ui(True)
+        else:
+            self._set_playlist_ui(False)
         # Debounce format fetching when the URL changes.
         self._reset_format_selections()
         self._update_controls_state()
@@ -402,6 +417,14 @@ class YtDlpGui:
             lookup = self.formats.audio_lookup
             # For audio-only, container selection controls output post-processing, not
             # which source formats are shown in the dropdown.
+            if not labels:
+                labels = ["Best audio only"]
+                lookup = {
+                    "Best audio only": {
+                        "custom_format": "bestaudio/best",
+                        "is_audio_only": True,
+                    }
+                }
             self.formats.filtered_labels = list(labels)
             self.formats.filtered_lookup = {label: lookup.get(label) or {} for label in labels}
             self.format_combo.configure(values=self.formats.filtered_labels)
@@ -461,6 +484,10 @@ class YtDlpGui:
                 self.formats.last_codec_fallback_notice = notice_key
                 self._log(f"[info] {msg}")
             apply_filters(allow_any_codec=True)
+        if not filtered_labels:
+            # Add a fall-back "best" option if no exact matches exist.
+            filtered_labels.append("Best available")
+            filtered_lookup["Best available"] = {"custom_format": "bestvideo+bestaudio/best"}
 
         self.formats.filtered_labels = filtered_labels
         self.formats.filtered_lookup = filtered_lookup
@@ -568,12 +595,10 @@ class YtDlpGui:
         if is_playlist:
             self.url_label.configure(text="Playlist URL")
             self.playlist_enabled_var.set(True)
-            self.playlist_check.state(["disabled"])
         else:
             self.url_label.configure(text="Video URL")
             self.playlist_enabled_var.set(False)
             self.playlist_items_var.set("")
-            self.playlist_check.state(["!disabled"])
         self._update_controls_state()
 
     def _on_mixed_choose_playlist(self) -> None:
@@ -593,9 +618,10 @@ class YtDlpGui:
             self.url_var.set(resolved_url)
 
     def _reset_progress_summary(self) -> None:
-        self.progress_pct_var.set("0.0%")
+        self.progress_pct_var.set("—")
         self.progress_speed_var.set("—")
         self.progress_eta_var.set("—")
+        self.progress_item_var.set("—")
         self._progress_pct_target = 0.0
         self._progress_pct_display = 0.0
         self._cancel_after("_progress_anim_after_id")
@@ -617,6 +643,10 @@ class YtDlpGui:
                 eta_clean = eta.strip()
                 if eta_clean and eta_clean != "—":
                     self.progress_eta_var.set(eta_clean)
+        elif status == "item":
+            item = update.get("item")
+            if isinstance(item, str) and item.strip():
+                self.progress_item_var.set(item.strip())
         elif status == "finished":
             self._progress_pct_target = 100.0
             if self._progress_anim_after_id is None:
@@ -686,15 +716,13 @@ class YtDlpGui:
     def _run_download(self, url: str, output_dir: Path, fmt_label: str) -> None:
         fmt_info = self.formats.filtered_lookup.get(fmt_label)
         format_filter = self.format_filter_var.get()
-        title_override_raw = self.title_override_var.get().strip()
-        if getattr(self, "_title_placeholder_active", False):
-            title_override_raw = ""
-        title_override = title_override_raw or None
         playlist_enabled = bool(self.playlist_enabled_var.get())
-        playlist_items = (self.playlist_items_var.get() or "").strip()
-        if playlist_enabled and title_override:
-            self._log("[info] Title override ignored for playlists.")
-            title_override = None
+        playlist_items_raw = (self.playlist_items_var.get() or "").strip()
+        playlist_items = re.sub(r"\s+", "", playlist_items_raw)
+        if playlist_items_raw and playlist_items != playlist_items_raw:
+            self._log("[info] Playlist items normalized (spaces removed).")
+        if playlist_enabled:
+            self._log(f"[playlist] enabled=1 items={playlist_items or 'none'}")
 
         download.run_download(
             url=url,
@@ -703,7 +731,6 @@ class YtDlpGui:
             fmt_label=fmt_label,
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
-            title_override=title_override,
             playlist_enabled=playlist_enabled,
             playlist_items=playlist_items or None,
             cancel_event=self._cancel_event,
