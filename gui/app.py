@@ -19,7 +19,7 @@ from .state import FormatState
 class YtDlpGui:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("yt-dlp GUI")
+        self.root.title("yt-dlp-gui")
         self.root.minsize(720, 550)
         self._progress_anim_after_id: str | None = None
         self._progress_pct_target = 0.0
