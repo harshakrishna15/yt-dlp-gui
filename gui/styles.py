@@ -56,7 +56,9 @@ def _make_solid_image(root: tk.Tk, *, fill: str, size: int = 7) -> tk.PhotoImage
     return img
 
 
-def _pick_first_existing(candidates: tuple[str, ...], available: set[str]) -> str | None:
+def _pick_first_existing(
+    candidates: tuple[str, ...], available: set[str]
+) -> str | None:
     for name in candidates:
         if name in available:
             return name
@@ -86,7 +88,9 @@ def _apply_connected_corner_fields(
 
     # Padding elements vary by theme; keep optional and fall back to the textarea directly.
     entry_padding = _pick_first_existing(("Entry.padding", "Entry.border"), available)
-    combo_padding = _pick_first_existing(("Combobox.padding", "Combobox.border"), available)
+    combo_padding = _pick_first_existing(
+        ("Combobox.padding", "Combobox.border"), available
+    )
 
     if not all((entry_textarea, combo_textarea, combo_arrow)):
         return
@@ -315,7 +319,13 @@ def _apply_connected_corner_buttons(
 
 
 def _set_named_fonts(root: tk.Tk, family: str, size: int) -> None:
-    for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont"):
+    for name in (
+        "TkDefaultFont",
+        "TkTextFont",
+        "TkFixedFont",
+        "TkMenuFont",
+        "TkHeadingFont",
+    ):
         try:
             tkfont.nametofont(name).configure(family=family, size=size)
         except tk.TclError:
@@ -386,14 +396,28 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     style.configure(".", background=base_bg, foreground=text_fg)
     style.configure("TFrame", background=base_bg)
     style.configure("Accent.TFrame", background=panel_bg, borderwidth=1, relief="solid")
-    style.configure("TLabel", background=base_bg, foreground=text_fg, padding=(0, 0), font=base_font)
-    style.configure("Title.TLabel", font=title_font, foreground=accent, background=base_bg)
-    style.configure("Header.TLabel", font=header_font, foreground=accent, background=base_bg)
-    style.configure("Subheader.TLabel", font=subheader_font, foreground=text_fg, background=base_bg)
-    style.configure("Alert.TLabel", foreground="#b42318", background=base_bg, font=base_font)
+    style.configure(
+        "TLabel", background=base_bg, foreground=text_fg, padding=(0, 0), font=base_font
+    )
+    style.configure(
+        "Title.TLabel", font=title_font, foreground=accent, background=base_bg
+    )
+    style.configure(
+        "Header.TLabel", font=header_font, foreground=accent, background=base_bg
+    )
+    style.configure(
+        "Subheader.TLabel", font=subheader_font, foreground=text_fg, background=base_bg
+    )
+    style.configure(
+        "Alert.TLabel", foreground="#b42318", background=base_bg, font=base_font
+    )
     style.configure("Muted.TLabel", foreground="#94a3b8", background=base_bg)
-    style.configure("TRadiobutton", background=base_bg, foreground=text_fg, font=base_font)
-    style.configure("TCheckbutton", background=base_bg, foreground=text_fg, font=base_font)
+    style.configure(
+        "TRadiobutton", background=base_bg, foreground=text_fg, font=base_font
+    )
+    style.configure(
+        "TCheckbutton", background=base_bg, foreground=text_fg, font=base_font
+    )
 
     style.configure(
         "TButton",
