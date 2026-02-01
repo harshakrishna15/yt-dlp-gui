@@ -1,12 +1,12 @@
-## yt-dlp GUI
+## yt-dlp-gui
 
-A clean Tkinter desktop wrapper for `yt-dlp` that handles downloads without a command line.
+A front-end for `yt-dlp`. Paste a URL, pick a format, and download—no command line needed.
 
 ### Requirements
 
-- Python 3.10+ with Tk support (python.org builds include Tk)
+- Python 3.10+ with Tk support
 - `yt-dlp` (installed via `requirements.txt`)
-- FFmpeg (recommended; required for some merges/conversions)
+- FFmpeg
 
 ### Quick start
 
@@ -25,14 +25,14 @@ pip install -r requirements.txt
 3. Launch:
 
 ```bash
-python -m gui
+python3 run_gui.py
 ```
 
-Paste a URL, choose container/codec, select a format, and pick an output folder. Keep the window open until downloads finish; progress and errors appear in the UI.
+Paste a URL, choose container/codec, select a format, and pick an output folder. Keep the window open until downloads finish; progress and errors show in the UI.
 
 ### Playlists
 
-Enable **Download playlist** to grab all items from a playlist URL. To download only part of a playlist, enter item ranges in **Playlist items** (e.g., `1-5,7,10-`). Leave it blank to download the full playlist.
+Playlist URLs are supported. Use **Playlist items** to download a range (for example: `1-5,7,10-`). Leave it blank to download the whole playlist.
 
 ### FFmpeg
 
@@ -49,35 +49,3 @@ Install FFmpeg and ensure it’s on your `PATH`:
 - Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
 
 Note: FFmpeg is a system binary, so it is not listed in `requirements.txt`.
-
-### Convenience scripts
-
-- macOS: `scripts/setup_mac.sh`
-- Windows: `scripts/setup_windows.bat`
-- Linux: create a venv, install Tk, then install requirements:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-sudo apt-get install -y python3-tk
-pip install -r requirements.txt
-python run_gui.py
-```
-
-The scripts set up a venv and install dependencies. If your Python build lacks Tk, install a Tk-enabled build first. If you upgrade Python later, recreate the venv (or run `python3 -m venv --upgrade .venv`) so it tracks your current interpreter.
-
-### Running without activating the venv
-
-`run_gui.py` prefers the local `.venv` interpreter if present:
-
-```bash
-python run_gui.py
-```
-
-### Fonts
-
-The app ships with IBM Plex Mono in `font/` and registers it at runtime so the UI looks consistent even when the font isn’t installed system-wide.
-
-- Enforce IBM Plex Mono: `YTDLP_GUI_REQUIRE_PLEX_MONO=1`
-- Warn if missing: `YTDLP_GUI_WARN_MISSING_FONT=1`
-- Override family: `YTDLP_GUI_FONT_FAMILY="Menlo"`
