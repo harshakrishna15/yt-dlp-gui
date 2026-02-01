@@ -4,6 +4,24 @@ from tkinter import ttk
 from tkinter import font as tkfont
 
 
+def _safe_style_configure(style: ttk.Style, style_name: str, **kwargs: object) -> None:
+    """Configure only options supported by the active ttk theme."""
+    for key, value in kwargs.items():
+        try:
+            style.configure(style_name, **{key: value})
+        except tk.TclError:
+            continue
+
+
+def _safe_style_map(style: ttk.Style, style_name: str, **kwargs: object) -> None:
+    """Map only options supported by the active ttk theme."""
+    for key, value in kwargs.items():
+        try:
+            style.map(style_name, **{key: value})
+        except tk.TclError:
+            continue
+
+
 def _theme_image_cache(root: tk.Tk) -> list[tk.PhotoImage]:
     cache = getattr(root, "_ytdlp_gui_theme_images", None)
     if cache is None:
@@ -30,6 +48,14 @@ def _make_rect_border_image(
     return img
 
 
+def _make_solid_image(root: tk.Tk, *, fill: str, size: int = 7) -> tk.PhotoImage:
+    """Create a simple solid rectangle (no border)."""
+    size = max(3, int(size))
+    img = tk.PhotoImage(master=root, width=size, height=size)
+    img.put(fill, to=(0, 0, size, size))
+    return img
+
+
 def _pick_first_existing(candidates: tuple[str, ...], available: set[str]) -> str | None:
     for name in candidates:
         if name in available:
@@ -47,22 +73,28 @@ def _apply_connected_corner_fields(
     disabled_fill: str,
     disabled_border: str,
 ) -> None:
-    """Override Entry/Combobox field elements so rectangle corners join cleanly."""
+    """Override Entry/Combobox field elements for clean, borderless fields."""
     available = set(style.element_names())
 
-    entry_padding = _pick_first_existing(("Entry.padding",), available)
-    entry_textarea = _pick_first_existing(("Entry.textarea",), available)
-    combo_padding = _pick_first_existing(("Combobox.padding",), available)
-    combo_textarea = _pick_first_existing(("Combobox.textarea",), available)
-    combo_arrow = _pick_first_existing(("Combobox.downarrow", "Combobox.arrow"), available)
+    entry_textarea = _pick_first_existing(("Entry.textarea", "Entry.field"), available)
+    combo_textarea = _pick_first_existing(
+        ("Combobox.textarea", "Combobox.textfield", "Combobox.field"), available
+    )
+    combo_arrow = _pick_first_existing(
+        ("Combobox.downarrow", "Combobox.arrow"), available
+    )
 
-    if not all((entry_padding, entry_textarea, combo_padding, combo_textarea, combo_arrow)):
+    # Padding elements vary by theme; keep optional and fall back to the textarea directly.
+    entry_padding = _pick_first_existing(("Entry.padding", "Entry.border"), available)
+    combo_padding = _pick_first_existing(("Combobox.padding", "Combobox.border"), available)
+
+    if not all((entry_textarea, combo_textarea, combo_arrow)):
         return
 
     cache = _theme_image_cache(root)
-    normal_img = _make_rect_border_image(root, fill=fill, border=border)
-    focus_img = _make_rect_border_image(root, fill=fill, border=focus_border)
-    disabled_img = _make_rect_border_image(root, fill=disabled_fill, border=disabled_border)
+    normal_img = _make_solid_image(root, fill=fill)
+    focus_img = _make_solid_image(root, fill=fill)
+    disabled_img = _make_solid_image(root, fill=disabled_fill)
     cache.extend([normal_img, focus_img, disabled_img])
 
     try:
@@ -72,7 +104,7 @@ def _apply_connected_corner_fields(
             normal_img,
             ("focus", focus_img),
             ("disabled", disabled_img),
-            border=1,
+            border=0,
             sticky="nsew",
         )
         style.element_create(
@@ -81,14 +113,14 @@ def _apply_connected_corner_fields(
             normal_img,
             ("focus", focus_img),
             ("disabled", disabled_img),
-            border=1,
+            border=0,
             sticky="nsew",
         )
     except tk.TclError:
         # Element names can only be created once per interpreter; ignore duplicates.
         pass
 
-    # Remove theme bevels and rely on the image element for a clean 1px rectangle.
+    # Remove theme bevels and rely on the image element for borderless fields.
     style.configure("TCombobox", relief="flat", borderwidth=0)
     style.configure("Dark.TEntry", relief="flat", borderwidth=0)
     style.configure("Placeholder.Dark.TEntry", relief="flat", borderwidth=0)
@@ -102,12 +134,16 @@ def _apply_connected_corner_fields(
                     "sticky": "nsew",
                     "children": [
                         (
-                            entry_padding,
+                            (entry_padding or entry_textarea),
                             {
                                 "sticky": "nsew",
-                                "children": [(entry_textarea, {"sticky": "nsew"})],
+                                "children": (
+                                    [(entry_textarea, {"sticky": "nsew"})]
+                                    if entry_padding
+                                    else []
+                                ),
                             },
-                        )
+                        ),
                     ],
                 },
             )
@@ -122,12 +158,16 @@ def _apply_connected_corner_fields(
                     "sticky": "nsew",
                     "children": [
                         (
-                            entry_padding,
+                            (entry_padding or entry_textarea),
                             {
                                 "sticky": "nsew",
-                                "children": [(entry_textarea, {"sticky": "nsew"})],
+                                "children": (
+                                    [(entry_textarea, {"sticky": "nsew"})]
+                                    if entry_padding
+                                    else []
+                                ),
                             },
-                        )
+                        ),
                     ],
                 },
             )
@@ -143,10 +183,14 @@ def _apply_connected_corner_fields(
                     "children": [
                         (combo_arrow, {"side": "right", "sticky": "ns"}),
                         (
-                            combo_padding,
+                            (combo_padding or combo_textarea),
                             {
                                 "sticky": "nsew",
-                                "children": [(combo_textarea, {"sticky": "nsew"})],
+                                "children": (
+                                    [(combo_textarea, {"sticky": "nsew"})]
+                                    if combo_padding
+                                    else []
+                                ),
                             },
                         ),
                     ],
@@ -184,7 +228,7 @@ def _apply_connected_corner_frames(
     except tk.TclError:
         pass
 
-    for frame_style in ("Accent.TFrame", "OutputPath.TFrame"):
+    for frame_style in ("Accent.TFrame",):
         style.configure(frame_style, relief="flat", borderwidth=0)
         style.layout(
             frame_style,
@@ -204,14 +248,12 @@ def _apply_connected_corner_buttons(
     root: tk.Tk,
     style: ttk.Style,
     *,
-    border: str,
-    focus_border: str,
     normal_fill: str,
     active_fill: str,
     pressed_fill: str,
     disabled_fill: str,
 ) -> None:
-    """Make buttons render as true rectangles with consistent connected corners."""
+    """Make buttons render as clean rectangles (no theme bevels)."""
     available = set(style.element_names())
     button_padding = _pick_first_existing(("Button.padding",), available)
     button_label = _pick_first_existing(("Button.label",), available)
@@ -219,37 +261,28 @@ def _apply_connected_corner_buttons(
         return
 
     cache = _theme_image_cache(root)
-    normal_img = _make_rect_border_image(root, fill=normal_fill, border=border)
-    active_img = _make_rect_border_image(root, fill=active_fill, border=border)
-    pressed_img = _make_rect_border_image(root, fill=pressed_fill, border=border)
-    disabled_img = _make_rect_border_image(root, fill=disabled_fill, border=border)
-    focus_img = _make_rect_border_image(root, fill=normal_fill, border=focus_border)
-    active_focus_img = _make_rect_border_image(root, fill=active_fill, border=focus_border)
-    pressed_focus_img = _make_rect_border_image(root, fill=pressed_fill, border=focus_border)
+    normal_img = _make_solid_image(root, fill=normal_fill)
+    active_img = _make_solid_image(root, fill=active_fill)
+    pressed_img = _make_solid_image(root, fill=pressed_fill)
+    disabled_img = _make_solid_image(root, fill=disabled_fill)
     cache.extend(
         [
             normal_img,
             active_img,
             pressed_img,
             disabled_img,
-            focus_img,
-            active_focus_img,
-            pressed_focus_img,
         ]
     )
 
     try:
         style.element_create(
-            "Ytdlp.Button.border",
+            "Ytdlp.Button.bg",
             "image",
             normal_img,
             ("disabled", disabled_img),
             ("pressed", pressed_img),
             ("active", active_img),
-            ("focus", focus_img),
-            ("pressed", "focus", pressed_focus_img),
-            ("active", "focus", active_focus_img),
-            border=1,
+            border=0,
             sticky="nsew",
         )
     except tk.TclError:
@@ -257,14 +290,13 @@ def _apply_connected_corner_buttons(
 
     # Remove theme bevels and rely on our image for borders/corners.
     style.configure("TButton", relief="flat", borderwidth=0)
-    style.configure("Accent.TButton", relief="flat", borderwidth=0)
 
-    for button_style in ("TButton", "Accent.TButton"):
+    for button_style in ("TButton",):
         style.layout(
             button_style,
             [
                 (
-                    "Ytdlp.Button.border",
+                    "Ytdlp.Button.bg",
                     {
                         "sticky": "nsew",
                         "children": [
@@ -358,16 +390,17 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     style.configure("Title.TLabel", font=title_font, foreground=accent, background=base_bg)
     style.configure("Header.TLabel", font=header_font, foreground=accent, background=base_bg)
     style.configure("Subheader.TLabel", font=subheader_font, foreground=text_fg, background=base_bg)
+    style.configure("Alert.TLabel", foreground="#b42318", background=base_bg, font=base_font)
     style.configure("Muted.TLabel", foreground="#94a3b8", background=base_bg)
     style.configure("TRadiobutton", background=base_bg, foreground=text_fg, font=base_font)
     style.configure("TCheckbutton", background=base_bg, foreground=text_fg, font=base_font)
 
     style.configure(
         "TButton",
-        padding=(6, 3),
+        padding=(8, 4),
         background=accent,
         foreground="#fdfaf5",
-        borderwidth=1,
+        borderwidth=0,
         font=base_font,
     )
     style.map(
@@ -376,17 +409,73 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         foreground=[("disabled", "#8b8b8b")],
     )
     style.configure(
+        "TEntry",
+        fieldbackground=entry_bg,
+        background=entry_bg,
+        foreground=text_fg,
+        insertcolor=text_fg,
+        relief="flat",
+        borderwidth=0,
+    )
+    # On some platforms/themes (notably "clam"), the entry still draws a 1px
+    # outline via border colors even when borderwidth is 0.
+    _safe_style_configure(
+        style,
+        "TEntry",
+        bordercolor=entry_bg,
+        lightcolor=entry_bg,
+        darkcolor=entry_bg,
+        focuscolor=entry_bg,
+    )
+    _safe_style_map(
+        style,
+        "TEntry",
+        bordercolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        lightcolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        darkcolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        focuscolor=[("focus", entry_bg), ("!focus", entry_bg)],
+    )
+    style.configure(
         "TCombobox",
         fieldbackground=entry_bg,
         background=entry_bg,
         foreground=text_fg,
         padding=(2, 2),
-        bordercolor=entry_border,
-        lightcolor=entry_border,
-        darkcolor=entry_border,
         arrowcolor=text_fg,
-        relief="solid",
-        borderwidth=1,
+        relief="flat",
+        borderwidth=0,
+    )
+    _safe_style_configure(
+        style,
+        "TCombobox",
+        bordercolor=entry_bg,
+        lightcolor=entry_bg,
+        darkcolor=entry_bg,
+        focuscolor=entry_bg,
+    )
+    _safe_style_map(
+        style,
+        "TCombobox",
+        bordercolor=[
+            ("focus", entry_bg),
+            ("!focus", entry_bg),
+            ("readonly", entry_bg),
+        ],
+        lightcolor=[
+            ("focus", entry_bg),
+            ("!focus", entry_bg),
+            ("readonly", entry_bg),
+        ],
+        darkcolor=[
+            ("focus", entry_bg),
+            ("!focus", entry_bg),
+            ("readonly", entry_bg),
+        ],
+        focuscolor=[
+            ("focus", entry_bg),
+            ("!focus", entry_bg),
+            ("readonly", entry_bg),
+        ],
     )
     # Ensure readonly comboboxes don't look "disabled"/greyed out.
     style.map(
@@ -401,11 +490,24 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         background=entry_bg,
         foreground=text_fg,
         insertcolor=text_fg,
-        bordercolor=entry_border,
-        lightcolor=entry_border,
-        darkcolor=entry_border,
-        relief="solid",
-        borderwidth=1,
+        relief="flat",
+        borderwidth=0,
+    )
+    _safe_style_configure(
+        style,
+        "Dark.TEntry",
+        bordercolor=entry_bg,
+        lightcolor=entry_bg,
+        darkcolor=entry_bg,
+        focuscolor=entry_bg,
+    )
+    _safe_style_map(
+        style,
+        "Dark.TEntry",
+        bordercolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        lightcolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        darkcolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        focuscolor=[("focus", entry_bg), ("!focus", entry_bg)],
     )
     style.configure(
         "Placeholder.Dark.TEntry",
@@ -413,23 +515,24 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         background=entry_bg,
         foreground="#94a3b8",
         insertcolor="#94a3b8",
-        bordercolor=entry_border,
-        lightcolor=entry_border,
-        darkcolor=entry_border,
-        relief="solid",
-        borderwidth=1,
+        relief="flat",
+        borderwidth=0,
     )
-    style.configure(
-        "Accent.TButton",
-        foreground="#fdfaf5",
-        background=accent,
-        padding=(8, 4),
-        borderwidth=1,
+    _safe_style_configure(
+        style,
+        "Placeholder.Dark.TEntry",
+        bordercolor=entry_bg,
+        lightcolor=entry_bg,
+        darkcolor=entry_bg,
+        focuscolor=entry_bg,
     )
-    style.map(
-        "Accent.TButton",
-        background=[("active", "#243c63"), ("disabled", "#e5e7eb")],
-        foreground=[("disabled", "#8b8b8b")],
+    _safe_style_map(
+        style,
+        "Placeholder.Dark.TEntry",
+        bordercolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        lightcolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        darkcolor=[("focus", entry_bg), ("!focus", entry_bg)],
+        focuscolor=[("focus", entry_bg), ("!focus", entry_bg)],
     )
     style.configure(
         "Card.TFrame",
@@ -455,8 +558,8 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     style.configure(
         "OutputPath.TFrame",
         background=panel_bg,
-        borderwidth=1,
-        relief="solid",
+        borderwidth=0,
+        relief="flat",
     )
     style.configure(
         "OutputPath.TLabel",
@@ -471,7 +574,7 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         style,
         fill=entry_bg,
         border=entry_border,
-        focus_border=accent,
+        focus_border=entry_border,
         disabled_fill="#e5e7eb",
         disabled_border="#d1d5db",
     )
@@ -479,8 +582,6 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     _apply_connected_corner_buttons(
         root,
         style,
-        border=entry_border,
-        focus_border=accent,
         normal_fill=accent,
         active_fill="#243c63",
         pressed_fill="#243c63",

@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from urllib.parse import parse_qs, urlparse
 
 # Timing/layout constants (keep UI behavior consistent and readable).
 FETCH_DEBOUNCE_MS = 600
@@ -29,9 +30,14 @@ class YtDlpGui:
         self._cancel_requested = False
         self.formats = FormatState()
         self._normalizing_url = False
+        self.is_playlist = False
+        self._mixed_prompt_active = False
+        self._pending_mixed_url = ""
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value="")  # "video" or "audio"
+        self.playlist_enabled_var = tk.BooleanVar(value=False)
+        self.playlist_items_var = tk.StringVar(value="")
         # These are filled after probing a URL.
         self.format_filter_var = tk.StringVar(value="")  # must choose mp4 or webm
         self.codec_filter_var = tk.StringVar(value="")  # must choose avc1 or av01
@@ -74,6 +80,10 @@ class YtDlpGui:
         # Cache grid info for widgets we may hide/show.
         self._widget_grid_info = {}
         for w in [
+            self.mixed_prompt_label,
+            self.mixed_prompt_frame,
+            self.playlist_label,
+            self.playlist_frame,
             self.container_label,
             self.container_combo,
             self.codec_label,
@@ -84,6 +94,9 @@ class YtDlpGui:
             self.format_combo,
         ]:
             self._widget_grid_info[w] = w.grid_info()
+
+        self._set_playlist_ui(False)
+        self._set_mixed_prompt_ui(False)
 
     def _set_combobox_enabled(self, combo: ttk.Combobox, enabled: bool) -> None:
         combo.configure(state="readonly" if enabled else "disabled")
@@ -108,8 +121,10 @@ class YtDlpGui:
             elif not widget.winfo_ismapped():
                 widget.grid()
         else:
-            if widget.winfo_manager():
+            try:
                 widget.grid_remove()
+            except Exception:
+                pass
 
     def _pick_folder(self) -> None:
         chosen = filedialog.askdirectory()
@@ -152,6 +167,57 @@ class YtDlpGui:
         finally:
             self._normalizing_url = False
 
+    def _is_mixed_url(self, url: str) -> bool:
+        try:
+            parsed = urlparse(url)
+            query = parse_qs(parsed.query)
+        except Exception:
+            return False
+        return bool(query.get("v")) and bool(query.get("list"))
+
+    def _strip_list_param(self, url: str) -> str:
+        try:
+            parsed = urlparse(url)
+            query = parse_qs(parsed.query)
+            if "list" in query:
+                query.pop("list", None)
+            if "index" in query:
+                query.pop("index", None)
+            if "start" in query:
+                query.pop("start", None)
+            from urllib.parse import urlencode
+
+            new_query = urlencode(query, doseq=True)
+            return parsed._replace(query=new_query).geturl()
+        except Exception:
+            return url
+
+    def _to_playlist_url(self, url: str) -> str:
+        try:
+            parsed = urlparse(url)
+            query = parse_qs(parsed.query)
+            list_id = (query.get("list") or [None])[0]
+            if not list_id:
+                return url
+            return parsed._replace(path="/playlist", query=f"list={list_id}").geturl()
+        except Exception:
+            return url
+
+    def _set_mixed_prompt_ui(self, show: bool) -> None:
+        self._mixed_prompt_active = show
+        self._set_widget_visible(self.mixed_prompt_label, show)
+        self._set_widget_visible(self.mixed_prompt_frame, show)
+
+    def _show_mixed_prompt(self, url: str) -> None:
+        self._pending_mixed_url = url
+        self._set_mixed_prompt_ui(True)
+        self._update_controls_state()
+
+    def _hide_mixed_prompt(self) -> None:
+        self._pending_mixed_url = ""
+        self._set_mixed_prompt_ui(False)
+        self._update_controls_state()
+
     def _log(self, message: str) -> None:
         self.logs.queue(message)
 
@@ -192,6 +258,14 @@ class YtDlpGui:
 
     def _on_url_change(self, force: bool = False) -> None:
         self._normalize_url_var()
+        self._set_playlist_ui(False)
+        url = self.url_var.get().strip()
+        if self._mixed_prompt_active and url == self._pending_mixed_url:
+            return
+        self._hide_mixed_prompt()
+        if url and self._is_mixed_url(url):
+            self._show_mixed_prompt(url)
+            return
         # Debounce format fetching when the URL changes.
         self._reset_format_selections()
         self._update_controls_state()
@@ -237,11 +311,25 @@ class YtDlpGui:
             self._log(f"Could not fetch formats: {exc}")
             self.root.after(0, lambda: self._set_formats([], error=True))
             return
+        entries = info.get("entries")
+        is_playlist = info.get("_type") == "playlist" or entries is not None
         formats = formats_mod.formats_from_info(info)
-        self.root.after(0, lambda: self._set_formats(formats))
+        self.root.after(0, lambda: self._set_formats(formats, is_playlist=is_playlist))
 
-    def _set_formats(self, formats: list[dict], error: bool = False) -> None:
+    def _set_formats(
+        self,
+        formats: list[dict],
+        error: bool = False,
+        is_playlist: bool = False,
+    ) -> None:
         self.formats.is_fetching = False
+        if not error:
+            if is_playlist:
+                self._set_playlist_ui(True)
+            else:
+                self._set_playlist_ui(False)
+        else:
+            self._set_playlist_ui(False)
         if error or not formats:
             if error:
                 self.formats.last_fetched_url = ""
@@ -392,6 +480,9 @@ class YtDlpGui:
         is_video_mode = mode == "video"
         mode_chosen = is_audio_mode or is_video_mode
         container_value = self.format_filter_var.get()
+        if is_audio_mode and container_value not in AUDIO_CONTAINERS:
+            self.format_filter_var.set(AUDIO_CONTAINERS[0])
+            container_value = self.format_filter_var.get()
         filter_chosen = (
             container_value in AUDIO_CONTAINERS if is_audio_mode else container_value in VIDEO_CONTAINERS
         )
@@ -446,7 +537,13 @@ class YtDlpGui:
         )
 
         # Start button
-        if base_ready and filter_chosen and format_selected and (is_audio_mode or codec_chosen):
+        if (
+            base_ready
+            and filter_chosen
+            and format_selected
+            and (is_audio_mode or codec_chosen)
+            and not self._mixed_prompt_active
+        ):
             self.start_button.state(["!disabled"])
         else:
             self.start_button.state(["disabled"])
@@ -457,6 +554,43 @@ class YtDlpGui:
             self.cancel_button.state(["!disabled"])
         else:
             self.cancel_button.state(["disabled"])
+
+        playlist_items_enabled = self.playlist_enabled_var.get() and not self.is_downloading
+        if playlist_items_enabled:
+            self.playlist_items_entry.configure(state="normal")
+        else:
+            self.playlist_items_entry.configure(state="disabled")
+
+    def _set_playlist_ui(self, is_playlist: bool) -> None:
+        self.is_playlist = is_playlist
+        self._set_widget_visible(self.playlist_label, is_playlist)
+        self._set_widget_visible(self.playlist_frame, is_playlist)
+        if is_playlist:
+            self.url_label.configure(text="Playlist URL")
+            self.playlist_enabled_var.set(True)
+            self.playlist_check.state(["disabled"])
+        else:
+            self.url_label.configure(text="Video URL")
+            self.playlist_enabled_var.set(False)
+            self.playlist_items_var.set("")
+            self.playlist_check.state(["!disabled"])
+        self._update_controls_state()
+
+    def _on_mixed_choose_playlist(self) -> None:
+        if not self._pending_mixed_url:
+            return
+        resolved_url = self._to_playlist_url(self._pending_mixed_url)
+        self._hide_mixed_prompt()
+        if resolved_url and resolved_url != self.url_var.get():
+            self.url_var.set(resolved_url)
+
+    def _on_mixed_choose_video(self) -> None:
+        if not self._pending_mixed_url:
+            return
+        resolved_url = self._strip_list_param(self._pending_mixed_url)
+        self._hide_mixed_prompt()
+        if resolved_url and resolved_url != self.url_var.get():
+            self.url_var.set(resolved_url)
 
     def _reset_progress_summary(self) -> None:
         self.progress_pct_var.set("0.0%")
@@ -556,6 +690,11 @@ class YtDlpGui:
         if getattr(self, "_title_placeholder_active", False):
             title_override_raw = ""
         title_override = title_override_raw or None
+        playlist_enabled = bool(self.playlist_enabled_var.get())
+        playlist_items = (self.playlist_items_var.get() or "").strip()
+        if playlist_enabled and title_override:
+            self._log("[info] Title override ignored for playlists.")
+            title_override = None
 
         download.run_download(
             url=url,
@@ -565,6 +704,8 @@ class YtDlpGui:
             format_filter=format_filter,
             convert_to_mp4=self.convert_to_mp4_var.get(),
             title_override=title_override,
+            playlist_enabled=playlist_enabled,
+            playlist_items=playlist_items or None,
             cancel_event=self._cancel_event,
             log=self._log,
             update_progress=lambda u: self.root.after(

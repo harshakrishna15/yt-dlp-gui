@@ -16,9 +16,10 @@ def fetch_info(url: str) -> dict:
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
+        "playlist_items": "1",
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=False, process=False)
+        return ydl.extract_info(url, download=False, process=True)
 
 def split_and_filter_formats(
     formats: list[FormatInfo],

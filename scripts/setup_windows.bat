@@ -4,8 +4,13 @@ set ROOT=%~dp0..
 pushd "%ROOT%"
 
 if not defined PYTHON set PYTHON=python
-echo Creating venv with %PYTHON%...
-%PYTHON% -m venv .venv
+if exist .venv (
+  echo Upgrading venv with %PYTHON%...
+  %PYTHON% -m venv --upgrade .venv
+) else (
+  echo Creating venv with %PYTHON%...
+  %PYTHON% -m venv .venv
+)
 call .venv\Scripts\activate.bat
 
 echo Upgrading pip...

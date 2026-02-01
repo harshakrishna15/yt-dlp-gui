@@ -5,8 +5,13 @@ cd "$ROOT"
 
 PYTHON_BIN="${PYTHON:-python3}"
 
-echo "Creating venv with $PYTHON_BIN..."
-$PYTHON_BIN -m venv .venv
+if [ -d ".venv" ]; then
+  echo "Upgrading venv with $PYTHON_BIN..."
+  $PYTHON_BIN -m venv --upgrade .venv
+else
+  echo "Creating venv with $PYTHON_BIN..."
+  $PYTHON_BIN -m venv .venv
+fi
 source .venv/bin/activate
 
 echo "Upgrading pip..."

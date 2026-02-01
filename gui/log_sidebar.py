@@ -121,11 +121,9 @@ class LogSidebar:
             state="disabled",
             background=self._palette["panel_bg"],
             foreground=self._text_fg,
-            relief="solid",
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground=self._entry_border,
-            highlightcolor=self._entry_border,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
         )
         scrollbar = ttk.Scrollbar(body, orient="vertical", command=self.text.yview)
         self.text.configure(
@@ -151,7 +149,9 @@ class LogSidebar:
         inner_w = max(1, w - (bw * 2))
         inner_h = max(1, h - (bw * 2))
         self.sidebar.coords(self._sidebar_window_item, bw, bw)
-        self.sidebar.itemconfigure(self._sidebar_window_item, width=inner_w, height=inner_h)
+        self.sidebar.itemconfigure(
+            self._sidebar_window_item, width=inner_w, height=inner_h
+        )
         self._redraw_sidebar_border(w, h)
 
     def _redraw_sidebar_border(self, w: int, h: int) -> None:
@@ -283,10 +283,16 @@ class LogSidebar:
         self._log_sidebar_width_target = min(
             420, max(260, min(max_width, int(width * 0.42)))
         )
-        if prev > 0 and self._log_sidebar_width_target > 0 and prev != self._log_sidebar_width_target:
+        if (
+            prev > 0
+            and self._log_sidebar_width_target > 0
+            and prev != self._log_sidebar_width_target
+        ):
             # Preserve the current visible fraction during resizes.
             frac = max(0.0, min(1.0, self._log_sidebar_width_current / float(prev)))
-            self._log_sidebar_width_current = frac * float(self._log_sidebar_width_target)
+            self._log_sidebar_width_current = frac * float(
+                self._log_sidebar_width_target
+            )
 
     def _sidebar_y_and_height(self) -> tuple[int, int]:
         root_h = self.root.winfo_height()
@@ -322,7 +328,11 @@ class LogSidebar:
 
         y, h = self._sidebar_y_and_height()
         # Slide the fixed-width sidebar by shifting it right as it closes.
-        shift = int(round(float(self._log_sidebar_width_target) - self._log_sidebar_width_current))
+        shift = int(
+            round(
+                float(self._log_sidebar_width_target) - self._log_sidebar_width_current
+            )
+        )
         shift = max(0, min(self._log_sidebar_width_target, shift))
         self.sidebar.place_configure(
             relx=1.0,
@@ -337,7 +347,9 @@ class LogSidebar:
             self._log_sidebar_after_id = None
             return
 
-        self._log_sidebar_after_id = self.root.after(SIDEBAR_ANIM_MS, self._sidebar_tick)
+        self._log_sidebar_after_id = self.root.after(
+            SIDEBAR_ANIM_MS, self._sidebar_tick
+        )
 
     def on_root_configure(self, event: tk.Event) -> None:
         if getattr(event, "widget", self.root) is not self.root:
@@ -441,7 +453,11 @@ class LogSidebar:
         self._set_unread(False)
 
     def shutdown(self) -> None:
-        for attr in ("_poll_after_id", "_layout_anim_after_id", "_log_sidebar_after_id"):
+        for attr in (
+            "_poll_after_id",
+            "_layout_anim_after_id",
+            "_log_sidebar_after_id",
+        ):
             after_id = getattr(self, attr, None)
             if not after_id:
                 continue

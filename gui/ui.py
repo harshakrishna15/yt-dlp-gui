@@ -94,31 +94,91 @@ def build_ui(app: object) -> LogSidebar:
         font=fonts["subheader"],
     ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 3))
 
-    ttk.Label(options, text="Video URL").grid(
+    url_label = ttk.Label(options, text="Video URL")
+    url_label.grid(
         column=0, row=1, sticky="w", padx=(0, 8), pady=2
     )
+    setattr(app, "url_label", url_label)
     url_frame = ttk.Frame(options)
     url_frame.grid(column=1, row=1, sticky="ew", pady=2)
     url_frame.columnconfigure(0, weight=1)
-    url_entry = ttk.Entry(url_frame, textvariable=getattr(app, "url_var"), style="Dark.TEntry")
+    url_entry = ttk.Entry(
+        url_frame, textvariable=getattr(app, "url_var"), style="Dark.TEntry"
+    )
     url_entry.grid(column=0, row=0, sticky="ew")
     ttk.Button(url_frame, text="Paste", command=getattr(app, "_paste_url")).grid(
         column=1, row=0, padx=(8, 0)
     )
     url_entry.focus()
 
+    mixed_prompt_label = ttk.Label(options, text="Playlist")
+    mixed_prompt_label.grid(column=0, row=2, sticky="w", padx=(0, 8), pady=2)
+    setattr(app, "mixed_prompt_label", mixed_prompt_label)
+    mixed_prompt_frame = ttk.Frame(options)
+    mixed_prompt_frame.grid(column=1, row=2, sticky="ew", pady=2)
+    mixed_prompt_frame.columnconfigure(0, weight=1)
+    setattr(app, "mixed_prompt_frame", mixed_prompt_frame)
+    mixed_prompt_text = ttk.Label(
+        mixed_prompt_frame,
+        text="Download playlist or video?",
+        style="Alert.TLabel",
+    )
+    mixed_prompt_text.grid(column=0, row=0, sticky="w")
+    mixed_prompt_buttons = ttk.Frame(mixed_prompt_frame)
+    mixed_prompt_buttons.grid(column=1, row=0, sticky="e", padx=(8, 0))
+    ttk.Button(
+        mixed_prompt_buttons,
+        text="Playlist",
+        command=getattr(app, "_on_mixed_choose_playlist"),
+    ).grid(column=0, row=0, padx=(0, 6))
+    ttk.Button(
+        mixed_prompt_buttons,
+        text="Video",
+        command=getattr(app, "_on_mixed_choose_video"),
+    ).grid(column=1, row=0)
+
+    playlist_label = ttk.Label(options, text="Playlist items")
+    playlist_label.grid(column=0, row=3, sticky="w", padx=(0, 8), pady=2)
+    setattr(app, "playlist_label", playlist_label)
+    playlist_frame = ttk.Frame(options)
+    playlist_frame.grid(column=1, row=3, sticky="ew", pady=2)
+    playlist_frame.columnconfigure(1, weight=1)
+    setattr(app, "playlist_frame", playlist_frame)
+    playlist_check = ttk.Checkbutton(
+        playlist_frame,
+        text="Download playlist",
+        variable=getattr(app, "playlist_enabled_var"),
+    )
+    playlist_check.grid(column=0, row=0, sticky="w", padx=(0, 10))
+    setattr(app, "playlist_check", playlist_check)
+    playlist_items_entry = ttk.Entry(
+        playlist_frame,
+        textvariable=getattr(app, "playlist_items_var"),
+        style="Dark.TEntry",
+    )
+    playlist_items_entry.grid(column=1, row=0, sticky="ew")
+    setattr(app, "playlist_items_entry", playlist_items_entry)
+    widgets.Tooltip(
+        root,
+        playlist_items_entry,
+        "Optional items/ranges (e.g., 1-5,7,10-). Leave blank for full playlist.",
+    )
+    getattr(app, "playlist_enabled_var").trace_add(
+        "write", lambda *_: getattr(app, "_update_controls_state")()
+    )
+
     ttk.Label(options, text="Output title").grid(
-        column=0, row=2, sticky="w", padx=(0, 8), pady=2
+        column=0, row=4, sticky="w", padx=(0, 8), pady=2
     )
     title_entry = ttk.Entry(
         options, textvariable=getattr(app, "title_override_var"), style="Dark.TEntry"
     )
-    title_entry.grid(column=1, row=2, sticky="ew", pady=2)
+    title_entry.grid(column=1, row=4, sticky="ew", pady=2)
     setattr(app, "title_entry", title_entry)
     init_title_placeholder(app)
 
     type_row = ttk.Frame(options)
-    type_row.grid(column=0, row=3, columnspan=2, sticky="ew", pady=2)
+    type_row.grid(column=0, row=5, columnspan=2, sticky="ew", pady=2)
     type_row.columnconfigure(1, weight=1)
     ttk.Label(type_row, text="Content Type").grid(
         column=0, row=0, sticky="w", padx=(0, 8)
@@ -141,11 +201,11 @@ def build_ui(app: object) -> LogSidebar:
     ).grid(column=1, row=0)
 
     container_label = ttk.Label(options, text="Container")
-    container_label.grid(column=0, row=4, sticky="w", padx=(0, 8), pady=2)
+    container_label.grid(column=0, row=6, sticky="w", padx=(0, 8), pady=2)
     setattr(app, "container_label", container_label)
 
     container_row = ttk.Frame(options)
-    container_row.grid(column=1, row=4, sticky="ew", pady=2)
+    container_row.grid(column=1, row=6, sticky="ew", pady=2)
     container_row.columnconfigure(0, weight=1)
     container_combo = ttk.Combobox(
         container_row,
@@ -176,11 +236,14 @@ def build_ui(app: object) -> LogSidebar:
     )
     getattr(app, "format_filter_var").trace_add(
         "write",
-        lambda *_: (getattr(app, "_apply_mode_formats")(), getattr(app, "_update_controls_state")()),
+        lambda *_: (
+            getattr(app, "_apply_mode_formats")(),
+            getattr(app, "_update_controls_state")(),
+        ),
     )
 
     codec_label = ttk.Label(options, text="Codec")
-    codec_label.grid(column=0, row=5, sticky="w", padx=(0, 8), pady=2)
+    codec_label.grid(column=0, row=7, sticky="w", padx=(0, 8), pady=2)
     setattr(app, "codec_label", codec_label)
 
     codec_combo = ttk.Combobox(
@@ -190,15 +253,18 @@ def build_ui(app: object) -> LogSidebar:
         state="readonly",
         width=15,
     )
-    codec_combo.grid(column=1, row=5, sticky="ew", pady=2)
+    codec_combo.grid(column=1, row=7, sticky="ew", pady=2)
     setattr(app, "codec_combo", codec_combo)
     getattr(app, "codec_filter_var").trace_add(
         "write",
-        lambda *_: (getattr(app, "_apply_mode_formats")(), getattr(app, "_update_controls_state")()),
+        lambda *_: (
+            getattr(app, "_apply_mode_formats")(),
+            getattr(app, "_update_controls_state")(),
+        ),
     )
 
     format_label = ttk.Label(options, text="Format")
-    format_label.grid(column=0, row=6, sticky="w", padx=(0, 8), pady=2)
+    format_label.grid(column=0, row=8, sticky="w", padx=(0, 8), pady=2)
     setattr(app, "format_label", format_label)
 
     format_combo = ttk.Combobox(
@@ -207,14 +273,14 @@ def build_ui(app: object) -> LogSidebar:
         values=getattr(app, "formats").filtered_labels,
         state="readonly",
     )
-    format_combo.grid(column=1, row=6, sticky="ew", pady=2)
+    format_combo.grid(column=1, row=8, sticky="ew", pady=2)
     setattr(app, "format_combo", format_combo)
 
     ttk.Label(options, text="Output folder").grid(
-        column=0, row=7, sticky="w", padx=(0, 8), pady=2
+        column=0, row=9, sticky="w", padx=(0, 8), pady=2
     )
     output_frame = ttk.Frame(options)
-    output_frame.grid(column=1, row=7, sticky="ew", pady=(1, 0))
+    output_frame.grid(column=1, row=9, sticky="ew", pady=(1, 0))
     output_frame.columnconfigure(0, weight=1)
     pill = ttk.Frame(output_frame, style="OutputPath.TFrame", padding=4)
     pill.grid(column=0, row=0, sticky="ew")
@@ -225,9 +291,9 @@ def build_ui(app: object) -> LogSidebar:
         anchor="w",
         style="OutputPath.TLabel",
     ).grid(column=0, row=0, sticky="ew")
-    ttk.Button(output_frame, text="Browse...", command=getattr(app, "_pick_folder")).grid(
-        column=1, row=0, padx=(8, 0), sticky="e"
-    )
+    ttk.Button(
+        output_frame, text="Browse...", command=getattr(app, "_pick_folder")
+    ).grid(column=1, row=0, padx=(8, 0), sticky="e")
 
     sep2 = ttk.Separator(main, orient="horizontal")
     sep2.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(1, 1))
@@ -248,7 +314,6 @@ def build_ui(app: object) -> LogSidebar:
         buttons,
         text="Start download",
         command=getattr(app, "_on_start"),
-        style="Accent.TButton",
     )
     start_button.grid(column=0, row=0, sticky="e")
     setattr(app, "start_button", start_button)

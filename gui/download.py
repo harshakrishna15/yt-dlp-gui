@@ -27,6 +27,8 @@ def build_ydl_opts(
     format_filter: str,
     convert_to_mp4: bool,
     title_override: str | None,
+    playlist_enabled: bool,
+    playlist_items: str | None,
     cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
@@ -88,11 +90,12 @@ def build_ydl_opts(
         ]
         pp_args = ["-movflags", "+faststart"]
 
-    outtmpl = (
-        str(output_dir / f"{_sanitize_filename_base(title_override)}.%(ext)s")
-        if title_override
-        else str(output_dir / "%(title)s.%(ext)s")
-    )
+    if title_override:
+        outtmpl = str(output_dir / f"{_sanitize_filename_base(title_override)}.%(ext)s")
+    elif playlist_enabled:
+        outtmpl = str(output_dir / "%(playlist_index)s - %(title)s.%(ext)s")
+    else:
+        outtmpl = str(output_dir / "%(title)s.%(ext)s")
 
     log(f"[start] {url}")
     if fmt_label:
@@ -102,11 +105,14 @@ def build_ydl_opts(
         "outtmpl": outtmpl,
         "format": fmt,
         "progress_hooks": [_progress_hook_factory(log, update_progress, cancel_event)],
-        "noplaylist": False,
+        "noplaylist": not playlist_enabled,
         "merge_output_format": merge_output_format,
         "postprocessors": postprocessors,
         "postprocessor_args": pp_args,
     }
+    if playlist_enabled and playlist_items:
+        opts["playlist_items"] = playlist_items
+    return opts
 
 
 def run_download(
@@ -117,6 +123,8 @@ def run_download(
     format_filter: str,
     convert_to_mp4: bool,
     title_override: str | None,
+    playlist_enabled: bool,
+    playlist_items: str | None,
     cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
@@ -130,6 +138,8 @@ def run_download(
         format_filter=format_filter,
         convert_to_mp4=convert_to_mp4,
         title_override=title_override,
+        playlist_enabled=playlist_enabled,
+        playlist_items=playlist_items,
         cancel_event=cancel_event,
         log=log,
         update_progress=update_progress,

@@ -8,5 +8,9 @@ from .shared_types import FormatInfo
 def formats_from_info(info: dict[str, Any]) -> list[FormatInfo]:
     entry: dict[str, Any] = info
     if info.get("_type") == "playlist" and info.get("entries"):
-        entry = info["entries"][0] or {}
+        entries = info.get("entries")
+        try:
+            entry = next(iter(entries), {}) if entries is not None else {}
+        except TypeError:
+            entry = {}
     return entry.get("formats") or []
