@@ -59,6 +59,9 @@ def build_ui(app: object) -> LogSidebar:
     main = scroll.content
     main.columnconfigure(1, weight=1)
 
+    header_padx = 6
+    label_padx = 6
+    input_padx = 6
     options = ttk.Frame(main, padding=6, style="Card.TFrame")
     options.grid(column=0, row=0, columnspan=2, sticky="ew", pady=(0, 3))
     options.columnconfigure(1, weight=1)
@@ -67,20 +70,19 @@ def build_ui(app: object) -> LogSidebar:
         text="Download Options",
         style="Subheader.TLabel",
         font=fonts["subheader"],
-    ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 3))
+    ).grid(column=0, row=0, columnspan=2, sticky="w", padx=header_padx, pady=(0, 3))
 
     url_label = ttk.Label(options, text="Video URL")
-    url_label.grid(
-        column=0, row=1, sticky="w", padx=(0, 8), pady=2
-    )
+    url_label.grid(column=0, row=1, sticky="w", padx=(label_padx, 8), pady=2)
     setattr(app, "url_label", url_label)
     url_frame = ttk.Frame(options)
-    url_frame.grid(column=1, row=1, sticky="ew", pady=2)
+    url_frame.grid(column=1, row=1, sticky="ew", padx=(input_padx, 0), pady=2)
     url_frame.columnconfigure(0, weight=1)
     url_entry = ttk.Entry(
         url_frame, textvariable=getattr(app, "url_var"), style="Dark.TEntry"
     )
     url_entry.grid(column=0, row=0, sticky="ew")
+
     def _select_all(_event: tk.Event) -> str:
         url_entry.selection_range(0, "end")
         url_entry.icursor("end")
@@ -88,16 +90,18 @@ def build_ui(app: object) -> LogSidebar:
 
     url_entry.bind("<Control-a>", _select_all, add=True)
     url_entry.bind("<Command-a>", _select_all, add=True)
-    paste_button = ttk.Button(url_frame, text="Paste", command=getattr(app, "_paste_url"))
+    paste_button = ttk.Button(
+        url_frame, text="Paste", command=getattr(app, "_paste_url")
+    )
     paste_button.grid(column=1, row=0, padx=(8, 0))
     setattr(app, "paste_button", paste_button)
     url_entry.focus()
 
     mixed_prompt_label = ttk.Label(options, text="Playlist")
-    mixed_prompt_label.grid(column=0, row=2, sticky="w", padx=(0, 8), pady=2)
+    mixed_prompt_label.grid(column=0, row=2, sticky="w", padx=(label_padx, 8), pady=2)
     setattr(app, "mixed_prompt_label", mixed_prompt_label)
     mixed_prompt_frame = ttk.Frame(options)
-    mixed_prompt_frame.grid(column=1, row=2, sticky="ew", pady=2)
+    mixed_prompt_frame.grid(column=1, row=2, sticky="ew", padx=(input_padx, 0), pady=2)
     mixed_prompt_frame.columnconfigure(0, weight=1)
     setattr(app, "mixed_prompt_frame", mixed_prompt_frame)
     mixed_prompt_text = ttk.Label(
@@ -120,10 +124,10 @@ def build_ui(app: object) -> LogSidebar:
     ).grid(column=1, row=0)
 
     playlist_label = ttk.Label(options, text="Playlist items")
-    playlist_label.grid(column=0, row=3, sticky="w", padx=(0, 8), pady=2)
+    playlist_label.grid(column=0, row=3, sticky="w", padx=(label_padx, 8), pady=2)
     setattr(app, "playlist_label", playlist_label)
     playlist_frame = ttk.Frame(options)
-    playlist_frame.grid(column=1, row=3, sticky="ew", pady=2)
+    playlist_frame.grid(column=1, row=3, sticky="ew", padx=(input_padx, 0), pady=2)
     playlist_frame.columnconfigure(1, weight=1)
     setattr(app, "playlist_frame", playlist_frame)
     playlist_check = ttk.Label(playlist_frame, text="Items")
@@ -144,35 +148,36 @@ def build_ui(app: object) -> LogSidebar:
         "write", lambda *_: getattr(app, "_update_controls_state")()
     )
 
-    type_row = ttk.Frame(options)
-    type_row.grid(column=0, row=4, columnspan=2, sticky="ew", pady=2)
-    type_row.columnconfigure(1, weight=1)
-    ttk.Label(type_row, text="Content Type").grid(
-        column=0, row=0, sticky="w", padx=(0, 8)
+    ttk.Label(options, text="Content Type").grid(
+        column=0, row=4, sticky="w", padx=(label_padx, 8), pady=2
     )
-    mode_frame = ttk.Frame(type_row)
-    mode_frame.grid(column=1, row=0, sticky="w")
-    ttk.Radiobutton(
+    mode_frame = ttk.Frame(options)
+    mode_frame.grid(column=1, row=4, sticky="w", padx=(input_padx, 0), pady=2)
+    video_mode_radio = ttk.Radiobutton(
         mode_frame,
         text="Video and Audio",
         variable=getattr(app, "mode_var"),
         value="video",
         command=getattr(app, "_on_mode_change"),
-    ).grid(column=0, row=0, padx=(0, 12))
-    ttk.Radiobutton(
+    )
+    video_mode_radio.grid(column=0, row=0, padx=(0, 12))
+    setattr(app, "video_mode_radio", video_mode_radio)
+    audio_mode_radio = ttk.Radiobutton(
         mode_frame,
         text="Audio Only",
         variable=getattr(app, "mode_var"),
         value="audio",
         command=getattr(app, "_on_mode_change"),
-    ).grid(column=1, row=0)
+    )
+    audio_mode_radio.grid(column=1, row=0)
+    setattr(app, "audio_mode_radio", audio_mode_radio)
 
     container_label = ttk.Label(options, text="Container")
-    container_label.grid(column=0, row=5, sticky="w", padx=(0, 8), pady=2)
+    container_label.grid(column=0, row=5, sticky="w", padx=(label_padx, 8), pady=2)
     setattr(app, "container_label", container_label)
 
     container_row = ttk.Frame(options)
-    container_row.grid(column=1, row=5, sticky="ew", pady=2)
+    container_row.grid(column=1, row=5, sticky="ew", padx=(input_padx, 0), pady=2)
     container_row.columnconfigure(0, weight=1)
     container_combo = ttk.Combobox(
         container_row,
@@ -210,7 +215,7 @@ def build_ui(app: object) -> LogSidebar:
     )
 
     codec_label = ttk.Label(options, text="Codec")
-    codec_label.grid(column=0, row=6, sticky="w", padx=(0, 8), pady=2)
+    codec_label.grid(column=0, row=6, sticky="w", padx=(label_padx, 8), pady=2)
     setattr(app, "codec_label", codec_label)
 
     codec_combo = ttk.Combobox(
@@ -220,7 +225,7 @@ def build_ui(app: object) -> LogSidebar:
         state="readonly",
         width=15,
     )
-    codec_combo.grid(column=1, row=6, sticky="ew", pady=2)
+    codec_combo.grid(column=1, row=6, sticky="ew", padx=(input_padx, 0), pady=2)
     setattr(app, "codec_combo", codec_combo)
     getattr(app, "codec_filter_var").trace_add(
         "write",
@@ -231,7 +236,7 @@ def build_ui(app: object) -> LogSidebar:
     )
 
     format_label = ttk.Label(options, text="Format")
-    format_label.grid(column=0, row=7, sticky="w", padx=(0, 8), pady=2)
+    format_label.grid(column=0, row=7, sticky="w", padx=(label_padx, 8), pady=2)
     setattr(app, "format_label", format_label)
 
     format_combo = ttk.Combobox(
@@ -240,17 +245,17 @@ def build_ui(app: object) -> LogSidebar:
         values=getattr(app, "formats").filtered_labels,
         state="readonly",
     )
-    format_combo.grid(column=1, row=7, sticky="ew", pady=2)
+    format_combo.grid(column=1, row=7, sticky="ew", padx=(input_padx, 0), pady=2)
     setattr(app, "format_combo", format_combo)
     getattr(app, "format_var").trace_add(
         "write", lambda *_: getattr(app, "_update_controls_state")()
     )
 
     ttk.Label(options, text="Output folder").grid(
-        column=0, row=8, sticky="w", padx=(0, 8), pady=2
+        column=0, row=8, sticky="w", padx=(label_padx, 8), pady=2
     )
     output_frame = ttk.Frame(options)
-    output_frame.grid(column=1, row=8, sticky="ew", pady=(1, 0))
+    output_frame.grid(column=1, row=8, sticky="ew", padx=(input_padx, 0), pady=(1, 0))
     output_frame.columnconfigure(0, weight=1)
     pill = ttk.Frame(output_frame, style="OutputPath.TFrame", padding=4)
     pill.grid(column=0, row=0, sticky="ew")
@@ -275,12 +280,15 @@ def build_ui(app: object) -> LogSidebar:
     controls.columnconfigure(0, weight=1)
     ttk.Label(
         controls, text="Controls", style="Subheader.TLabel", font=fonts["subheader"]
-    ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 3))
-    ttk.Label(controls, textvariable=getattr(app, "simple_state_var")).grid(
-        column=0, row=1, sticky="w"
+    ).grid(column=0, row=0, columnspan=2, sticky="w", padx=header_padx, pady=(0, 3))
+    controls_row = ttk.Frame(controls, style="Card.TFrame", padding=3)
+    controls_row.grid(column=0, row=1, columnspan=2, sticky="ew")
+    controls_row.columnconfigure(0, weight=1)
+    ttk.Label(controls_row, textvariable=getattr(app, "simple_state_var")).grid(
+        column=0, row=0, sticky="w", padx=(label_padx, 0)
     )
-    buttons = ttk.Frame(controls, style="Card.TFrame", padding=0)
-    buttons.grid(column=1, row=1, sticky="e")
+    buttons = ttk.Frame(controls_row, style="Card.TFrame", padding=0)
+    buttons.grid(column=1, row=0, sticky="e")
 
     start_button = ttk.Button(
         buttons,
@@ -314,31 +322,36 @@ def build_ui(app: object) -> LogSidebar:
     cancel_button.grid(column=3, row=0, sticky="e", padx=(8, 0))
     setattr(app, "cancel_button", cancel_button)
 
-    progress_frame = ttk.Frame(controls, padding=3, style="Card.TFrame")
+    progress_frame = ttk.Frame(controls, padding=(0, 3), style="Card.TFrame")
     progress_frame.grid(column=0, row=2, columnspan=2, sticky="ew", pady=(4, 0))
     ttk.Label(
         progress_frame,
         text="Progress",
         style="Subheader.TLabel",
         font=fonts["subheader"],
-    ).grid(column=0, row=0, sticky="w", pady=(0, 3))
+    ).grid(column=0, row=0, sticky="w", padx=header_padx, pady=(0, 3))
     summary = ttk.Frame(progress_frame, padding=0, style="Card.TFrame")
     summary.grid(column=0, row=1, sticky="ew")
+    summary.columnconfigure(0, minsize=90)
     summary.columnconfigure(1, weight=1)
 
-    ttk.Label(summary, text="Item").grid(column=0, row=0, sticky="w", padx=(0, 6))
-    ttk.Label(summary, textvariable=getattr(app, "progress_item_var")).grid(
-        column=1, row=0, sticky="w"
+    progress_item_label = ttk.Label(summary, text="Item")
+    progress_item_label.grid(column=0, row=0, sticky="w", padx=(label_padx, 6))
+    setattr(app, "progress_item_label", progress_item_label)
+    progress_item_value = ttk.Label(
+        summary, textvariable=getattr(app, "progress_item_var")
     )
-    ttk.Label(summary, text="Progress").grid(column=0, row=1, sticky="w", padx=(0, 6))
+    progress_item_value.grid(column=1, row=0, sticky="w")
+    setattr(app, "progress_item_value", progress_item_value)
+    ttk.Label(summary, text="Progress").grid(column=0, row=1, sticky="w", padx=(label_padx, 6))
     ttk.Label(summary, textvariable=getattr(app, "progress_pct_var")).grid(
         column=1, row=1, sticky="w"
     )
-    ttk.Label(summary, text="Speed").grid(column=0, row=2, sticky="w", padx=(0, 6))
+    ttk.Label(summary, text="Speed").grid(column=0, row=2, sticky="w", padx=(label_padx, 6))
     ttk.Label(summary, textvariable=getattr(app, "progress_speed_var")).grid(
         column=1, row=2, sticky="w"
     )
-    ttk.Label(summary, text="ETA").grid(column=0, row=3, sticky="w", padx=(0, 6))
+    ttk.Label(summary, text="ETA").grid(column=0, row=3, sticky="w", padx=(label_padx, 6))
     ttk.Label(summary, textvariable=getattr(app, "progress_eta_var")).grid(
         column=1, row=3, sticky="w"
     )
@@ -374,4 +387,6 @@ def build_ui(app: object) -> LogSidebar:
         entry_border=entry_border,
         fonts=fonts,
     )
+    queue_panel.set_on_open(logs_panel.close)
+    logs_panel.set_on_open(queue_panel.close)
     return logs_panel

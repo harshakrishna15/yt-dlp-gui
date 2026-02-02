@@ -57,6 +57,7 @@ class YtDlpGui:
         self.progress_speed_var = tk.StringVar(value="—")
         self.progress_eta_var = tk.StringVar(value="—")
         self.progress_item_var = tk.StringVar(value="—")
+        self._show_progress_item = False
 
         self.logs = ui.build_ui(self)
         self.queue_panel.refresh(self.queue_items)
@@ -99,6 +100,8 @@ class YtDlpGui:
             self.convert_mp4_check,
             self.format_label,
             self.format_combo,
+            self.progress_item_label,
+            self.progress_item_value,
         ]:
             self._widget_grid_info[w] = w.grid_info()
 
@@ -685,6 +688,16 @@ class YtDlpGui:
         else:
             self.playlist_items_entry.configure(state="disabled")
 
+        if url_present and not self.is_downloading and has_formats_data:
+            self.video_mode_radio.state(["!disabled"])
+            self.audio_mode_radio.state(["!disabled"])
+        else:
+            self.video_mode_radio.state(["disabled"])
+            self.audio_mode_radio.state(["disabled"])
+
+        self._set_widget_visible(self.progress_item_label, self._show_progress_item)
+        self._set_widget_visible(self.progress_item_value, self._show_progress_item)
+
         if self.is_downloading:
             self.browse_button.state(["disabled"])
             self.paste_button.state(["disabled"])
@@ -748,6 +761,8 @@ class YtDlpGui:
                 if eta_clean and eta_clean != "—":
                     self.progress_eta_var.set(eta_clean)
         elif status == "item":
+            if not self._show_progress_item:
+                return
             item = update.get("item")
             if isinstance(item, str) and item.strip():
                 self.progress_item_var.set(item.strip())
@@ -790,6 +805,7 @@ class YtDlpGui:
         self.is_downloading = True
         self._cancel_requested = False
         self._cancel_event = threading.Event()
+        self._show_progress_item = bool(self.playlist_enabled_var.get() and self.is_playlist)
         self.simple_state_var.set("Downloading")
         self.status_var.set("Downloading...")
         self.logs.clear()
@@ -910,6 +926,7 @@ class YtDlpGui:
                 "fmt_info": lookup.get(label) or {"custom_format": "bestaudio/best"},
                 "format_filter": format_filter,
                 "is_playlist": info.get("_type") == "playlist" or info.get("entries") is not None,
+                "title": info.get("title") or url,
             }
 
         labels = [label for label, _ in video_labeled]
@@ -973,6 +990,7 @@ class YtDlpGui:
             "fmt_info": filtered_lookup.get(label) or {"custom_format": "best"},
             "format_filter": format_filter,
             "is_playlist": info.get("_type") == "playlist" or info.get("entries") is not None,
+            "title": info.get("title") or url,
         }
 
     def _start_queue_download(self) -> None:
@@ -1010,6 +1028,7 @@ class YtDlpGui:
         self.queue_index = 0
         self.queue_settings = None
         self.is_downloading = True
+        self._show_progress_item = True
         self._cancel_requested = False
         self._cancel_event = threading.Event()
         self.simple_state_var.set("Downloading queue")
@@ -1037,14 +1056,22 @@ class YtDlpGui:
         self._queue_refresh()
         self.download_thread = threading.Thread(
             target=self._run_queue_download,
-            kwargs={"url": url, "settings": settings},
+            kwargs={
+                "url": url,
+                "settings": settings,
+                "index": self.queue_index + 1,
+                "total": total,
+            },
             daemon=True,
         )
         self.download_thread.start()
 
-    def _run_queue_download(self, url: str, settings: dict) -> None:
+    def _run_queue_download(self, url: str, settings: dict, index: int, total: int) -> None:
         try:
             resolved = self._resolve_format_for_url(url, settings)
+            title = resolved.get("title") or url
+            item_text = f"{index}/{total} {title}"
+            self.root.after(0, lambda: self.progress_item_var.set(item_text))
             output_dir = Path(settings.get("output_dir") or self.output_dir_var.get()).expanduser()
             output_dir.mkdir(parents=True, exist_ok=True)
             playlist_enabled = bool(resolved.get("is_playlist"))
@@ -1093,6 +1120,7 @@ class YtDlpGui:
         self.queue_index = None
         self.queue_settings = None
         self.is_downloading = False
+        self._show_progress_item = False
         self._cancel_requested = False
         self._cancel_event = None
         self.simple_state_var.set("Idle")
@@ -1133,6 +1161,7 @@ class YtDlpGui:
         self.is_downloading = False
         self._cancel_requested = False
         self._cancel_event = None
+        self._show_progress_item = False
         self.simple_state_var.set("Idle")
         self.status_var.set("Idle")
         self._reset_progress_summary()

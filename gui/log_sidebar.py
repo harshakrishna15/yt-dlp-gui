@@ -46,6 +46,7 @@ class LogSidebar:
         self._log_sidebar_margin = 0
         self._log_sidebar_manual_width: int | None = None
         self._logs_unread = False
+        self._on_open_cb: callable | None = None
 
         self._layout_anim_after_id: str | None = None
         self._layout_target_lines: int | None = None
@@ -250,6 +251,8 @@ class LogSidebar:
             self.open()
 
     def open(self) -> None:
+        if self._on_open_cb is not None:
+            self._on_open_cb()
         self._log_sidebar_open = True
         self._recompute_sidebar_target()
         if self._log_sidebar_width_target <= 1:
@@ -274,6 +277,9 @@ class LogSidebar:
     def close(self) -> None:
         self._log_sidebar_open = False
         self._start_sidebar_animation()
+
+    def set_on_open(self, callback: callable | None) -> None:
+        self._on_open_cb = callback
 
     def _recompute_sidebar_target(self) -> None:
         prev = self._log_sidebar_width_target

@@ -44,6 +44,7 @@ class QueueSidebar:
         self._sidebar_width_current = 0.0
         self._sidebar_margin = 0
         self._sidebar_manual_width: int | None = None
+        self._on_open_cb: callable | None = None
 
         self._selected_index: int | None = None
         self._row_widgets: list[dict] = []
@@ -240,6 +241,8 @@ class QueueSidebar:
             self.open()
 
     def open(self) -> None:
+        if self._on_open_cb is not None:
+            self._on_open_cb()
         self._sidebar_open = True
         self._recompute_sidebar_target()
         if self._sidebar_width_target <= 1:
@@ -262,6 +265,9 @@ class QueueSidebar:
     def close(self) -> None:
         self._sidebar_open = False
         self._start_sidebar_animation()
+
+    def set_on_open(self, callback: callable | None) -> None:
+        self._on_open_cb = callback
 
     def _recompute_sidebar_target(self) -> None:
         prev = self._sidebar_width_target
