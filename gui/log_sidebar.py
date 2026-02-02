@@ -44,6 +44,7 @@ class LogSidebar:
         # to avoid internal layout reflow (which can cause button flicker/jank).
         self._log_sidebar_width_current = 0.0
         self._log_sidebar_margin = 0
+        self._log_sidebar_manual_width: int | None = None
         self._logs_unread = False
 
         self._layout_anim_after_id: str | None = None
@@ -280,9 +281,11 @@ class LogSidebar:
         if width <= 1:
             return
         max_width = max(200, width - (self._log_sidebar_margin * 2))
-        self._log_sidebar_width_target = min(
-            420, max(260, min(max_width, int(width * 0.42)))
-        )
+        if self._log_sidebar_manual_width is not None:
+            target = self._log_sidebar_manual_width
+        else:
+            target = int(width * 0.42)
+        self._log_sidebar_width_target = min(420, max(260, min(max_width, target)))
         if (
             prev > 0
             and self._log_sidebar_width_target > 0

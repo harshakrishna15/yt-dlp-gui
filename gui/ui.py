@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 
 from . import styles, widgets
 from .log_sidebar import LogSidebar
+from .queue_sidebar import QueueSidebar
 
 
 def build_ui(app: object) -> LogSidebar:
@@ -44,6 +45,8 @@ def build_ui(app: object) -> LogSidebar:
 
     logs_wrap = ttk.Frame(header_bar, style="Card.TFrame", padding=0)
     logs_wrap.grid(column=1, row=0, sticky="e")
+    logs_wrap.columnconfigure(0, weight=1)
+    logs_wrap.columnconfigure(1, weight=1)
 
     header_sep = ttk.Separator(root, orient="horizontal")
     header_sep.grid(column=0, row=1, sticky="ew")
@@ -85,9 +88,9 @@ def build_ui(app: object) -> LogSidebar:
 
     url_entry.bind("<Control-a>", _select_all, add=True)
     url_entry.bind("<Command-a>", _select_all, add=True)
-    ttk.Button(url_frame, text="Paste", command=getattr(app, "_paste_url")).grid(
-        column=1, row=0, padx=(8, 0)
-    )
+    paste_button = ttk.Button(url_frame, text="Paste", command=getattr(app, "_paste_url"))
+    paste_button.grid(column=1, row=0, padx=(8, 0))
+    setattr(app, "paste_button", paste_button)
     url_entry.focus()
 
     mixed_prompt_label = ttk.Label(options, text="Playlist")
@@ -239,6 +242,9 @@ def build_ui(app: object) -> LogSidebar:
     )
     format_combo.grid(column=1, row=7, sticky="ew", pady=2)
     setattr(app, "format_combo", format_combo)
+    getattr(app, "format_var").trace_add(
+        "write", lambda *_: getattr(app, "_update_controls_state")()
+    )
 
     ttk.Label(options, text="Output folder").grid(
         column=0, row=8, sticky="w", padx=(0, 8), pady=2
@@ -255,9 +261,11 @@ def build_ui(app: object) -> LogSidebar:
         anchor="w",
         style="OutputPath.TLabel",
     ).grid(column=0, row=0, sticky="ew")
-    ttk.Button(
+    browse_button = ttk.Button(
         output_frame, text="Browse...", command=getattr(app, "_pick_folder")
-    ).grid(column=1, row=0, padx=(8, 0), sticky="e")
+    )
+    browse_button.grid(column=1, row=0, padx=(8, 0), sticky="e")
+    setattr(app, "browse_button", browse_button)
 
     sep2 = ttk.Separator(main, orient="horizontal")
     sep2.grid(column=0, row=1, columnspan=2, sticky="ew", pady=(1, 1))
@@ -276,18 +284,34 @@ def build_ui(app: object) -> LogSidebar:
 
     start_button = ttk.Button(
         buttons,
-        text="Start download",
+        text="Download",
         command=getattr(app, "_on_start"),
     )
     start_button.grid(column=0, row=0, sticky="e")
     setattr(app, "start_button", start_button)
+
+    add_queue_button = ttk.Button(
+        buttons,
+        text="Add to queue",
+        command=getattr(app, "_on_add_to_queue"),
+    )
+    add_queue_button.grid(column=1, row=0, sticky="e", padx=(8, 0))
+    setattr(app, "add_queue_button", add_queue_button)
+
+    start_queue_button = ttk.Button(
+        buttons,
+        text="Download queue",
+        command=getattr(app, "_on_start_queue"),
+    )
+    start_queue_button.grid(column=2, row=0, sticky="e", padx=(8, 0))
+    setattr(app, "start_queue_button", start_queue_button)
 
     cancel_button = ttk.Button(
         buttons,
         text="Cancel",
         command=getattr(app, "_on_cancel"),
     )
-    cancel_button.grid(column=1, row=0, sticky="e", padx=(8, 0))
+    cancel_button.grid(column=3, row=0, sticky="e", padx=(8, 0))
     setattr(app, "cancel_button", cancel_button)
 
     progress_frame = ttk.Frame(controls, padding=3, style="Card.TFrame")
@@ -319,13 +343,35 @@ def build_ui(app: object) -> LogSidebar:
         column=1, row=3, sticky="w"
     )
 
-    return LogSidebar(
+    queue_wrap = ttk.Frame(logs_wrap, style="Card.TFrame", padding=0)
+    queue_wrap.grid(column=0, row=0, sticky="e", padx=(0, 6))
+    logs_button_wrap = ttk.Frame(logs_wrap, style="Card.TFrame", padding=0)
+    logs_button_wrap.grid(column=1, row=0, sticky="e")
+
+    queue_panel = QueueSidebar(
         root,
         header_bar=header_bar,
         header_sep=header_sep,
-        header_wrap=logs_wrap,
+        header_wrap=queue_wrap,
+        palette=palette,
+        text_fg=text_fg,
+        entry_border=entry_border,
+        fonts=fonts,
+        on_remove=getattr(app, "_queue_remove_selected"),
+        on_move_up=getattr(app, "_queue_move_up"),
+        on_move_down=getattr(app, "_queue_move_down"),
+        on_clear=getattr(app, "_queue_clear"),
+    )
+    setattr(app, "queue_panel", queue_panel)
+
+    logs_panel = LogSidebar(
+        root,
+        header_bar=header_bar,
+        header_sep=header_sep,
+        header_wrap=logs_button_wrap,
         palette=palette,
         text_fg=text_fg,
         entry_border=entry_border,
         fonts=fonts,
     )
+    return logs_panel
