@@ -34,6 +34,44 @@ Paste a URL, choose container/codec, select a format, and pick an output folder.
 
 Playlist URLs are supported. Use **Playlist items** to download a range (for example: `1-5,7,10-`). Leave it blank to download the whole playlist.
 
+### Downloadable app builds
+
+This repo includes a PyInstaller build config that produces:
+
+- macOS: `yt-dlp-gui.app` (zipped for distribution)
+- Windows: `yt-dlp-gui.exe` (zipped for distribution)
+
+#### Build locally (macOS)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install pyinstaller
+pyinstaller yt-dlp-gui.spec
+```
+
+Your app will be at `dist/yt-dlp-gui.app`.
+
+#### Build locally (Windows)
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pip install pyinstaller
+pyinstaller yt-dlp-gui.spec
+```
+
+Your app will be at `dist\yt-dlp-gui\yt-dlp-gui.exe`.
+
+#### GitHub Releases
+
+Publishing a GitHub Release runs the CI workflow and uploads:
+
+- `yt-dlp-gui-macos.zip`
+- `yt-dlp-gui-windows.zip`
+
 ### FFmpeg
 
 `yt-dlp` can download many formats without FFmpeg, but FFmpeg is needed for common operations:

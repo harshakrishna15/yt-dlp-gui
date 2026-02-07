@@ -37,14 +37,19 @@ def _make_rect_border_image(
     border: str,
     size: int = 7,
 ) -> tk.PhotoImage:
-    """Create a simple solid rectangle with a 1px border (connected corners)."""
-    size = max(3, int(size))
+    """Create a solid rectangle with a 1px border (connected corners)."""
+    size = max(1, int(size))
     img = tk.PhotoImage(master=root, width=size, height=size)
     img.put(fill, to=(0, 0, size, size))
     img.put(border, to=(0, 0, size, 1))  # top
     img.put(border, to=(0, size - 1, size, size))  # bottom
     img.put(border, to=(0, 0, 1, size))  # left
     img.put(border, to=(size - 1, 0, size, size))  # right
+    # Force the 4 corner pixels to the border color.
+    img.put(border, to=(0, 0, 1, 1))
+    img.put(border, to=(size - 1, 0, size, 1))
+    img.put(border, to=(0, size - 1, 1, size))
+    img.put(border, to=(size - 1, size - 1, size, size))
     return img
 
 
@@ -91,32 +96,48 @@ def _apply_connected_corner_fields(
     combo_padding = _pick_first_existing(
         ("Combobox.padding", "Combobox.border"), available
     )
+    if combo_padding == "Combobox.border":
+        combo_padding = None
 
     if not all((entry_textarea, combo_textarea, combo_arrow)):
         return
 
     cache = _theme_image_cache(root)
-    normal_img = _make_solid_image(root, fill=fill)
-    focus_img = _make_solid_image(root, fill=fill)
-    disabled_img = _make_solid_image(root, fill=disabled_fill)
-    cache.extend([normal_img, focus_img, disabled_img])
+    entry_normal = _make_solid_image(root, fill=fill)
+    entry_focus = _make_solid_image(root, fill=fill)
+    entry_disabled = _make_solid_image(root, fill=disabled_fill)
+    combo_normal = _make_rect_border_image(root, fill=fill, border=border)
+    combo_focus = _make_rect_border_image(root, fill=fill, border=focus_border)
+    combo_disabled = _make_rect_border_image(
+        root, fill=disabled_fill, border=disabled_border
+    )
+    cache.extend(
+        [
+            entry_normal,
+            entry_focus,
+            entry_disabled,
+            combo_normal,
+            combo_focus,
+            combo_disabled,
+        ]
+    )
 
     try:
         style.element_create(
             "Ytdlp.Entry.field",
             "image",
-            normal_img,
-            ("focus", focus_img),
-            ("disabled", disabled_img),
+            entry_normal,
+            ("focus", entry_focus),
+            ("disabled", entry_disabled),
             border=0,
             sticky="nsew",
         )
         style.element_create(
             "Ytdlp.Combobox.field",
             "image",
-            normal_img,
-            ("focus", focus_img),
-            ("disabled", disabled_img),
+            combo_normal,
+            ("focus", combo_focus),
+            ("disabled", combo_disabled),
             border=0,
             sticky="nsew",
         )
@@ -177,31 +198,34 @@ def _apply_connected_corner_fields(
             )
         ],
     )
-    style.layout(
-        "TCombobox",
-        [
-            (
-                "Ytdlp.Combobox.field",
-                {
-                    "sticky": "nsew",
-                    "children": [
-                        (combo_arrow, {"side": "right", "sticky": "ns"}),
-                        (
-                            (combo_padding or combo_textarea),
-                            {
-                                "sticky": "nsew",
-                                "children": (
-                                    [(combo_textarea, {"sticky": "nsew"})]
-                                    if combo_padding
-                                    else []
-                                ),
-                            },
-                        ),
-                    ],
-                },
-            )
-        ],
-    )
+    text_element = combo_textarea
+    if combo_textarea in ("Combobox.textfield", "Combobox.field"):
+        text_element = entry_textarea or combo_textarea
+
+    combo_layout = [
+        (
+            "Ytdlp.Combobox.field",
+            {
+                "sticky": "nsew",
+                "children": [
+                    (combo_arrow, {"side": "right", "sticky": "ns"}),
+                    (
+                        (combo_padding or text_element),
+                        {
+                            "sticky": "nsew",
+                            "children": (
+                                [(text_element, {"sticky": "nsew"})]
+                                if combo_padding
+                                else []
+                            ),
+                        },
+                    ),
+                ],
+            },
+        )
+    ]
+    style.layout("TCombobox", combo_layout)
+    style.layout("Clean.TCombobox", combo_layout)
 
 
 def _apply_connected_corner_frames(
@@ -421,7 +445,7 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
 
     style.configure(
         "TButton",
-        padding=(8, 4),
+        padding=(2, 2),
         background=accent,
         foreground="#fdfaf5",
         borderwidth=0,
@@ -469,45 +493,57 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         relief="flat",
         borderwidth=0,
     )
-    _safe_style_configure(
-        style,
-        "TCombobox",
-        bordercolor=entry_bg,
-        lightcolor=entry_bg,
-        darkcolor=entry_bg,
-        focuscolor=entry_bg,
+    style.configure(
+        "Clean.TCombobox",
+        fieldbackground=entry_bg,
+        background=entry_bg,
+        foreground=text_fg,
+        padding=(2, 2),
+        arrowcolor=text_fg,
+        relief="flat",
+        borderwidth=0,
     )
-    _safe_style_map(
-        style,
-        "TCombobox",
-        bordercolor=[
-            ("focus", entry_bg),
-            ("!focus", entry_bg),
-            ("readonly", entry_bg),
-        ],
-        lightcolor=[
-            ("focus", entry_bg),
-            ("!focus", entry_bg),
-            ("readonly", entry_bg),
-        ],
-        darkcolor=[
-            ("focus", entry_bg),
-            ("!focus", entry_bg),
-            ("readonly", entry_bg),
-        ],
-        focuscolor=[
-            ("focus", entry_bg),
-            ("!focus", entry_bg),
-            ("readonly", entry_bg),
-        ],
-    )
+    for combo_style in ("TCombobox", "Clean.TCombobox"):
+        _safe_style_configure(
+            style,
+            combo_style,
+            bordercolor=base_bg,
+            lightcolor=base_bg,
+            darkcolor=base_bg,
+            focuscolor=base_bg,
+        )
+        _safe_style_map(
+            style,
+            combo_style,
+            bordercolor=[
+                ("focus", base_bg),
+                ("!focus", base_bg),
+                ("readonly", base_bg),
+            ],
+            lightcolor=[
+                ("focus", base_bg),
+                ("!focus", base_bg),
+                ("readonly", base_bg),
+            ],
+            darkcolor=[
+                ("focus", base_bg),
+                ("!focus", base_bg),
+                ("readonly", base_bg),
+            ],
+            focuscolor=[
+                ("focus", base_bg),
+                ("!focus", base_bg),
+                ("readonly", base_bg),
+            ],
+        )
     # Ensure readonly comboboxes don't look "disabled"/greyed out.
-    style.map(
-        "TCombobox",
-        fieldbackground=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
-        background=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
-        foreground=[("disabled", "#8b8b8b")],
-    )
+    for combo_style in ("TCombobox", "Clean.TCombobox"):
+        style.map(
+            combo_style,
+            fieldbackground=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
+            background=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
+            foreground=[("disabled", "#8b8b8b")],
+        )
     style.configure(
         "Dark.TEntry",
         fieldbackground=entry_bg,
@@ -593,15 +629,8 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         font=base_font,
     )
 
-    _apply_connected_corner_fields(
-        root,
-        style,
-        fill=entry_bg,
-        border=entry_border,
-        focus_border=entry_border,
-        disabled_fill="#e5e7eb",
-        disabled_border="#d1d5db",
-    )
+    # Keep default theme combobox rendering; custom layout overrides were causing
+    # persistent outlines on some platforms.
     _apply_connected_corner_frames(root, style, fill=panel_bg, border=entry_border)
     _apply_connected_corner_buttons(
         root,
