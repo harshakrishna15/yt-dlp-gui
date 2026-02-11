@@ -33,7 +33,7 @@ Homebrew note: if Tk is missing, install the matching `python-tk` formula (for e
 Install before running:
 
 - macOS: `brew install ffmpeg`
-- Windows: `winget install -e --id Gyan.FFmpeg`
+- Windows: `winget install ffmpeg` (or `winget install -e --id Gyan.FFmpeg`)
 - Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
 
 ### Playlists
