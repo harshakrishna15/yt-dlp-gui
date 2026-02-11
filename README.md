@@ -1,58 +1,51 @@
 ## yt-dlp-gui
 
-A front-end for `yt-dlp`. Paste a URL, pick a format, and download—no command line needed.
+Small desktop UI for `yt-dlp`.
+Paste a URL, pick a format, and download without using the terminal.
+
+This is a hobby/personal-use project.
 
 ### Requirements
 
-- Python 3.10+ with Tk support
-- `yt-dlp` (installed via `requirements.txt`)
-- FFmpeg (optional for local dev if you place binaries in `bundled_tools/`)
+- Python 3.10+ (with Tk)
+- Dependencies in `requirements.txt` (includes Python `yt-dlp`)
+- `ffmpeg` and `ffprobe` available on your `PATH`
 
-### Quick start
+### Quick Start
 
 1. Install Python with Tk support.
-   - python.org builds include Tk.
-   - Homebrew users: install the `python-tk` formula matching your Python (example: `brew install python-tk@3.11`).
-
-2. Create a virtual environment and install dependencies:
+2. Create and activate a virtual environment.
+3. Install dependencies and run the app.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-3. Launch:
-
-```bash
 python3 run_gui.py
 ```
 
-Paste a URL, choose container/codec, select a format, and pick an output folder. Keep the window open until downloads finish; progress and errors show in the UI.
+Homebrew note: if Tk is missing, install the matching `python-tk` formula (for example `brew install python-tk@3.11`).
+
+### FFmpeg / FFprobe
+
+`yt-dlp` can download some formats without FFmpeg, but FFmpeg/FFprobe are needed for common tasks like merging streams and format conversion.
+
+Install before running:
+
+- macOS: `brew install ffmpeg`
+- Windows: `winget install -e --id Gyan.FFmpeg`
+- Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
 
 ### Playlists
 
-Playlist URLs are supported. Use **Playlist items** to download a range (for example: `1-5,7,10-`). Leave it blank to download the whole playlist.
+Playlist URLs work.  
+Use **Playlist items** for ranges like `1-5,7,10-`, or leave it blank for the full playlist.
 
-### Downloadable app builds
+### Building with PyInstaller
 
-This repo includes a PyInstaller build config that produces:
+This repo includes `yt-dlp-gui.spec`.
 
-- macOS: `yt-dlp-gui.app` (zipped for distribution)
-- Windows: `yt-dlp-gui.exe` (zipped for distribution)
-
-You can bundle binaries by placing them in `bundled_tools/` before building:
-
-- macOS/Linux: `bundled_tools/ffmpeg`, `bundled_tools/ffprobe`, `bundled_tools/yt-dlp`
-- Windows: `bundled_tools/ffmpeg.exe`, `bundled_tools/ffprobe.exe`, `bundled_tools/yt-dlp.exe`
-
-At runtime, the app resolves tools in this order:
-
-1. Bundled binaries (`tools/` inside the packaged app)
-2. System `PATH`
-3. For `yt-dlp`, the Python module fallback (`yt_dlp`)
-
-#### Build locally (macOS)
+macOS:
 
 ```bash
 python3 -m venv .venv
@@ -62,9 +55,9 @@ pip install pyinstaller
 pyinstaller yt-dlp-gui.spec
 ```
 
-Your app will be at `dist/yt-dlp-gui.app`.
+Output: `dist/yt-dlp-gui.app`
 
-#### Build locally (Windows)
+Windows:
 
 ```powershell
 py -3 -m venv .venv
@@ -74,27 +67,25 @@ pip install pyinstaller
 pyinstaller yt-dlp-gui.spec
 ```
 
-Your app will be at `dist\yt-dlp-gui\yt-dlp-gui.exe`.
+Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
 
-#### GitHub Releases
+### Support / Maintenance
 
-Publishing a GitHub Release runs the CI workflow and uploads:
+This project is built and maintained in my spare time.
 
-- `yt-dlp-gui-macos.zip`
-- `yt-dlp-gui-windows.zip`
+I might fix bugs or ship updates when I can, but there is no guaranteed timeline.
+I can't promise support, compatibility fixes, or long-term maintenance.
 
-### FFmpeg
+If you open an issue or PR, I'll take a look when I have time.
 
-`yt-dlp` can download many formats without FFmpeg, but FFmpeg is needed for common operations:
+### Legal / Usage
 
-- Merging separate video and audio streams
-- Re-encoding WebM → MP4 when “Convert to MP4” is enabled
-- Some container conversions and post-processing steps
+Only download content you are authorized to download.
+Platform terms can still restrict downloads even if the tool supports them.
+By using this app, you are responsible for complying with local law and platform terms.
 
-Install FFmpeg and ensure it’s on your `PATH` if you are not bundling it:
+For binary releases, include the notices/licenses files and publish the
+matching source tag for that build.
 
-- macOS: `brew install ffmpeg`
-- Windows: `choco install ffmpeg` (or install the official build and add `ffmpeg.exe` to `PATH`)
-- Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
-
-Note: FFmpeg is a native binary, so it is not listed in `requirements.txt`.
+See `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`,
+`licenses/mutagen-GPL-2.0-or-later.txt`, and `RELEASE_COMPLIANCE_CHECKLIST.md`.

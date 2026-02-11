@@ -12,7 +12,7 @@ PROGRESS_ANIM_MS = 33
 VIDEO_CONTAINERS = ("mp4", "webm")
 AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
 
-from . import download, formats as formats_mod, ui, yt_dlp_helpers as helpers
+from . import download, formats as formats_mod, ui, yt_dlp_helpers as helpers, tooling
 from .state import FormatState
 
 
@@ -73,6 +73,7 @@ class YtDlpGui:
         self.logs.on_root_configure(tk.Event())
         self.queue_panel.on_root_configure(tk.Event())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._safe_after(50, self._warn_missing_dependencies)
 
     def _cancel_after(self, attr_name: str, obj: object | None = None) -> None:
         target = obj if obj is not None else self
@@ -267,6 +268,24 @@ class YtDlpGui:
         )
         self._log(
             f"[toolchain] ffmpeg source={info['ffmpeg_source']} path={info['ffmpeg_path']}"
+        )
+        self._log(
+            f"[toolchain] ffprobe source={info['ffprobe_source']} path={info['ffprobe_path']}"
+        )
+
+    def _warn_missing_dependencies(self) -> None:
+        missing = tooling.missing_required_binaries()
+        if not missing:
+            return
+
+        missing_txt = ", ".join(missing)
+        self._log(f"[deps] missing binaries: {missing_txt}")
+        messagebox.showwarning(
+            "Missing dependencies",
+            "Some required binaries are missing:\n"
+            f"{missing_txt}\n\n"
+            "Please install required dependencies before using this app.\n"
+            "See README.md for setup instructions.",
         )
 
     def _on_mode_change(self) -> None:

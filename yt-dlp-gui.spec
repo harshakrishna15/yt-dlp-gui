@@ -1,31 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
 from pathlib import Path
 
 project_root = Path.cwd()
-binaries = []
-
-
-def add_tool_if_present(relative_path: str, target_dir: str = "tools") -> None:
-    src = project_root / relative_path
-    if src.exists():
-        binaries.append((str(src), target_dir))
-
-
-if os.name == "nt":
-    add_tool_if_present("bundled_tools/ffmpeg.exe")
-    add_tool_if_present("bundled_tools/ffprobe.exe")
-    add_tool_if_present("bundled_tools/yt-dlp.exe")
-else:
-    add_tool_if_present("bundled_tools/ffmpeg")
-    add_tool_if_present("bundled_tools/ffprobe")
-    add_tool_if_present("bundled_tools/yt-dlp")
 
 a = Analysis(
     ['pyinstaller_entry.py'],
     pathex=[str(project_root)],
-    binaries=binaries,
+    binaries=[],
     datas=[('font', 'font')],
     hiddenimports=[],
     hookspath=[],

@@ -5,6 +5,3 @@ notes.txt
 .github/
 build/
 dist/
-bundled_tools/*
-!bundled_tools/.gitkeep
-!bundled_tools/README.md

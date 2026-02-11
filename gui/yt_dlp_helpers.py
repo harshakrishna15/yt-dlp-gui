@@ -26,6 +26,7 @@ def fetch_info(url: str) -> dict:
 def detect_toolchain() -> dict[str, str]:
     yt_dlp_bin, yt_dlp_source = resolve_binary("yt-dlp")
     ffmpeg_bin, ffmpeg_source = resolve_binary("ffmpeg")
+    ffprobe_bin, ffprobe_source = resolve_binary("ffprobe")
     yt_dlp_module_version = getattr(getattr(yt_dlp, "version", None), "__version__", "unknown")
     return {
         "yt_dlp_module_version": str(yt_dlp_module_version),
@@ -33,6 +34,8 @@ def detect_toolchain() -> dict[str, str]:
         "yt_dlp_binary_path": str(yt_dlp_bin) if yt_dlp_bin else "not found",
         "ffmpeg_source": ffmpeg_source,
         "ffmpeg_path": str(ffmpeg_bin) if ffmpeg_bin else "not found",
+        "ffprobe_source": ffprobe_source,
+        "ffprobe_path": str(ffprobe_bin) if ffprobe_bin else "not found",
     }
 
 def split_and_filter_formats(

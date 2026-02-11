@@ -9,11 +9,3 @@ requests==2.32.5
 urllib3==2.6.3
 websockets==16.0
 yt-dlp-ejs==0.4.0
-
-# Build tooling (PyInstaller + transitive dependencies)
-pyinstaller==6.18.0
-pyinstaller-hooks-contrib==2026.0
-altgraph==0.17.5
-macholib==1.16.4
-packaging==26.0
-setuptools==81.0.0
