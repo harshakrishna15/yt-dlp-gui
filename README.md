@@ -86,4 +86,4 @@ Install FFmpeg and ensure it’s on your `PATH`:
 - Windows: `choco install ffmpeg` (or install the official build and add `ffmpeg.exe` to `PATH`)
 - Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
 
-Note: FFmpeg is a system binary, so it is not listed in `requirements.txt`.
+Note: FFmpeg is a system binary, so it is not listed in `requirements.txt`
