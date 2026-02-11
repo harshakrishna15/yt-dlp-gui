@@ -84,4 +84,6 @@ Only download content you are authorized to download.
 Platform terms can still restrict downloads even if the tool supports them.
 By using this app, you are responsible for complying with local law and platform terms.
 
-See `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md`.
+See `licenses/LICENSE`, `licenses/NOTICE`, `licenses/THIRD_PARTY_NOTICES.md`,
+`licenses/mutagen-GPL-2.0-or-later.txt`,
+and `licenses/RELEASE_COMPLIANCE_CHECKLIST.md`.

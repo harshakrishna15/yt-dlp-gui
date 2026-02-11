@@ -43,6 +43,11 @@ $env:PIP_REQUIRE_VIRTUALENV = "true"
 
 & $VenvPython -m pip install -r requirements.txt
 & $VenvPython -m pip install pyinstaller
-& $VenvPython -m PyInstaller yt-dlp-gui.spec
+
+# Remove prior outputs to avoid interactive delete prompts and stale locks.
+if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
+if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+
+& $VenvPython -m PyInstaller --noconfirm --clean yt-dlp-gui.spec
 
 Write-Host "Build complete: dist\yt-dlp-gui\yt-dlp-gui.exe"

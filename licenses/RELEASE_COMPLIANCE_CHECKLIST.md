@@ -8,7 +8,7 @@ Use this checklist when publishing binary releases.
 - `LICENSE`
 - `NOTICE`
 - `THIRD_PARTY_NOTICES.md`
-- `licenses/mutagen-GPL-2.0-or-later.txt`
+- `mutagen-GPL-2.0-or-later.txt`
 4. Make sure the release points to the exact source tag/commit.
 5. Keep the "authorized content only" warning in docs/release notes.
 

@@ -12,6 +12,10 @@ fi
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 python3 -m pip install pyinstaller
-python3 -m PyInstaller yt-dlp-gui.spec
+
+# Remove prior outputs to avoid interactive delete prompts and stale locks.
+rm -rf build dist
+
+python3 -m PyInstaller --noconfirm --clean yt-dlp-gui.spec
 
 echo "Build complete: dist/yt-dlp-gui.app"

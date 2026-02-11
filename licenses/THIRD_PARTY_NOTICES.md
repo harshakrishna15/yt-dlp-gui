@@ -36,5 +36,5 @@ builds are LGPL, some are GPL, and some configurations are non-redistributable.
 - Platform terms may prohibit downloads even when technically possible.
 - If distributing this app publicly, review obligations for all included
   third-party components.
-- For binary releases, include `licenses/mutagen-GPL-2.0-or-later.txt` and
+- For binary releases, include `mutagen-GPL-2.0-or-later.txt` and
   publish the exact corresponding source for that release tag.
