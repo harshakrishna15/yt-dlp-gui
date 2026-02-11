@@ -48,6 +48,12 @@ $env:PIP_REQUIRE_VIRTUALENV = "true"
 if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 
-& $VenvPython -m PyInstaller --noconfirm --clean yt-dlp-gui.spec
+& $VenvPython -m PyInstaller `
+  --noconfirm `
+  --clean `
+  --windowed `
+  --name "yt-dlp-gui" `
+  --add-data "font;font" `
+  pyinstaller_entry.py
 
 Write-Host "Build complete: dist\yt-dlp-gui\yt-dlp-gui.exe"

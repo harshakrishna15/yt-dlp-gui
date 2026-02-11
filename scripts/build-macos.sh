@@ -16,6 +16,12 @@ python3 -m pip install pyinstaller
 # Remove prior outputs to avoid interactive delete prompts and stale locks.
 rm -rf build dist
 
-python3 -m PyInstaller --noconfirm --clean yt-dlp-gui.spec
+python3 -m PyInstaller \
+  --noconfirm \
+  --clean \
+  --windowed \
+  --name "yt-dlp-gui" \
+  --add-data "font:font" \
+  pyinstaller_entry.py
 
 echo "Build complete: dist/yt-dlp-gui.app"
