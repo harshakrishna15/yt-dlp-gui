@@ -47,6 +47,7 @@ You can bundle binaries by placing them in `bundled_tools/` before building:
 - Windows: `bundled_tools/ffmpeg.exe`, `bundled_tools/ffprobe.exe`, `bundled_tools/yt-dlp.exe`
 
 At runtime, the app resolves tools in this order:
+
 1. Bundled binaries (`tools/` inside the packaged app)
 2. System `PATH`
 3. For `yt-dlp`, the Python module fallback (`yt_dlp`)
