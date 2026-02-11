@@ -6,7 +6,7 @@ A front-end for `yt-dlp`. Paste a URL, pick a format, and download—no command 
 
 - Python 3.10+ with Tk support
 - `yt-dlp` (installed via `requirements.txt`)
-- FFmpeg
+- FFmpeg (optional for local dev if you place binaries in `bundled_tools/`)
 
 ### Quick start
 
@@ -40,6 +40,16 @@ This repo includes a PyInstaller build config that produces:
 
 - macOS: `yt-dlp-gui.app` (zipped for distribution)
 - Windows: `yt-dlp-gui.exe` (zipped for distribution)
+
+You can bundle binaries by placing them in `bundled_tools/` before building:
+
+- macOS/Linux: `bundled_tools/ffmpeg`, `bundled_tools/ffprobe`, `bundled_tools/yt-dlp`
+- Windows: `bundled_tools/ffmpeg.exe`, `bundled_tools/ffprobe.exe`, `bundled_tools/yt-dlp.exe`
+
+At runtime, the app resolves tools in this order:
+1. Bundled binaries (`tools/` inside the packaged app)
+2. System `PATH`
+3. For `yt-dlp`, the Python module fallback (`yt_dlp`)
 
 #### Build locally (macOS)
 
@@ -80,10 +90,10 @@ Publishing a GitHub Release runs the CI workflow and uploads:
 - Re-encoding WebM → MP4 when “Convert to MP4” is enabled
 - Some container conversions and post-processing steps
 
-Install FFmpeg and ensure it’s on your `PATH`:
+Install FFmpeg and ensure it’s on your `PATH` if you are not bundling it:
 
 - macOS: `brew install ffmpeg`
 - Windows: `choco install ffmpeg` (or install the official build and add `ffmpeg.exe` to `PATH`)
 - Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
 
-Note: FFmpeg is a system binary, so it is not listed in `requirements.txt`.
+Note: FFmpeg is a native binary, so it is not listed in `requirements.txt`.

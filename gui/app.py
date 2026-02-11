@@ -61,6 +61,7 @@ class YtDlpGui:
         self._show_progress_item = False
 
         self.logs = ui.build_ui(self)
+        self._log_toolchain()
         self.queue_panel.refresh(self.queue_items)
         self._init_visibility_helpers()
         self._refresh_container_choices()
@@ -256,6 +257,17 @@ class YtDlpGui:
 
     def _log(self, message: str) -> None:
         self.logs.queue(message)
+
+    def _log_toolchain(self) -> None:
+        info = helpers.detect_toolchain()
+        self._log(
+            f"[toolchain] yt-dlp module={info['yt_dlp_module_version']} "
+            f"binary_source={info['yt_dlp_binary_source']} "
+            f"binary={info['yt_dlp_binary_path']}"
+        )
+        self._log(
+            f"[toolchain] ffmpeg source={info['ffmpeg_source']} path={info['ffmpeg_path']}"
+        )
 
     def _on_mode_change(self) -> None:
         self._refresh_container_choices()

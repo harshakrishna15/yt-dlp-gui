@@ -3,12 +3,12 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 import re
-import shutil
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadCancelled
 
 from .shared_types import FormatInfo, ProgressUpdate
+from .tooling import resolve_binary
 
 AUDIO_OUTPUT_CODECS = {"m4a", "mp3", "opus", "wav", "flac"}
 
@@ -97,14 +97,7 @@ def build_ydl_opts(
     if playlist_enabled and playlist_items:
         ranges = _parse_playlist_items(playlist_items)
 
-    ffmpeg_location: str | None = None
-    ffmpeg_path = shutil.which("ffmpeg")
-    if ffmpeg_path:
-        ffmpeg_location = ffmpeg_path
-    else:
-        brew_ffmpeg = Path("/opt/homebrew/bin/ffmpeg")
-        if brew_ffmpeg.exists():
-            ffmpeg_location = str(brew_ffmpeg)
+    ffmpeg_path, ffmpeg_source = resolve_binary("ffmpeg")
 
     opts: dict[str, Any] = {
         "outtmpl": outtmpl,
@@ -118,9 +111,11 @@ def build_ydl_opts(
         "postprocessors": postprocessors,
         "postprocessor_args": pp_args,
     }
-    if ffmpeg_location:
-        opts["ffmpeg_location"] = ffmpeg_location
-        log(f"[ffmpeg] {ffmpeg_location}")
+    if ffmpeg_path:
+        opts["ffmpeg_location"] = str(ffmpeg_path)
+        log(f"[ffmpeg] source={ffmpeg_source} path={ffmpeg_path}")
+    else:
+        log("[ffmpeg] source=missing (some merges/conversions may fail)")
     if playlist_enabled and playlist_items:
         opts["playlist_items"] = playlist_items
         opts["extractor_args"] = {

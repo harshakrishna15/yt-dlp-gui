@@ -3,6 +3,8 @@
 __pycache__/
 notes.txt
 .github/
-yt-dlp-gui.spec
 build/
 dist/
+bundled_tools/*
+!bundled_tools/.gitkeep
+!bundled_tools/README.md

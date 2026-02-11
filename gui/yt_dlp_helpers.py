@@ -1,6 +1,7 @@
 from typing import Any
 
 from .shared_types import FormatInfo
+from .tooling import resolve_binary
 
 try:
     import yt_dlp
@@ -20,6 +21,19 @@ def fetch_info(url: str) -> dict:
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False, process=True)
+
+
+def detect_toolchain() -> dict[str, str]:
+    yt_dlp_bin, yt_dlp_source = resolve_binary("yt-dlp")
+    ffmpeg_bin, ffmpeg_source = resolve_binary("ffmpeg")
+    yt_dlp_module_version = getattr(getattr(yt_dlp, "version", None), "__version__", "unknown")
+    return {
+        "yt_dlp_module_version": str(yt_dlp_module_version),
+        "yt_dlp_binary_source": yt_dlp_source,
+        "yt_dlp_binary_path": str(yt_dlp_bin) if yt_dlp_bin else "not found",
+        "ffmpeg_source": ffmpeg_source,
+        "ffmpeg_path": str(ffmpeg_bin) if ffmpeg_bin else "not found",
+    }
 
 def split_and_filter_formats(
     formats: list[FormatInfo],
