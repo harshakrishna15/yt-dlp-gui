@@ -3,7 +3,7 @@
 Small desktop UI for `yt-dlp`.
 Paste a URL, pick a format, and download without using the terminal.
 
-This is a hobby/personal-use project.
+This is a hobby and personal-use project.
 
 ### Requirements
 
@@ -84,8 +84,4 @@ Only download content you are authorized to download.
 Platform terms can still restrict downloads even if the tool supports them.
 By using this app, you are responsible for complying with local law and platform terms.
 
-For binary releases, include the notices/licenses files and publish the
-matching source tag for that build.
-
-See `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`,
-`licenses/mutagen-GPL-2.0-or-later.txt`, and `RELEASE_COMPLIANCE_CHECKLIST.md`.
+See `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md`.
