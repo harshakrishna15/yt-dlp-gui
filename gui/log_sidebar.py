@@ -36,6 +36,7 @@ class LogSidebar:
 
         self._queue: "queue.Queue[str]" = queue.Queue()
         self._poll_after_id: str | None = None
+        self._shutdown = False
 
         self._log_sidebar_after_id: str | None = None
         self._log_sidebar_open = False
@@ -319,6 +320,9 @@ class LogSidebar:
             self._sidebar_tick()
 
     def _sidebar_tick(self) -> None:
+        if self._shutdown:
+            self._log_sidebar_after_id = None
+            return
         full = float(self._log_sidebar_width_target)
         target = full if self._log_sidebar_open else 0.0
         ease = 0.28
@@ -401,6 +405,9 @@ class LogSidebar:
                 self.header_bar.lift()
 
     def _layout_tick(self) -> None:
+        if self._shutdown:
+            self._layout_anim_after_id = None
+            return
         if self._layout_target_lines is None:
             self._layout_anim_after_id = None
             return
@@ -438,6 +445,9 @@ class LogSidebar:
         self._queue.put(message)
 
     def _poll_queue(self) -> None:
+        if self._shutdown:
+            self._poll_after_id = None
+            return
         try:
             while True:
                 line = self._queue.get_nowait()
@@ -462,6 +472,7 @@ class LogSidebar:
         self._set_unread(False)
 
     def shutdown(self) -> None:
+        self._shutdown = True
         for attr in (
             "_poll_after_id",
             "_layout_anim_after_id",

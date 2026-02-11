@@ -28,6 +28,7 @@ class YtDlpGui:
         self.is_downloading = False
         self._cancel_event: threading.Event | None = None
         self._cancel_requested = False
+        self._closing = False
         self.formats = FormatState()
         self._normalizing_url = False
         self.is_playlist = False
@@ -83,6 +84,19 @@ class YtDlpGui:
         except Exception:
             pass
         setattr(target, attr_name, None)
+
+    def _safe_after(self, delay_ms: int, callback: callable) -> str | None:
+        if self._closing:
+            return None
+        try:
+            if not self.root.winfo_exists():
+                return None
+        except Exception:
+            return None
+        try:
+            return self.root.after(delay_ms, callback)
+        except Exception:
+            return None
 
     def _init_visibility_helpers(self) -> None:
         # Cache grid info for widgets we may hide/show.
@@ -364,7 +378,7 @@ class YtDlpGui:
         if force:
             self._start_fetch_formats(force=True)
         else:
-            self.formats.fetch_after_id = self.root.after(
+            self.formats.fetch_after_id = self._safe_after(
                 FETCH_DEBOUNCE_MS, self._start_fetch_formats
             )
 
@@ -400,12 +414,14 @@ class YtDlpGui:
             info = helpers.fetch_info(url)
         except Exception as exc:  # show error in UI
             self._log(f"Could not fetch formats: {exc}")
-            self.root.after(0, lambda: self._set_formats([], error=True))
+            self._safe_after(0, lambda: self._set_formats([], error=True))
             return
         entries = info.get("entries")
         is_playlist = info.get("_type") == "playlist" or entries is not None
         formats = formats_mod.formats_from_info(info)
-        self.root.after(0, lambda: self._set_formats(formats, is_playlist=is_playlist))
+        self._safe_after(
+            0, lambda: self._set_formats(formats, is_playlist=is_playlist)
+        )
 
     def _set_formats(
         self,
@@ -783,7 +799,7 @@ class YtDlpGui:
             return
         self._progress_pct_display += delta * ease
         self.progress_pct_var.set(f"{self._progress_pct_display:.1f}%")
-        self._progress_anim_after_id = self.root.after(
+        self._progress_anim_after_id = self._safe_after(
             PROGRESS_ANIM_MS, self._progress_anim_tick
         )
 
@@ -1071,7 +1087,7 @@ class YtDlpGui:
             resolved = self._resolve_format_for_url(url, settings)
             title = resolved.get("title") or url
             item_text = f"{index}/{total} {title}"
-            self.root.after(0, lambda: self.progress_item_var.set(item_text))
+            self._safe_after(0, lambda: self.progress_item_var.set(item_text))
             output_dir = Path(settings.get("output_dir") or self.output_dir_var.get()).expanduser()
             output_dir.mkdir(parents=True, exist_ok=True)
             playlist_enabled = bool(resolved.get("is_playlist"))
@@ -1091,14 +1107,14 @@ class YtDlpGui:
                 playlist_items=playlist_items,
                 cancel_event=self._cancel_event,
                 log=self._log,
-                update_progress=lambda u: self.root.after(
+                update_progress=lambda u: self._safe_after(
                     0, lambda: self._on_progress_update(u)
                 ),
             )
         except Exception as exc:
             self._log(f"[queue] failed: {exc}")
         finally:
-            self.root.after(0, self._on_queue_item_finish)
+            self._safe_after(0, self._on_queue_item_finish)
 
     def _on_queue_item_finish(self) -> None:
         if not self.queue_active or self.queue_index is None:
@@ -1151,11 +1167,11 @@ class YtDlpGui:
             playlist_items=playlist_items or None,
             cancel_event=self._cancel_event,
             log=self._log,
-            update_progress=lambda u: self.root.after(
+            update_progress=lambda u: self._safe_after(
                 0, lambda: self._on_progress_update(u)
             ),
         )
-        self.root.after(0, self._on_finish)
+        self._safe_after(0, self._on_finish)
 
     def _on_finish(self) -> None:
         self.is_downloading = False
@@ -1173,6 +1189,7 @@ class YtDlpGui:
                 "Download running", "A download is in progress. Quit anyway?"
             ):
                 return
+        self._closing = True
         self._cancel_after("fetch_after_id", self.formats)
         self._cancel_after("_progress_anim_after_id")
         self.logs.shutdown()

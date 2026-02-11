@@ -4,3 +4,5 @@ __pycache__/
 notes.txt
 .github/
 yt-dlp-gui.spec
+build/
+dist/

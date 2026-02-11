@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 import re
+import shutil
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadCancelled
@@ -96,6 +97,15 @@ def build_ydl_opts(
     if playlist_enabled and playlist_items:
         ranges = _parse_playlist_items(playlist_items)
 
+    ffmpeg_location: str | None = None
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        ffmpeg_location = ffmpeg_path
+    else:
+        brew_ffmpeg = Path("/opt/homebrew/bin/ffmpeg")
+        if brew_ffmpeg.exists():
+            ffmpeg_location = str(brew_ffmpeg)
+
     opts: dict[str, Any] = {
         "outtmpl": outtmpl,
         "format": fmt,
@@ -108,6 +118,9 @@ def build_ydl_opts(
         "postprocessors": postprocessors,
         "postprocessor_args": pp_args,
     }
+    if ffmpeg_location:
+        opts["ffmpeg_location"] = ffmpeg_location
+        log(f"[ffmpeg] {ffmpeg_location}")
     if playlist_enabled and playlist_items:
         opts["playlist_items"] = playlist_items
         opts["extractor_args"] = {

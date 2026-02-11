@@ -45,6 +45,7 @@ class QueueSidebar:
         self._sidebar_margin = 0
         self._sidebar_manual_width: int | None = None
         self._on_open_cb: callable | None = None
+        self._shutdown = False
 
         self._selected_index: int | None = None
         self._row_widgets: list[dict] = []
@@ -304,6 +305,9 @@ class QueueSidebar:
             self._sidebar_tick()
 
     def _sidebar_tick(self) -> None:
+        if self._shutdown:
+            self._sidebar_after_id = None
+            return
         full = float(self._sidebar_width_target)
         target = full if self._sidebar_open else 0.0
         ease = 0.28
@@ -418,6 +422,7 @@ class QueueSidebar:
 
 
     def shutdown(self) -> None:
+        self._shutdown = True
         for attr in ("_sidebar_after_id",):
             after_id = getattr(self, attr, None)
             if not after_id:
