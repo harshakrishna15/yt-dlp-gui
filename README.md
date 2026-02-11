@@ -1,38 +1,64 @@
 ## yt-dlp-gui
 
-A simple GUI for `yt-dlp`.
-Paste a link, choose a format, and download.
+A small desktop GUI for `yt-dlp`.
+This is a hobby project.
+Paste a URL, pick a format, and download.
 
-This is a hobby project that I'm using myself.
+### Supported Platforms
 
-### Requirements
+- macOS
+- Windows
 
-- Python 3.10+ (with Tk)
-- Python dependencies from `requirements.txt`
-- `ffmpeg` and `ffprobe` on your `PATH`
+### Prerequisites
 
-Install FFmpeg first:
+- Python 3.10+ (with Tk/Tkinter)
+- Dependencies from `requirements.txt`
+- `ffmpeg` and `ffprobe` available in `PATH`
 
-- macOS: `brew install ffmpeg`
-- Windows: `winget install -e --id Gyan.FFmpeg`
-- Linux (Debian/Ubuntu): `sudo apt-get install -y ffmpeg`
+### Set Up From Source (Developer Setup)
 
-### Quick Start
+This section installs dependencies for running the code from this repo.
+It does not install a packaged app.
+
+- macOS
 
 ```bash
+brew install ffmpeg
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+- Windows
+
+```powershell
+winget install ffmpeg
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### Run From Source
+
+- macOS
+
+```bash
+source .venv/bin/activate
 python3 run_gui.py
 ```
 
-If Tk is missing on Homebrew Python, install matching `python-tk` (example: `brew install python-tk@3.11`).
+- Windows
 
-### Build App
+```powershell
+.\.venv\Scripts\Activate.ps1
+python run_gui.py
+```
 
-Use the scripts in `scripts/`.
+### Build Packaged App
 
-- macOS:
+This section builds distributable app output from the source code.
+
+- macOS
 
 ```bash
 chmod +x scripts/build-macos.sh
@@ -41,13 +67,39 @@ chmod +x scripts/build-macos.sh
 
 Output: `dist/yt-dlp-gui.app`
 
-- Windows:
+- Windows
 
 ```powershell
 .\scripts\build-windows.ps1
 ```
 
 Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
+
+### Common Problems
+
+#### 1) `ffmpeg` or `ffprobe` not found
+
+macOS:
+Install with `brew install ffmpeg`, then restart your terminal.
+
+Windows:
+Install with `winget install ffmpeg`, then open a new PowerShell window so `PATH` refreshes.
+
+#### 2) Tkinter is missing
+
+macOS:
+If you use Homebrew Python and Tk is missing, install matching Tk support (example: `brew install python-tk@3.11`).
+
+Windows:
+Reinstall Python from `python.org` and make sure Tcl/Tk is included (default installer option), then recreate `.venv`.
+
+#### 3) Build/run command differences
+
+macOS:
+Use `source .venv/bin/activate`. Paths use `/`.
+
+Windows:
+Use `.venv\Scripts\Activate.ps1`. Paths use `\`.
 
 ### Usage Notes
 
