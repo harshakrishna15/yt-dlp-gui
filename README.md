@@ -101,9 +101,21 @@ Use `source .venv/bin/activate`. Paths use `/`.
 Windows:
 Use `.venv\Scripts\Activate.ps1`. Paths use `\`.
 
+#### 4) PowerShell blocks the Windows build script (unsigned script policy)
+
+If the script is blocked because there is no trusted signature, run the build with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
+```
+
+This command runs a new powershell processes, bypasses the execution check for ONLY this process, and runs the script.
+
+Use this command to allow the script to install needed build dependencies and build the app in the current session.
+
 ### Usage Notes
 
-- Playlist URLs work.
+- You can download playlists.
 - Use **Playlist items** for ranges like `1-5,7,10-`.
 - Leave Playlist items blank to download the full playlist.
 
@@ -111,7 +123,8 @@ Use `.venv\Scripts\Activate.ps1`. Paths use `\`.
 
 This is maintained in my spare time.
 I might fix things when I can, but there are no guarantees for support, updates, or compatibility fixes.
-Issues and PRs are welcome, and I review them when I have time.
+
+Issues and PRs are welcome, and but implementing fixes is based on my free time.
 
 ### Legal
 
