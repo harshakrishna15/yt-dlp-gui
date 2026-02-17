@@ -49,6 +49,7 @@ class QueueSidebar:
 
         self._selected_index: int | None = None
         self._row_widgets: list[dict] = []
+        self._editable = True
 
         self._build_header_controls(header_wrap)
         self._build_sidebar()
@@ -86,9 +87,8 @@ class QueueSidebar:
             style="Subheader.TLabel",
             font=self._fonts["subheader"],
         ).grid(column=0, row=0, sticky="w")
-        ttk.Button(header, text="Clear", command=self._on_clear_cb).grid(
-            column=1, row=0, sticky="e"
-        )
+        self.clear_button = ttk.Button(header, text="Clear", command=self._on_clear_cb)
+        self.clear_button.grid(column=1, row=0, sticky="e")
 
         list_wrap = ttk.Frame(self._sidebar_content, style="Card.TFrame", padding=0)
         list_wrap.grid(column=0, row=1, sticky="nsew")
@@ -368,7 +368,17 @@ class QueueSidebar:
                 )
                 self.header_bar.lift()
 
-    def refresh(self, items: list[dict], active_index: int | None = None) -> None:
+    def refresh(
+        self,
+        items: list[dict],
+        active_index: int | None = None,
+        editable: bool = True,
+    ) -> None:
+        self._editable = editable
+        if self._editable:
+            self.clear_button.state(["!disabled"])
+        else:
+            self.clear_button.state(["disabled"])
         for child in self.list_inner.winfo_children():
             child.destroy()
         self._row_widgets.clear()
@@ -382,23 +392,30 @@ class QueueSidebar:
             row.columnconfigure(1, weight=1)
             button_wrap = ttk.Frame(row, style="Card.TFrame", padding=0)
             button_wrap.grid(column=0, row=0, sticky="w", padx=(0, 8))
-            ttk.Button(
+            delete_button = ttk.Button(
                 button_wrap,
                 text="Delete",
                 command=lambda i=idx: self._on_remove_cb([i]),
-            ).grid(column=0, row=0, sticky="w")
-            ttk.Button(
+            )
+            delete_button.grid(column=0, row=0, sticky="w")
+            move_up_button = ttk.Button(
                 button_wrap,
                 text="↑",
                 command=lambda i=idx: self._on_move_up_cb([i]),
                 width=2,
-            ).grid(column=1, row=0, sticky="w", padx=(4, 0))
-            ttk.Button(
+            )
+            move_up_button.grid(column=1, row=0, sticky="w", padx=(4, 0))
+            move_down_button = ttk.Button(
                 button_wrap,
                 text="↓",
                 command=lambda i=idx: self._on_move_down_cb([i]),
                 width=2,
-            ).grid(column=2, row=0, sticky="w", padx=(2, 0))
+            )
+            move_down_button.grid(column=2, row=0, sticky="w", padx=(2, 0))
+            if not self._editable:
+                delete_button.state(["disabled"])
+                move_up_button.state(["disabled"])
+                move_down_button.state(["disabled"])
             label = tk.Label(
                 row,
                 text=label_text,

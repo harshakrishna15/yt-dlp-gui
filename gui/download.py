@@ -11,6 +11,16 @@ from .shared_types import FormatInfo, ProgressUpdate
 from .tooling import resolve_binary
 
 AUDIO_OUTPUT_CODECS = {"m4a", "mp3", "opus", "wav", "flac"}
+DOWNLOAD_SUCCESS = "success"
+DOWNLOAD_ERROR = "error"
+DOWNLOAD_CANCELLED = "cancelled"
+
+# Conservative retry/timeout defaults to reduce transient network failures.
+YDL_SOCKET_TIMEOUT_SECONDS = 20
+YDL_RETRIES = 10
+YDL_FRAGMENT_RETRIES = 10
+YDL_EXTRACTOR_RETRIES = 5
+YDL_FILE_ACCESS_RETRIES = 3
 
 
 def build_ydl_opts(
@@ -110,6 +120,13 @@ def build_ydl_opts(
         "merge_output_format": merge_output_format,
         "postprocessors": postprocessors,
         "postprocessor_args": pp_args,
+        "socket_timeout": YDL_SOCKET_TIMEOUT_SECONDS,
+        "retries": YDL_RETRIES,
+        "fragment_retries": YDL_FRAGMENT_RETRIES,
+        "extractor_retries": YDL_EXTRACTOR_RETRIES,
+        "file_access_retries": YDL_FILE_ACCESS_RETRIES,
+        "skip_unavailable_fragments": True,
+        "continuedl": True,
     }
     if ffmpeg_path:
         opts["ffmpeg_location"] = str(ffmpeg_path)
@@ -151,7 +168,7 @@ def run_download(
     cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
-) -> None:
+) -> str:
     """Run a yt-dlp download with progress callbacks."""
     opts = build_ydl_opts(
         url=url,
@@ -167,22 +184,26 @@ def run_download(
         update_progress=update_progress,
     )
     start_ts = time.time()
+    result = DOWNLOAD_SUCCESS
     try:
         with YoutubeDL(opts) as ydl:
             ydl.download([url])
     except DownloadCancelled:
+        result = DOWNLOAD_CANCELLED
         log("[cancelled] Download cancelled.")
         try:
             update_progress({"status": "cancelled"})
         except Exception:
             pass
     except Exception as exc:  # broad to surface in UI
+        result = DOWNLOAD_ERROR
         log(f"[error] {exc}")
     else:
         log("[done] Download complete.")
     finally:
         elapsed = time.time() - start_ts
         log(f"[time] Elapsed: {format_duration(elapsed)}")
+    return result
 
 
 def _progress_hook_factory(
@@ -193,7 +214,17 @@ def _progress_hook_factory(
 ) -> Callable[[dict], None]:
     last_log = {"ts": 0.0}
     last_item = {"key": None}
+    update_warning_logged = {"value": False}
     total_items = _playlist_ranges_count(ranges)
+
+    def _safe_update(payload: ProgressUpdate) -> None:
+        try:
+            update_progress(payload)
+        except Exception as exc:
+            if update_warning_logged["value"]:
+                return
+            update_warning_logged["value"] = True
+            log(f"[progress] UI update failed: {exc}")
 
     def _format_speed(bytes_per_sec: float | None) -> str:
         if not bytes_per_sec or bytes_per_sec <= 0:
@@ -245,7 +276,7 @@ def _progress_hook_factory(
                 if playlist_count and display_index
                 else f"{display_index} {title}".strip()
             )
-            update_progress({"status": "item", "item": item_text})
+            _safe_update({"status": "item", "item": item_text})
 
         if status.get("status") == "downloading":
             now = time.time()
@@ -259,7 +290,7 @@ def _progress_hook_factory(
                     pct_val = None
                 speed_bps = status.get("speed")
                 eta_s = status.get("eta")
-                update_progress(
+                _safe_update(
                     {
                         "status": "downloading",
                         "percent": pct_val,
@@ -269,7 +300,7 @@ def _progress_hook_factory(
                 )
         elif status.get("status") == "finished":
             log("[progress] Download finished, post-processing...")
-            update_progress({"status": "finished"})
+            _safe_update({"status": "finished"})
 
     return hook
 
@@ -314,11 +345,17 @@ def _parse_playlist_items(items: str) -> list[tuple[int, int | None]]:
                 start_i = int(start_s)
             except ValueError:
                 continue
+            if start_i <= 0:
+                continue
             if end_s:
                 try:
                     end_i = int(end_s)
                 except ValueError:
-                    end_i = None
+                    continue
+                if end_i is not None and end_i <= 0:
+                    continue
+                if end_i is not None and end_i < start_i:
+                    continue
             else:
                 end_i = None
             ranges.append((start_i, end_i))
@@ -326,6 +363,8 @@ def _parse_playlist_items(items: str) -> list[tuple[int, int | None]]:
             try:
                 idx = int(chunk)
             except ValueError:
+                continue
+            if idx <= 0:
                 continue
             ranges.append((idx, idx))
     return ranges
@@ -343,8 +382,15 @@ def _playlist_match_filter(
         return False
 
     def _filter(info: dict[str, Any]) -> str | None:
-        idx = info.get("playlist_index")
-        if not isinstance(idx, int):
+        idx_raw = info.get("playlist_index")
+        if isinstance(idx_raw, str):
+            try:
+                idx = int(idx_raw)
+            except ValueError:
+                return None
+        elif isinstance(idx_raw, int):
+            idx = idx_raw
+        else:
             return None
         if _matches(idx):
             return None

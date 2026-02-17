@@ -1,13 +1,18 @@
 import re
 import threading
+import queue
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from urllib.parse import parse_qs, urlparse
+from collections.abc import Callable
 
 # Timing/layout constants (keep UI behavior consistent and readable).
 FETCH_DEBOUNCE_MS = 600
 PROGRESS_ANIM_MS = 33
+UI_EVENT_POLL_MS = 25
+UI_EVENT_MAX_PER_TICK = 200
+FORMAT_CACHE_MAX_ENTRIES = 100
 
 VIDEO_CONTAINERS = ("mp4", "webm")
 AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
@@ -38,6 +43,7 @@ class YtDlpGui:
         self.queue_active = False
         self.queue_index: int | None = None
         self.queue_settings: dict | None = None
+        self._queue_failed_items = 0
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value="")  # "video" or "audio"
@@ -59,6 +65,10 @@ class YtDlpGui:
         self.progress_eta_var = tk.StringVar(value="—")
         self.progress_item_var = tk.StringVar(value="—")
         self._show_progress_item = False
+        self._ui_event_queue: "queue.Queue[tuple[Callable, tuple, dict]]" = queue.Queue()
+        self._ui_event_after_id: str | None = None
+        self._fetch_request_seq = 0
+        self._active_fetch_request_id: int | None = None
 
         self.logs = ui.build_ui(self)
         self._log_toolchain()
@@ -73,6 +83,7 @@ class YtDlpGui:
         self.logs.on_root_configure(tk.Event())
         self.queue_panel.on_root_configure(tk.Event())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._ui_event_after_id = self._safe_after(UI_EVENT_POLL_MS, self._drain_ui_events)
         self._safe_after(50, self._warn_missing_dependencies)
 
     def _cancel_after(self, attr_name: str, obj: object | None = None) -> None:
@@ -99,6 +110,55 @@ class YtDlpGui:
             return self.root.after(delay_ms, callback)
         except Exception:
             return None
+
+    def _post_ui(self, callback: Callable, *args: object, **kwargs: object) -> None:
+        if self._closing:
+            return
+        self._ui_event_queue.put((callback, args, kwargs))
+
+    def _drain_ui_events(self) -> None:
+        self._ui_event_after_id = None
+        if self._closing:
+            return
+        processed = 0
+        try:
+            while processed < UI_EVENT_MAX_PER_TICK:
+                callback, args, kwargs = self._ui_event_queue.get_nowait()
+                try:
+                    callback(*args, **kwargs)
+                except Exception as exc:
+                    self._log(f"[ui] callback failed: {exc}")
+                processed += 1
+        except queue.Empty:
+            pass
+        next_delay = 0 if not self._ui_event_queue.empty() else UI_EVENT_POLL_MS
+        self._ui_event_after_id = self._safe_after(next_delay, self._drain_ui_events)
+
+    def _cache_formats_entry(self, url: str, entry: dict) -> None:
+        if not url:
+            return
+        snapshot = {
+            "video_labels": list(entry.get("video_labels", [])),
+            "video_lookup": dict(entry.get("video_lookup", {})),
+            "audio_labels": list(entry.get("audio_labels", [])),
+            "audio_lookup": dict(entry.get("audio_lookup", {})),
+        }
+        cache = self.formats.cache
+        if url in cache:
+            cache.pop(url, None)
+        cache[url] = snapshot
+        while len(cache) > FORMAT_CACHE_MAX_ENTRIES:
+            oldest = next(iter(cache))
+            cache.pop(oldest, None)
+
+    def _touch_cached_url(self, url: str) -> None:
+        if not url:
+            return
+        cache = self.formats.cache
+        entry = cache.pop(url, None)
+        if entry is None:
+            return
+        cache[url] = entry
 
     def _init_visibility_helpers(self) -> None:
         # Cache grid info for widgets we may hide/show.
@@ -156,6 +216,22 @@ class YtDlpGui:
         chosen = filedialog.askdirectory()
         if chosen:
             self.output_dir_var.set(chosen)
+
+    def _ensure_output_dir(self, output_dir_raw: str) -> Path | None:
+        output_dir = Path(output_dir_raw).expanduser()
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            self._log(f"[error] output folder unavailable: {output_dir} ({exc})")
+            self.status_var.set("Output folder unavailable")
+            messagebox.showerror(
+                "Output folder unavailable",
+                "Could not create or access the output folder:\n"
+                f"{output_dir}\n\n"
+                f"{exc}",
+            )
+            return None
+        return output_dir
 
     def _on_status_change(self) -> None:
         value = (self.status_var.get() or "").strip()
@@ -295,9 +371,15 @@ class YtDlpGui:
 
     def _queue_refresh(self) -> None:
         active_index = self.queue_index if self.queue_active else None
-        self.queue_panel.refresh(self.queue_items, active_index=active_index)
+        self.queue_panel.refresh(
+            self.queue_items,
+            active_index=active_index,
+            editable=not self.queue_active,
+        )
 
     def _queue_remove_selected(self, indices: list[int]) -> None:
+        if self.queue_active:
+            return
         if not indices:
             return
         removed = sorted(set(indices), reverse=True)
@@ -312,9 +394,10 @@ class YtDlpGui:
                 self.queue_index = max(0, len(self.queue_items) - 1)
         self._queue_refresh()
         self._update_controls_state()
-        self._update_controls_state()
 
     def _queue_move_up(self, indices: list[int]) -> None:
+        if self.queue_active:
+            return
         if not indices:
             return
         moved = False
@@ -330,6 +413,8 @@ class YtDlpGui:
             self._queue_refresh()
 
     def _queue_move_down(self, indices: list[int]) -> None:
+        if self.queue_active:
+            return
         if not indices:
             return
         moved = False
@@ -345,6 +430,8 @@ class YtDlpGui:
             self._queue_refresh()
 
     def _queue_clear(self) -> None:
+        if self.queue_active:
+            return
         if not self.queue_items:
             return
         self.queue_items.clear()
@@ -432,26 +519,41 @@ class YtDlpGui:
         self.formats.is_fetching = True
         self.formats.last_fetched_url = url
         self.formats.last_fetch_failed = False
+        self._fetch_request_seq += 1
+        request_id = self._fetch_request_seq
+        self._active_fetch_request_id = request_id
         self.status_var.set("Fetching formats...")
         self.start_button.state(["disabled"])
         self.format_combo.configure(state="disabled")
         self.convert_to_mp4_var.set(False)
         threading.Thread(
-            target=self._fetch_formats_worker, args=(url,), daemon=True
+            target=self._fetch_formats_worker,
+            args=(url, request_id),
+            daemon=True,
         ).start()
 
-    def _fetch_formats_worker(self, url: str) -> None:
+    def _fetch_formats_worker(self, url: str, request_id: int) -> None:
         try:
             info = helpers.fetch_info(url)
         except Exception as exc:  # show error in UI
             self._log(f"Could not fetch formats: {exc}")
-            self._safe_after(0, lambda: self._set_formats([], error=True))
+            self._post_ui(
+                self._set_formats,
+                [],
+                error=True,
+                fetch_url=url,
+                request_id=request_id,
+            )
             return
         entries = info.get("entries")
         is_playlist = info.get("_type") == "playlist" or entries is not None
         formats = formats_mod.formats_from_info(info)
-        self._safe_after(
-            0, lambda: self._set_formats(formats, is_playlist=is_playlist)
+        self._post_ui(
+            self._set_formats,
+            formats,
+            is_playlist=is_playlist,
+            fetch_url=url,
+            request_id=request_id,
         )
 
     def _set_formats(
@@ -459,8 +561,26 @@ class YtDlpGui:
         formats: list[dict],
         error: bool = False,
         is_playlist: bool = False,
+        fetch_url: str = "",
+        request_id: int | None = None,
     ) -> None:
+        if request_id is not None and request_id != self._active_fetch_request_id:
+            return
+        current_url = ""
+        try:
+            current_url = (self.url_var.get() or "").strip()  # type: ignore[attr-defined]
+        except Exception:
+            current_url = ""
+        if fetch_url and current_url and fetch_url != current_url:
+            self._active_fetch_request_id = None
+            self.formats.is_fetching = False
+            self._safe_after(0, self._start_fetch_formats)
+            return
+        if request_id is not None:
+            self._active_fetch_request_id = None
         self.formats.is_fetching = False
+        if fetch_url:
+            self.formats.last_fetched_url = fetch_url
         if not error:
             if is_playlist:
                 self._set_playlist_ui(True)
@@ -500,12 +620,13 @@ class YtDlpGui:
         self.formats.audio_labels = [label for label, _ in audio_labeled]
         self.formats.audio_lookup = {label: fmt for label, fmt in audio_labeled}
         # Cache processed formats for this URL.
-        self.formats.cache[self.formats.last_fetched_url] = {
+        cache_key = fetch_url or self.formats.last_fetched_url
+        self._cache_formats_entry(cache_key, {
             "video_labels": self.formats.video_labels,
             "video_lookup": self.formats.video_lookup,
             "audio_labels": self.formats.audio_labels,
             "audio_lookup": self.formats.audio_lookup,
-        }
+        })
 
         # Require user to pick a container after formats load.
         self._reset_format_selections()
@@ -515,11 +636,12 @@ class YtDlpGui:
         self._update_controls_state()
 
     def _load_cached_formats(self, url: str, cached: dict) -> None:
+        self._touch_cached_url(url)
         self.formats.last_fetched_url = url
-        self.formats.video_labels = cached.get("video_labels", [])
-        self.formats.video_lookup = cached.get("video_lookup", {})
-        self.formats.audio_labels = cached.get("audio_labels", [])
-        self.formats.audio_lookup = cached.get("audio_lookup", {})
+        self.formats.video_labels = list(cached.get("video_labels", []))
+        self.formats.video_lookup = dict(cached.get("video_lookup", {}))
+        self.formats.audio_labels = list(cached.get("audio_labels", []))
+        self.formats.audio_lookup = dict(cached.get("audio_lookup", {}))
         self._reset_format_selections()
         self._apply_mode_formats()
         self.status_var.set("Formats loaded (cached)")
@@ -846,13 +968,20 @@ class YtDlpGui:
                 "Formats unavailable", "Formats have not been loaded yet."
             )
             return
-        output_dir = Path(self.output_dir_var.get()).expanduser()
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = self._ensure_output_dir(self.output_dir_var.get())
+        if output_dir is None:
+            return
+        fmt_label = self.format_var.get()
+        fmt_info = self.formats.filtered_lookup.get(fmt_label)
+        format_filter = self.format_filter_var.get()
+        playlist_enabled = bool(self.playlist_enabled_var.get())
+        playlist_items_raw = (self.playlist_items_var.get() or "").strip()
+        convert_to_mp4 = bool(self.convert_to_mp4_var.get())
 
         self.is_downloading = True
         self._cancel_requested = False
         self._cancel_event = threading.Event()
-        self._show_progress_item = bool(self.playlist_enabled_var.get() and self.is_playlist)
+        self._show_progress_item = bool(playlist_enabled and self.is_playlist)
         self.simple_state_var.set("Downloading")
         self.status_var.set("Downloading...")
         self.logs.clear()
@@ -863,7 +992,12 @@ class YtDlpGui:
             kwargs={
                 "url": url,
                 "output_dir": output_dir,
-                "fmt_label": self.format_var.get(),
+                "fmt_label": fmt_label,
+                "fmt_info": fmt_info,
+                "format_filter": format_filter,
+                "playlist_enabled": playlist_enabled,
+                "playlist_items_raw": playlist_items_raw,
+                "convert_to_mp4": convert_to_mp4,
             },
             daemon=True,
         )
@@ -1074,6 +1208,7 @@ class YtDlpGui:
         self.queue_active = True
         self.queue_index = 0
         self.queue_settings = None
+        self._queue_failed_items = 0
         self.is_downloading = True
         self._show_progress_item = True
         self._cancel_requested = False
@@ -1089,15 +1224,15 @@ class YtDlpGui:
     def _start_next_queue_item(self) -> None:
         if not self.queue_active or self.queue_index is None:
             return
+        while self.queue_index < len(self.queue_items):
+            url = str(self.queue_items[self.queue_index].get("url", "")).strip()
+            if url:
+                break
+            self.queue_index += 1
         if self.queue_index >= len(self.queue_items):
             self._finish_queue()
             return
-        url = self.queue_items[self.queue_index].get("url", "")
         settings = self.queue_items[self.queue_index].get("settings") or {}
-        if not url:
-            self.queue_index += 1
-            self._start_next_queue_item()
-            return
         total = len(self.queue_items)
         self._log(f"[queue] item {self.queue_index + 1}/{total} {url}")
         self._queue_refresh()
@@ -1108,18 +1243,28 @@ class YtDlpGui:
                 "settings": settings,
                 "index": self.queue_index + 1,
                 "total": total,
+                "default_output_dir": self.output_dir_var.get(),
             },
             daemon=True,
         )
         self.download_thread.start()
 
-    def _run_queue_download(self, url: str, settings: dict, index: int, total: int) -> None:
+    def _run_queue_download(
+        self,
+        url: str,
+        settings: dict,
+        index: int,
+        total: int,
+        default_output_dir: str,
+    ) -> None:
+        had_error = False
+        cancelled = False
         try:
             resolved = self._resolve_format_for_url(url, settings)
             title = resolved.get("title") or url
             item_text = f"{index}/{total} {title}"
-            self._safe_after(0, lambda: self.progress_item_var.set(item_text))
-            output_dir = Path(settings.get("output_dir") or self.output_dir_var.get()).expanduser()
+            self._post_ui(self.progress_item_var.set, item_text)
+            output_dir = Path(settings.get("output_dir") or default_output_dir).expanduser()
             output_dir.mkdir(parents=True, exist_ok=True)
             playlist_enabled = bool(resolved.get("is_playlist"))
             playlist_items = settings.get("playlist_items") or None
@@ -1127,7 +1272,7 @@ class YtDlpGui:
                 self._log(
                     f"[playlist] enabled=1 items={playlist_items or 'none'}"
                 )
-            download.run_download(
+            result = download.run_download(
                 url=url,
                 output_dir=output_dir,
                 fmt_info=resolved["fmt_info"],
@@ -1138,22 +1283,30 @@ class YtDlpGui:
                 playlist_items=playlist_items,
                 cancel_event=self._cancel_event,
                 log=self._log,
-                update_progress=lambda u: self._safe_after(
-                    0, lambda: self._on_progress_update(u)
-                ),
+                update_progress=lambda u: self._post_ui(self._on_progress_update, u),
             )
+            had_error = result == download.DOWNLOAD_ERROR
+            cancelled = result == download.DOWNLOAD_CANCELLED
         except Exception as exc:
+            had_error = True
             self._log(f"[queue] failed: {exc}")
         finally:
-            self._safe_after(0, self._on_queue_item_finish)
+            self._post_ui(self._on_queue_item_finish, had_error, cancelled)
 
-    def _on_queue_item_finish(self) -> None:
+    def _on_queue_item_finish(
+        self,
+        had_error: bool = False,
+        cancelled: bool = False,
+    ) -> None:
         if not self.queue_active or self.queue_index is None:
-            self._finish_queue()
             return
+        if had_error:
+            self._queue_failed_items += 1
+        if cancelled:
+            self._cancel_requested = True
         if self._cancel_requested:
             self._log("[queue] cancelled")
-            self._finish_queue()
+            self._finish_queue(cancelled=True)
             return
         self.queue_index += 1
         if self.queue_index >= len(self.queue_items):
@@ -1162,47 +1315,61 @@ class YtDlpGui:
         self._reset_progress_summary()
         self._start_next_queue_item()
 
-    def _finish_queue(self) -> None:
+    def _finish_queue(self, *, cancelled: bool = False) -> None:
+        failed_items = self._queue_failed_items
         self.queue_active = False
         self.queue_index = None
         self.queue_settings = None
+        self._queue_failed_items = 0
         self.is_downloading = False
         self._show_progress_item = False
         self._cancel_requested = False
         self._cancel_event = None
+        if cancelled:
+            self._log("[queue] stopped by cancellation")
+        elif failed_items:
+            self._log(f"[queue] finished with {failed_items} failed item(s)")
+        else:
+            self._log("[queue] finished successfully")
         self.simple_state_var.set("Idle")
         self.status_var.set("Idle")
         self._reset_progress_summary()
         self._update_controls_state()
         self._queue_refresh()
 
-    def _run_download(self, url: str, output_dir: Path, fmt_label: str) -> None:
-        fmt_info = self.formats.filtered_lookup.get(fmt_label)
-        format_filter = self.format_filter_var.get()
-        playlist_enabled = bool(self.playlist_enabled_var.get())
-        playlist_items_raw = (self.playlist_items_var.get() or "").strip()
+    def _run_download(
+        self,
+        url: str,
+        output_dir: Path,
+        fmt_label: str,
+        fmt_info: dict | None,
+        format_filter: str,
+        playlist_enabled: bool,
+        playlist_items_raw: str,
+        convert_to_mp4: bool,
+    ) -> None:
         playlist_items = re.sub(r"\s+", "", playlist_items_raw)
         if playlist_items_raw and playlist_items != playlist_items_raw:
             self._log("[info] Playlist items normalized (spaces removed).")
         if playlist_enabled:
             self._log(f"[playlist] enabled=1 items={playlist_items or 'none'}")
 
-        download.run_download(
+        result = download.run_download(
             url=url,
             output_dir=output_dir,
             fmt_info=fmt_info,
             fmt_label=fmt_label,
             format_filter=format_filter,
-            convert_to_mp4=self.convert_to_mp4_var.get(),
+            convert_to_mp4=convert_to_mp4,
             playlist_enabled=playlist_enabled,
             playlist_items=playlist_items or None,
             cancel_event=self._cancel_event,
             log=self._log,
-            update_progress=lambda u: self._safe_after(
-                0, lambda: self._on_progress_update(u)
-            ),
+            update_progress=lambda u: self._post_ui(self._on_progress_update, u),
         )
-        self._safe_after(0, self._on_finish)
+        if result == download.DOWNLOAD_ERROR:
+            self._log("[status] Download finished with errors.")
+        self._post_ui(self._on_finish)
 
     def _on_finish(self) -> None:
         self.is_downloading = False
@@ -1221,11 +1388,30 @@ class YtDlpGui:
             ):
                 return
         self._closing = True
+        self._active_fetch_request_id = None
+        self._cancel_requested = True
+        if self._cancel_event is not None:
+            self._cancel_event.set()
         self._cancel_after("fetch_after_id", self.formats)
         self._cancel_after("_progress_anim_after_id")
-        self.logs.shutdown()
-        self.queue_panel.shutdown()
-        self.root.destroy()
+        self._cancel_after("_ui_event_after_id")
+        try:
+            while True:
+                self._ui_event_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            self.logs.shutdown()
+        except Exception:
+            pass
+        try:
+            self.queue_panel.shutdown()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
 
 def main() -> None:

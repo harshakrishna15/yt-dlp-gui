@@ -54,6 +54,24 @@ python3 run_gui.py
 python run_gui.py
 ```
 
+### Run Tests
+
+The tests are pure unit tests (no GUI startup, no network calls).
+
+- macOS
+
+```bash
+source .venv/bin/activate
+python3 -m unittest discover -s tests -v
+```
+
+- Windows
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m unittest discover -s tests -v
+```
+
 ### Build Packaged App
 
 This section builds distributable app output from the source code.

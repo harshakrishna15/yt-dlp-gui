@@ -8,6 +8,8 @@ from tkinter import ttk
 LAYOUT_ANIM_MS = 16
 POLL_MS = 100
 SIDEBAR_ANIM_MS = 16
+LOG_BATCH_MAX = 200
+LOG_MAX_LINES = 5000
 
 
 class LogSidebar:
@@ -448,20 +450,36 @@ class LogSidebar:
         if self._shutdown:
             self._poll_after_id = None
             return
+        lines: list[str] = []
         try:
-            while True:
-                line = self._queue.get_nowait()
-                self._append(line)
+            for _ in range(LOG_BATCH_MAX):
+                lines.append(self._queue.get_nowait())
         except queue.Empty:
             pass
-        self._poll_after_id = self.root.after(POLL_MS, self._poll_queue)
+        if lines:
+            self._append_batch(lines)
+        next_delay = 0 if not self._queue.empty() else POLL_MS
+        self._poll_after_id = self.root.after(next_delay, self._poll_queue)
 
     def _append(self, message: str) -> None:
-        message = self._strip_ansi(message)
+        self._append_batch([message])
+
+    def _append_batch(self, messages: list[str]) -> None:
+        if not messages:
+            return
+        cleaned = [self._strip_ansi(msg) for msg in messages]
         if not self._log_sidebar_open:
             self._set_unread(True)
         self.text.configure(state="normal")
-        self.text.insert("end", message + "\n")
+        self.text.insert("end", "\n".join(cleaned) + "\n")
+        if LOG_MAX_LINES > 0:
+            try:
+                line_count = int(float(self.text.index("end-1c").split(".")[0]))
+            except Exception:
+                line_count = 0
+            excess = line_count - LOG_MAX_LINES
+            if excess > 0:
+                self.text.delete("1.0", f"{excess + 1}.0")
         self.text.see("end")
         self.text.configure(state="disabled")
 
