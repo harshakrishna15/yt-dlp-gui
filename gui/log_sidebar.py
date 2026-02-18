@@ -5,6 +5,8 @@ import re
 import tkinter as tk
 from tkinter import ttk
 
+from .sidebar_host import SidebarHost, SidebarSizeSpec
+
 LAYOUT_ANIM_MS = 16
 POLL_MS = 100
 SIDEBAR_ANIM_MS = 16
@@ -14,7 +16,6 @@ LOG_MAX_LINES = 5000
 
 class LogSidebar:
     _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-    _SIDEBAR_BORDER_WIDTH = 2
 
     def __init__(
         self,
@@ -22,6 +23,7 @@ class LogSidebar:
         *,
         header_bar: ttk.Frame,
         header_sep: ttk.Separator,
+        header_button: ttk.Button,
         header_wrap: ttk.Frame,
         palette: dict[str, str],
         text_fg: str,
@@ -40,29 +42,36 @@ class LogSidebar:
         self._poll_after_id: str | None = None
         self._shutdown = False
 
-        self._log_sidebar_after_id: str | None = None
-        self._log_sidebar_open = False
-        self._log_sidebar_width_target = 0
-        # Visible width during slide animation; the sidebar widget itself keeps a fixed width
-        # to avoid internal layout reflow (which can cause button flicker/jank).
-        self._log_sidebar_width_current = 0.0
-        self._log_sidebar_margin = 0
-        self._log_sidebar_manual_width: int | None = None
         self._logs_unread = False
-        self._on_open_cb: callable | None = None
 
         self._layout_anim_after_id: str | None = None
         self._layout_target_lines: int | None = None
         self._layout_current_lines: float | None = None
         self._layout_last_applied_lines: int | None = None
 
-        self._build_header_controls(header_wrap)
+        self._build_header_controls(header_button, header_wrap)
+        self._host = SidebarHost(
+            self.root,
+            header_bar=self.header_bar,
+            header_sep=self.header_sep,
+            palette=self._palette,
+            entry_border=self._entry_border,
+            size_spec=SidebarSizeSpec(width_ratio=1.0, min_width=720),
+            border_width=0,
+            anim_ms=SIDEBAR_ANIM_MS,
+        )
+        self.sidebar = self._host.canvas
+        self._sidebar_content = self._host.content
         self._build_sidebar()
         self._poll_queue()
 
-    def _build_header_controls(self, header_wrap: ttk.Frame) -> None:
-        self.button = ttk.Button(header_wrap, text="Logs", command=self.toggle)
-        self.button.grid(column=0, row=0, sticky="e")
+    def _build_header_controls(
+        self,
+        header_button: ttk.Button,
+        header_wrap: ttk.Frame,
+    ) -> None:
+        self.button = header_button
+        self.button.configure(command=self.toggle)
 
         self._dot = tk.Canvas(
             header_wrap,
@@ -79,26 +88,6 @@ class LogSidebar:
         )
 
     def _build_sidebar(self) -> None:
-        # Use a Canvas so we can draw a rounded outline for the sidebar container.
-        self.sidebar = tk.Canvas(
-            self.root,
-            highlightthickness=0,
-            borderwidth=0,
-            bd=0,
-            background=self._palette["base_bg"],
-        )
-        self.sidebar.place_forget()
-
-        self._sidebar_fill_item: int | None = None
-        self._sidebar_outline_items: list[int] = []
-        self._sidebar_window_item: int | None = None
-
-        self._sidebar_content = ttk.Frame(self.sidebar, style="Card.TFrame", padding=6)
-        self._sidebar_window_item = self.sidebar.create_window(
-            0, 0, window=self._sidebar_content, anchor="nw"
-        )
-        self.sidebar.bind("<Configure>", self._on_sidebar_canvas_configure, add=True)
-
         header = ttk.Frame(self._sidebar_content, style="Card.TFrame", padding=0)
         header.grid(column=0, row=0, sticky="ew", pady=(0, 6))
         header.columnconfigure(0, weight=1)
@@ -138,90 +127,6 @@ class LogSidebar:
         scrollbar.grid(column=1, row=0, sticky="ns")
         scrollbar.grid_remove()
 
-    def _on_sidebar_canvas_configure(self, _event: tk.Event) -> None:
-        # Keep the inner content inset from the border, then redraw the rounded outline.
-        if self._sidebar_window_item is None:
-            return
-        try:
-            w = int(self.sidebar.winfo_width())
-            h = int(self.sidebar.winfo_height())
-        except Exception:
-            return
-        if w <= 1 or h <= 1:
-            return
-
-        bw = self._SIDEBAR_BORDER_WIDTH
-        inner_w = max(1, w - (bw * 2))
-        inner_h = max(1, h - (bw * 2))
-        self.sidebar.coords(self._sidebar_window_item, bw, bw)
-        self.sidebar.itemconfigure(
-            self._sidebar_window_item, width=inner_w, height=inner_h
-        )
-        self._redraw_sidebar_border(w, h)
-
-    def _redraw_sidebar_border(self, w: int, h: int) -> None:
-        bw = self._SIDEBAR_BORDER_WIDTH
-        # Use integer coordinates to avoid macOS/Tk anti-aliasing artifacts.
-        x1 = 0
-        y1 = 0
-        x2 = max(1, w - 1)
-        y2 = max(1, h - 1)
-
-        outline = self._entry_border
-        fill = self._palette["panel_bg"]
-
-        if self._sidebar_fill_item is not None:
-            try:
-                self.sidebar.delete(self._sidebar_fill_item)
-            except Exception:
-                pass
-            self._sidebar_fill_item = None
-        for item in self._sidebar_outline_items:
-            try:
-                self.sidebar.delete(item)
-            except Exception:
-                pass
-        self._sidebar_outline_items = []
-
-        self._sidebar_fill_item = self.sidebar.create_rectangle(
-            x1,
-            y1,
-            x2,
-            y2,
-            outline="",
-            fill=fill,
-            width=0,
-        )
-        self._sidebar_outline_items.append(
-            self.sidebar.create_rectangle(
-                x1,
-                y1,
-                x2,
-                y2,
-                outline=outline,
-                fill="",
-                width=bw,
-            )
-        )
-
-        try:
-            if self._sidebar_fill_item is not None:
-                self.sidebar.tag_lower(self._sidebar_fill_item)
-            if self._sidebar_window_item is not None:
-                self.sidebar.tag_raise(self._sidebar_window_item)
-            for item in self._sidebar_outline_items:
-                self.sidebar.tag_raise(item)
-        except Exception:
-            pass
-
-    def _raise_sidebar_widget(self) -> None:
-        # Canvas overrides lift/tkraise to operate on canvas items (requires a tag/id),
-        # so raise the widget via the Tk "raise" command instead.
-        try:
-            self.sidebar.tk.call("raise", self.sidebar._w)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
     def _autohide_text_scrollbar(
         self, scrollbar: ttk.Scrollbar, first: str, last: str
     ) -> None:
@@ -229,7 +134,7 @@ class LogSidebar:
         try:
             f = float(first)
             l = float(last)
-        except Exception:
+        except (TypeError, ValueError):
             return
         should_show = not (f <= 0.0 and l >= 1.0)
         if should_show:
@@ -244,127 +149,27 @@ class LogSidebar:
         state = "normal" if unread else "hidden"
         try:
             self._dot.itemconfigure(self._dot_item, state=state)
-        except Exception:
+        except (tk.TclError, RuntimeError):
             pass
 
     def toggle(self) -> None:
-        if self._log_sidebar_open:
-            self.close()
-        else:
-            self.open()
+        self._host.toggle()
 
     def open(self) -> None:
-        if self._on_open_cb is not None:
-            self._on_open_cb()
-        self._log_sidebar_open = True
-        self._recompute_sidebar_target()
-        if self._log_sidebar_width_target <= 1:
-            self._log_sidebar_width_target = 320
-        if not self.sidebar.winfo_ismapped():
-            y, h = self._sidebar_y_and_height()
-            # Place fully off-screen and slide in by adjusting x, keeping width fixed.
-            self._log_sidebar_width_current = 0.0
-            self.sidebar.place(
-                relx=1.0,
-                x=-self._log_sidebar_margin + self._log_sidebar_width_target,
-                y=y,
-                anchor="ne",
-                width=self._log_sidebar_width_target,
-                height=h,
-            )
-        self._raise_sidebar_widget()
-        self.header_bar.lift()
+        self._host.open()
         self._set_unread(False)
-        self._start_sidebar_animation()
 
     def close(self) -> None:
-        self._log_sidebar_open = False
-        self._start_sidebar_animation()
+        self._host.close()
+
+    def is_open(self) -> bool:
+        host = getattr(self, "_host", None)
+        if host is None:
+            return bool(getattr(self, "_log_sidebar_open", False))
+        return host.is_open()
 
     def set_on_open(self, callback: callable | None) -> None:
-        self._on_open_cb = callback
-
-    def _recompute_sidebar_target(self) -> None:
-        prev = self._log_sidebar_width_target
-        width = self.root.winfo_width()
-        if width <= 1:
-            return
-        max_width = max(200, width - (self._log_sidebar_margin * 2))
-        if self._log_sidebar_manual_width is not None:
-            target = self._log_sidebar_manual_width
-        else:
-            target = int(width * 0.42)
-        self._log_sidebar_width_target = min(420, max(260, min(max_width, target)))
-        if (
-            prev > 0
-            and self._log_sidebar_width_target > 0
-            and prev != self._log_sidebar_width_target
-        ):
-            # Preserve the current visible fraction during resizes.
-            frac = max(0.0, min(1.0, self._log_sidebar_width_current / float(prev)))
-            self._log_sidebar_width_current = frac * float(
-                self._log_sidebar_width_target
-            )
-
-    def _sidebar_y_and_height(self) -> tuple[int, int]:
-        root_h = self.root.winfo_height()
-        if root_h <= 1:
-            return (0, 1)
-        header_h = self.header_bar.winfo_height() if self.header_bar else 0
-        sep_h = self.header_sep.winfo_height() if self.header_sep else 0
-        y = int(header_h + sep_h + self._log_sidebar_margin)
-        y = max(0, min(root_h - 1, y))
-        h = max(1, root_h - y - self._log_sidebar_margin)
-        return (y, h)
-
-    def _start_sidebar_animation(self) -> None:
-        if self._log_sidebar_after_id is None:
-            self._sidebar_tick()
-
-    def _sidebar_tick(self) -> None:
-        if self._shutdown:
-            self._log_sidebar_after_id = None
-            return
-        full = float(self._log_sidebar_width_target)
-        target = full if self._log_sidebar_open else 0.0
-        ease = 0.28
-        delta = target - self._log_sidebar_width_current
-        if abs(delta) < 0.8:
-            self._log_sidebar_width_current = target
-        else:
-            self._log_sidebar_width_current += delta * ease
-
-        visible = int(round(self._log_sidebar_width_current))
-        if visible <= 0:
-            self.sidebar.place_forget()
-            self._log_sidebar_after_id = None
-            self._log_sidebar_width_current = 0.0
-            return
-
-        y, h = self._sidebar_y_and_height()
-        # Slide the fixed-width sidebar by shifting it right as it closes.
-        shift = int(
-            round(
-                float(self._log_sidebar_width_target) - self._log_sidebar_width_current
-            )
-        )
-        shift = max(0, min(self._log_sidebar_width_target, shift))
-        self.sidebar.place_configure(
-            relx=1.0,
-            x=-self._log_sidebar_margin + shift,
-            y=y,
-            anchor="ne",
-            width=self._log_sidebar_width_target,
-            height=h,
-        )
-
-        if visible == int(round(target)):
-            self._log_sidebar_after_id = None
-            return
-
-        self._log_sidebar_after_id = self.root.after(
-            SIDEBAR_ANIM_MS, self._sidebar_tick
-        )
+        self._host.set_on_open(callback)
 
     def on_root_configure(self, event: tk.Event) -> None:
         if getattr(event, "widget", self.root) is not self.root:
@@ -379,7 +184,7 @@ class LogSidebar:
             from tkinter import font as tkfont
 
             line_px = tkfont.nametofont("TkFixedFont").metrics("linespace") or 16
-        except Exception:
+        except (tk.TclError, RuntimeError):
             line_px = 16
 
         compact = height < 720
@@ -391,20 +196,7 @@ class LogSidebar:
         if self._layout_anim_after_id is None:
             self._layout_tick()
 
-        if self._log_sidebar_open:
-            self._recompute_sidebar_target()
-            if self._log_sidebar_after_id is None:
-                y, h = self._sidebar_y_and_height()
-                self._log_sidebar_width_current = float(self._log_sidebar_width_target)
-                self.sidebar.place_configure(
-                    relx=1.0,
-                    x=-self._log_sidebar_margin,
-                    y=y,
-                    anchor="ne",
-                    width=self._log_sidebar_width_target,
-                    height=h,
-                )
-                self.header_bar.lift()
+        self._host.on_root_configure(event)
 
     def _layout_tick(self) -> None:
         if self._shutdown:
@@ -468,14 +260,14 @@ class LogSidebar:
         if not messages:
             return
         cleaned = [self._strip_ansi(msg) for msg in messages]
-        if not self._log_sidebar_open:
+        if not self.is_open():
             self._set_unread(True)
         self.text.configure(state="normal")
         self.text.insert("end", "\n".join(cleaned) + "\n")
         if LOG_MAX_LINES > 0:
             try:
                 line_count = int(float(self.text.index("end-1c").split(".")[0]))
-            except Exception:
+            except (tk.TclError, RuntimeError, TypeError, ValueError):
                 line_count = 0
             excess = line_count - LOG_MAX_LINES
             if excess > 0:
@@ -484,27 +276,34 @@ class LogSidebar:
         self.text.configure(state="disabled")
 
     def clear(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.configure(state="disabled")
         self._set_unread(False)
+
+    def get_text(self) -> str:
+        try:
+            return self.text.get("1.0", "end-1c")
+        except (tk.TclError, RuntimeError):
+            return ""
 
     def shutdown(self) -> None:
         self._shutdown = True
         for attr in (
             "_poll_after_id",
             "_layout_anim_after_id",
-            "_log_sidebar_after_id",
         ):
             after_id = getattr(self, attr, None)
             if not after_id:
                 continue
             try:
                 self.root.after_cancel(after_id)
-            except Exception:
+            except (tk.TclError, RuntimeError, ValueError):
                 pass
             setattr(self, attr, None)
-        try:
-            self.sidebar.place_forget()
-        except Exception:
-            pass
+        self._host.shutdown()

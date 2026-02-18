@@ -1,10 +1,12 @@
-import re
 import threading
 import queue
+import os
+import subprocess
+import sys
+from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from urllib.parse import parse_qs, urlparse
 from collections.abc import Callable
 
 # Timing/layout constants (keep UI behavior consistent and readable).
@@ -13,11 +15,30 @@ PROGRESS_ANIM_MS = 33
 UI_EVENT_POLL_MS = 25
 UI_EVENT_MAX_PER_TICK = 200
 FORMAT_CACHE_MAX_ENTRIES = 100
+HISTORY_MAX_ENTRIES = 250
+WINDOW_MIN_WIDTH = 720
+WINDOW_MIN_HEIGHT = 550
+WINDOW_SCREEN_MARGIN = 8
 
 VIDEO_CONTAINERS = ("mp4", "webm")
 AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
 
-from . import download, formats as formats_mod, ui, yt_dlp_helpers as helpers, tooling
+from . import (
+    diagnostics,
+    download,
+    format_pipeline,
+    formats as formats_mod,
+    history_store,
+    ui,
+    yt_dlp_helpers as helpers,
+    tooling,
+)
+from .core import format_selection as core_format_selection
+from .core import download_plan as core_download_plan
+from .core import options as core_options
+from .core import queue_logic as core_queue_logic
+from .core import urls as core_urls
+from .shared_types import DownloadOptions, HistoryItem, QueueItem, QueueSettings
 from .state import FormatState
 
 
@@ -25,7 +46,7 @@ class YtDlpGui:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("yt-dlp-gui")
-        self.root.minsize(720, 550)
+        self.root.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._progress_anim_after_id: str | None = None
         self._progress_pct_target = 0.0
         self._progress_pct_display = 0.0
@@ -39,11 +60,13 @@ class YtDlpGui:
         self.is_playlist = False
         self._mixed_prompt_active = False
         self._pending_mixed_url = ""
-        self.queue_items: list[dict] = []
+        self.queue_items: list[QueueItem] = []
         self.queue_active = False
         self.queue_index: int | None = None
-        self.queue_settings: dict | None = None
+        self.queue_settings: QueueSettings | None = None
         self._queue_failed_items = 0
+        self.download_history: list[HistoryItem] = []
+        self._history_seen_paths: set[str] = set()
 
         self.url_var = tk.StringVar()
         self.mode_var = tk.StringVar(value="")  # "video" or "audio"
@@ -57,9 +80,23 @@ class YtDlpGui:
         )  # convert WebM to MP4 after download (re-encode)
         self.format_var = tk.StringVar()
         self.output_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
+        self.custom_filename_var = tk.StringVar(value="")
+        self.preview_title_var = tk.StringVar(value="")
+        self.subtitle_languages_var = tk.StringVar(value="")
+        self.write_subtitles_var = tk.BooleanVar(value=False)
+        self.embed_subtitles_var = tk.BooleanVar(value=False)
+        self.audio_language_var = tk.StringVar(value="")
+        self.network_timeout_var = tk.StringVar(
+            value=str(download.YDL_SOCKET_TIMEOUT_SECONDS)
+        )
+        self.network_retries_var = tk.StringVar(value=str(download.YDL_ATTEMPT_RETRIES))
+        self.retry_backoff_var = tk.StringVar(
+            value=str(download.YDL_RETRY_BACKOFF_SECONDS)
+        )
         self.status_var = tk.StringVar(value="Idle")
         self._last_status_logged = self.status_var.get()
         self.simple_state_var = tk.StringVar(value="Idle")
+        self.ui_layout_var = tk.StringVar(value="Simple")
         self.progress_pct_var = tk.StringVar(value="—")
         self.progress_speed_var = tk.StringVar(value="—")
         self.progress_eta_var = tk.StringVar(value="—")
@@ -71,20 +108,50 @@ class YtDlpGui:
         self._active_fetch_request_id: int | None = None
 
         self.logs = ui.build_ui(self)
-        self._log_toolchain()
+        self._set_audio_language_values([])
+        # Ensure logs are empty when the app launches.
+        self.logs.clear()
         self.queue_panel.refresh(self.queue_items)
         self._init_visibility_helpers()
         self._refresh_container_choices()
         self.status_var.trace_add("write", lambda *_: self._on_status_change())
         self.url_var.trace_add("write", lambda *_: self._on_url_change())
+        self.write_subtitles_var.trace_add(
+            "write", lambda *_: self._update_controls_state()
+        )
+        self.mode_var.trace_add("write", lambda *_: self._update_controls_state())
+        self._refresh_history_panel()
         self._update_controls_state()
+        self._fit_window_to_content()
         self.root.bind("<Configure>", self.logs.on_root_configure, add=True)
+        self.root.bind("<Configure>", self.settings_panel.on_root_configure, add=True)
         self.root.bind("<Configure>", self.queue_panel.on_root_configure, add=True)
+        self.root.bind("<Configure>", self.history_panel.on_root_configure, add=True)
         self.logs.on_root_configure(tk.Event())
+        self.settings_panel.on_root_configure(tk.Event())
         self.queue_panel.on_root_configure(tk.Event())
+        self.history_panel.on_root_configure(tk.Event())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._ui_event_after_id = self._safe_after(UI_EVENT_POLL_MS, self._drain_ui_events)
         self._safe_after(50, self._warn_missing_dependencies)
+
+    def _fit_window_to_content(self) -> None:
+        try:
+            self.root.update_idletasks()
+            req_w = int(self.root.winfo_reqwidth())
+            req_h = int(self.root.winfo_reqheight())
+            screen_w = int(self.root.winfo_screenwidth())
+            screen_h = int(self.root.winfo_screenheight())
+        except (tk.TclError, RuntimeError, ValueError):
+            return
+        max_w = max(WINDOW_MIN_WIDTH, screen_w - WINDOW_SCREEN_MARGIN)
+        max_h = max(WINDOW_MIN_HEIGHT, screen_h - WINDOW_SCREEN_MARGIN)
+        target_w = max(WINDOW_MIN_WIDTH, min(req_w, max_w))
+        target_h = max(WINDOW_MIN_HEIGHT, min(req_h, max_h))
+        try:
+            self.root.geometry(f"{target_w}x{target_h}")
+        except (tk.TclError, RuntimeError, ValueError):
+            return
 
     def _cancel_after(self, attr_name: str, obj: object | None = None) -> None:
         target = obj if obj is not None else self
@@ -94,7 +161,7 @@ class YtDlpGui:
             return
         try:
             self.root.after_cancel(after_id)
-        except Exception:
+        except (tk.TclError, ValueError, RuntimeError):
             pass
         setattr(target, attr_name, None)
 
@@ -104,11 +171,11 @@ class YtDlpGui:
         try:
             if not self.root.winfo_exists():
                 return None
-        except Exception:
+        except (tk.TclError, RuntimeError):
             return None
         try:
             return self.root.after(delay_ms, callback)
-        except Exception:
+        except (tk.TclError, RuntimeError):
             return None
 
     def _post_ui(self, callback: Callable, *args: object, **kwargs: object) -> None:
@@ -142,6 +209,8 @@ class YtDlpGui:
             "video_lookup": dict(entry.get("video_lookup", {})),
             "audio_labels": list(entry.get("audio_labels", [])),
             "audio_lookup": dict(entry.get("audio_lookup", {})),
+            "audio_languages": list(entry.get("audio_languages", [])),
+            "preview_title": str(entry.get("preview_title", "")),
         }
         cache = self.formats.cache
         if url in cache:
@@ -176,6 +245,12 @@ class YtDlpGui:
             self.convert_mp4_check,
             self.format_label,
             self.format_combo,
+            self.subtitle_languages_label,
+            self.subtitle_languages_entry,
+            self.subtitle_options_label,
+            self.write_subtitles_check,
+            self.embed_subtitles_check,
+            self.progress_frame,
             self.progress_item_label,
             self.progress_item_value,
         ]:
@@ -186,6 +261,40 @@ class YtDlpGui:
 
     def _set_combobox_enabled(self, combo: ttk.Combobox, enabled: bool) -> None:
         combo.configure(state="readonly" if enabled else "disabled")
+
+    def _set_audio_language_values(self, languages: list[str]) -> None:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for value in languages:
+            clean = str(value or "").strip().lower()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            unique.append(clean)
+        values = ["Any"] + unique
+
+        combo = getattr(self, "audio_language_combo", None)
+        if combo is not None:
+            try:
+                combo.configure(values=values)
+            except tk.TclError:
+                pass
+
+        var = getattr(self, "audio_language_var", None)
+        if var is None:
+            return
+        try:
+            current = str(var.get() or "").strip()
+        except (tk.TclError, AttributeError, TypeError, ValueError):
+            return
+        if not current:
+            var.set("Any")
+            return
+        if current.lower() in {"any", "auto"}:
+            var.set("Any")
+            return
+        if current.lower() not in {item.lower() for item in values}:
+            var.set("Any")
 
     def _configure_combobox(
         self,
@@ -221,7 +330,7 @@ class YtDlpGui:
         output_dir = Path(output_dir_raw).expanduser()
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as exc:
+        except OSError as exc:
             self._log(f"[error] output folder unavailable: {output_dir} ({exc})")
             self.status_var.set("Output folder unavailable")
             messagebox.showerror(
@@ -254,7 +363,7 @@ class YtDlpGui:
             self.status_var.set("Clipboard is empty")
 
     def _strip_url_whitespace(self, url: str) -> str:
-        return re.sub(r"\s+", "", url or "")
+        return core_urls.strip_url_whitespace(url)
 
     def _normalize_url_var(self) -> None:
         if self._normalizing_url:
@@ -270,52 +379,102 @@ class YtDlpGui:
             self._normalizing_url = False
 
     def _is_mixed_url(self, url: str) -> bool:
-        try:
-            parsed = urlparse(url)
-            query = parse_qs(parsed.query)
-        except Exception:
-            return False
-        return bool(query.get("v")) and bool(query.get("list"))
+        return core_urls.is_mixed_url(url)
 
     def _is_playlist_url(self, url: str) -> bool:
-        try:
-            parsed = urlparse(url)
-            query = parse_qs(parsed.query)
-        except Exception:
-            return False
-        if parsed.path.startswith("/playlist") and query.get("list"):
-            return True
-        if query.get("list") and not query.get("v"):
-            return True
-        return False
+        return core_urls.is_playlist_url(url)
 
     def _strip_list_param(self, url: str) -> str:
-        try:
-            parsed = urlparse(url)
-            query = parse_qs(parsed.query)
-            if "list" in query:
-                query.pop("list", None)
-            if "index" in query:
-                query.pop("index", None)
-            if "start" in query:
-                query.pop("start", None)
-            from urllib.parse import urlencode
-
-            new_query = urlencode(query, doseq=True)
-            return parsed._replace(query=new_query).geturl()
-        except Exception:
-            return url
+        return core_urls.strip_list_param(url)
 
     def _to_playlist_url(self, url: str) -> str:
+        return core_urls.to_playlist_url(url)
+
+    def _open_path(self, path: Path) -> bool:
+        target = path.expanduser()
         try:
-            parsed = urlparse(url)
-            query = parse_qs(parsed.query)
-            list_id = (query.get("list") or [None])[0]
-            if not list_id:
-                return url
-            return parsed._replace(path="/playlist", query=f"list={list_id}").geturl()
-        except Exception:
-            return url
+            if os.name == "nt" and hasattr(os, "startfile"):
+                os.startfile(str(target))  # type: ignore[attr-defined]
+                return True
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(target)])
+                return True
+            subprocess.Popen(["xdg-open", str(target)])
+            return True
+        except (OSError, ValueError, RuntimeError) as exc:
+            self._log(f"[history] Failed to open path: {target} ({exc})")
+            return False
+
+    def _selected_history_item(self) -> dict[str, str] | None:
+        panel = getattr(self, "history_panel", None)
+        if panel is None:
+            return None
+        try:
+            idx = panel.get_selected_index()
+        except (tk.TclError, AttributeError, TypeError, ValueError):
+            return None
+        history = getattr(self, "download_history", [])
+        if idx is None:
+            return None
+        if idx < 0 or idx >= len(history):
+            return None
+        return history[idx]
+
+    def _update_history_buttons_state(self) -> None:
+        # HistorySidebar owns the action-button state.
+        return
+
+    def _refresh_history_panel(self) -> None:
+        panel = getattr(self, "history_panel", None)
+        if panel is None:
+            return
+        panel.refresh(self.download_history)
+
+    def _record_download_output(self, output_path: Path, source_url: str = "") -> None:
+        if not output_path:
+            return
+        normalized = history_store.normalize_output_path(output_path)
+        if not normalized:
+            return
+        history_store.upsert_history_entry(
+            self.download_history,
+            self._history_seen_paths,
+            normalized_path=normalized,
+            source_url=source_url,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            max_entries=HISTORY_MAX_ENTRIES,
+        )
+        self._refresh_history_panel()
+
+    def _open_selected_history_file(self, _event: tk.Event | None = None) -> None:
+        item = self._selected_history_item()
+        if item is None:
+            return
+        path_raw = str(item.get("path", "")).strip()
+        if not path_raw:
+            return
+        path = Path(path_raw)
+        if self._open_path(path):
+            self.status_var.set("Opened downloaded file")
+
+    def _open_selected_history_folder(self, _event: tk.Event | None = None) -> None:
+        item = self._selected_history_item()
+        if item is None:
+            return
+        path_raw = str(item.get("path", "")).strip()
+        if not path_raw:
+            return
+        path = Path(path_raw)
+        if self._open_path(path.parent):
+            self.status_var.set("Opened download folder")
+
+    def _clear_download_history(self) -> None:
+        if not self.download_history:
+            return
+        self.download_history.clear()
+        self._history_seen_paths.clear()
+        self._refresh_history_panel()
+        self.status_var.set("Download history cleared")
 
     def _set_mixed_prompt_ui(self, show: bool) -> None:
         self._mixed_prompt_active = show
@@ -334,20 +493,6 @@ class YtDlpGui:
 
     def _log(self, message: str) -> None:
         self.logs.queue(message)
-
-    def _log_toolchain(self) -> None:
-        info = helpers.detect_toolchain()
-        self._log(
-            f"[toolchain] yt-dlp module={info['yt_dlp_module_version']} "
-            f"binary_source={info['yt_dlp_binary_source']} "
-            f"binary={info['yt_dlp_binary_path']}"
-        )
-        self._log(
-            f"[toolchain] ffmpeg source={info['ffmpeg_source']} path={info['ffmpeg_path']}"
-        )
-        self._log(
-            f"[toolchain] ffprobe source={info['ffprobe_source']} path={info['ffprobe_path']}"
-        )
 
     def _warn_missing_dependencies(self) -> None:
         missing = tooling.missing_required_binaries()
@@ -482,6 +627,10 @@ class YtDlpGui:
         self.format_var.set("")
         self.convert_to_mp4_var.set(False)
         self.playlist_items_var.set("")
+        self.formats.preview_title = ""
+        self.formats.audio_languages = []
+        self.preview_title_var.set("")
+        self._set_audio_language_values([])
         if url and self._is_mixed_url(url):
             self._show_mixed_prompt(url)
             return
@@ -548,12 +697,14 @@ class YtDlpGui:
         entries = info.get("entries")
         is_playlist = info.get("_type") == "playlist" or entries is not None
         formats = formats_mod.formats_from_info(info)
+        preview_title = format_pipeline.preview_title_from_info(info)
         self._post_ui(
             self._set_formats,
             formats,
             is_playlist=is_playlist,
             fetch_url=url,
             request_id=request_id,
+            preview_title=preview_title,
         )
 
     def _set_formats(
@@ -563,13 +714,14 @@ class YtDlpGui:
         is_playlist: bool = False,
         fetch_url: str = "",
         request_id: int | None = None,
+        preview_title: str = "",
     ) -> None:
         if request_id is not None and request_id != self._active_fetch_request_id:
             return
         current_url = ""
         try:
             current_url = (self.url_var.get() or "").strip()  # type: ignore[attr-defined]
-        except Exception:
+        except (tk.TclError, AttributeError, TypeError, ValueError):
             current_url = ""
         if fetch_url and current_url and fetch_url != current_url:
             self._active_fetch_request_id = None
@@ -581,6 +733,8 @@ class YtDlpGui:
         self.formats.is_fetching = False
         if fetch_url:
             self.formats.last_fetched_url = fetch_url
+        self.formats.preview_title = (preview_title or "").strip()
+        self.preview_title_var.set(self.formats.preview_title)
         if not error:
             if is_playlist:
                 self._set_playlist_ui(True)
@@ -597,28 +751,23 @@ class YtDlpGui:
             self.formats.video_lookup = {}
             self.formats.audio_labels = []
             self.formats.audio_lookup = {}
+            self.formats.audio_languages = []
+            self._set_audio_language_values([])
+            if not self.formats.preview_title:
+                self.preview_title_var.set("")
             self._apply_mode_formats()
             # if not error:
             # self.status_var.set("No formats found")
             self._update_controls_state()
             return
 
-        video_formats, audio_formats = helpers.split_and_filter_formats(formats)
-        video_labeled = helpers.build_labeled_formats(video_formats)
-        audio_labeled = helpers.build_labeled_formats(audio_formats)
-        # Add top-level best options.
-        audio_labeled.insert(
-            0,
-            (
-                "Best audio only",
-                {"custom_format": "bestaudio/best", "is_audio_only": True},
-            ),
-        )
-
-        self.formats.video_labels = [label for label, _ in video_labeled]
-        self.formats.video_lookup = {label: fmt for label, fmt in video_labeled}
-        self.formats.audio_labels = [label for label, _ in audio_labeled]
-        self.formats.audio_lookup = {label: fmt for label, fmt in audio_labeled}
+        collections = format_pipeline.build_format_collections(formats)
+        self.formats.video_labels = list(collections["video_labels"])
+        self.formats.video_lookup = dict(collections["video_lookup"])
+        self.formats.audio_labels = list(collections["audio_labels"])
+        self.formats.audio_lookup = dict(collections["audio_lookup"])
+        self.formats.audio_languages = list(collections["audio_languages"])
+        self._set_audio_language_values(self.formats.audio_languages)
         # Cache processed formats for this URL.
         cache_key = fetch_url or self.formats.last_fetched_url
         self._cache_formats_entry(cache_key, {
@@ -626,6 +775,8 @@ class YtDlpGui:
             "video_lookup": self.formats.video_lookup,
             "audio_labels": self.formats.audio_labels,
             "audio_lookup": self.formats.audio_lookup,
+            "audio_languages": self.formats.audio_languages,
+            "preview_title": self.formats.preview_title,
         })
 
         # Require user to pick a container after formats load.
@@ -642,107 +793,50 @@ class YtDlpGui:
         self.formats.video_lookup = dict(cached.get("video_lookup", {}))
         self.formats.audio_labels = list(cached.get("audio_labels", []))
         self.formats.audio_lookup = dict(cached.get("audio_lookup", {}))
+        self.formats.audio_languages = list(cached.get("audio_languages", []))
+        self.formats.preview_title = str(cached.get("preview_title", ""))
+        self.preview_title_var.set(self.formats.preview_title)
+        self._set_audio_language_values(self.formats.audio_languages)
         self._reset_format_selections()
         self._apply_mode_formats()
         self.status_var.set("Formats loaded (cached)")
         self._update_controls_state()
 
+    @staticmethod
+    def _codec_matches_preference(vcodec_raw: str, codec_pref: str) -> bool:
+        return core_format_selection.codec_matches_preference(vcodec_raw, codec_pref)
+
     def _apply_mode_formats(self) -> None:
         mode = self.mode_var.get()
-        if mode not in {"audio", "video"}:
-            self.formats.filtered_labels = []
-            self.formats.filtered_lookup = {}
-            self.format_combo.configure(values=[])
-            self.format_var.set("")
-            self._update_controls_state()
-            return
-
-        if mode == "audio":
-            labels = self.formats.audio_labels
-            lookup = self.formats.audio_lookup
-            # For audio-only, container selection controls output post-processing, not
-            # which source formats are shown in the dropdown.
-            if not labels:
-                labels = ["Best audio only"]
-                lookup = {
-                    "Best audio only": {
-                        "custom_format": "bestaudio/best",
-                        "is_audio_only": True,
-                    }
-                }
-            self.formats.filtered_labels = list(labels)
-            self.formats.filtered_lookup = {label: lookup.get(label) or {} for label in labels}
-            self.format_combo.configure(values=self.formats.filtered_labels)
-            if self.formats.filtered_labels:
-                if self.format_var.get() not in self.formats.filtered_labels:
-                    self.format_var.set("")
-            else:
-                self.format_var.set("")
-            self._update_controls_state()
-            return
-        else:
-            labels = self.formats.video_labels
-            lookup = self.formats.video_lookup
-
         filter_val = self.format_filter_var.get()
         codec_raw = self.codec_filter_var.get()
         codec_val = codec_raw.lower()
-        if filter_val not in {"mp4", "webm"} or not codec_val:
-            self.formats.filtered_labels = []
-            self.formats.filtered_lookup = {}
-            self.format_combo.configure(values=[])
-            self.format_var.set("")
-            self._update_controls_state()
-            return
-        filtered_labels: list[str] = []
-        filtered_lookup: dict[str, dict] = {}
-
-        def apply_filters(allow_any_codec: bool) -> None:
-            filtered_labels.clear()
-            filtered_lookup.clear()
-            if filter_val in {"mp4", "webm"} and (allow_any_codec or codec_val):
-                for label in labels:
-                    info = lookup.get(label) or {}
-                    if info.get("custom_format"):
-                        filtered_labels.append(label)
-                        filtered_lookup[label] = info
-                        continue
-                    ext = (info.get("ext") or "").lower()
-                    if filter_val == "mp4" and ext != "mp4":
-                        continue
-                    if filter_val == "webm" and ext != "webm":
-                        continue
-                    if not allow_any_codec and codec_val != "any":
-                        vcodec = (info.get("vcodec") or "").lower()
-                        if codec_val.startswith("avc1") and "avc1" not in vcodec:
-                            continue
-                        if codec_val.startswith("av01") and "av01" not in vcodec:
-                            continue
-                    filtered_labels.append(label)
-                    filtered_lookup[label] = info
-
-        apply_filters(allow_any_codec=False)
+        result = core_format_selection.select_mode_formats(
+            mode=mode,
+            container=filter_val,
+            codec=codec_val,
+            video_labels=list(self.formats.video_labels),
+            video_lookup=dict(self.formats.video_lookup),
+            audio_labels=list(self.formats.audio_labels),
+            audio_lookup=dict(self.formats.audio_lookup),
+            video_containers=VIDEO_CONTAINERS,
+            required_video_codecs=("avc1", "av01"),
+        )
         if (
-            self.mode_var.get() == "video"
-            and filter_val in {"mp4", "webm"}
+            mode == "video"
+            and filter_val in VIDEO_CONTAINERS
             and codec_val
-            and not filtered_labels
+            and result.codec_fallback_used
         ):
-            # If codec filter wipes all video entries, fall back to any codec for this container.
             msg = "Chosen codec not available for this container; showing all formats in container"
             self.status_var.set(msg)
-            notice_key = (self.mode_var.get(), filter_val, codec_raw)
+            notice_key = (mode, filter_val, codec_raw)
             if notice_key != self.formats.last_codec_fallback_notice:
                 self.formats.last_codec_fallback_notice = notice_key
                 self._log(f"[info] {msg}")
-            apply_filters(allow_any_codec=True)
-        if not filtered_labels:
-            # Add a fall-back "best" option if no exact matches exist.
-            filtered_labels.append("Best available")
-            filtered_lookup["Best available"] = {"custom_format": "bestvideo+bestaudio/best"}
 
-        self.formats.filtered_labels = filtered_labels
-        self.formats.filtered_lookup = filtered_lookup
+        self.formats.filtered_labels = list(result.labels)
+        self.formats.filtered_lookup = dict(result.lookup)
         self.format_combo.configure(values=self.formats.filtered_labels)
         if self.formats.filtered_labels:
             if self.format_var.get() not in self.formats.filtered_labels:
@@ -866,13 +960,60 @@ class YtDlpGui:
 
         self._set_widget_visible(self.progress_item_label, self._show_progress_item)
         self._set_widget_visible(self.progress_item_value, self._show_progress_item)
+        self._set_widget_visible(self.progress_frame, True)
+
+        subtitle_controls_enabled = is_video_mode and not self.is_downloading
+        self._set_widget_visible(self.subtitle_languages_label, is_video_mode)
+        self._set_widget_visible(self.subtitle_languages_entry, is_video_mode)
+        self._set_widget_visible(self.subtitle_options_label, is_video_mode)
+        self._set_widget_visible(self.write_subtitles_check, is_video_mode)
+        self._set_widget_visible(self.embed_subtitles_check, is_video_mode)
+        if subtitle_controls_enabled:
+            self.subtitle_languages_entry.configure(state="normal")
+            self.write_subtitles_check.state(["!disabled"])
+        else:
+            self.subtitle_languages_entry.configure(state="disabled")
+            self.write_subtitles_check.state(["disabled"])
+            self.embed_subtitles_var.set(False)
+        embed_allowed = subtitle_controls_enabled and bool(self.write_subtitles_var.get())
+        if embed_allowed:
+            self.embed_subtitles_check.state(["!disabled"])
+        else:
+            self.embed_subtitles_var.set(False)
+            self.embed_subtitles_check.state(["disabled"])
+
+        audio_language_combo = getattr(self, "audio_language_combo", None)
 
         if self.is_downloading:
             self.browse_button.state(["disabled"])
             self.paste_button.state(["disabled"])
+            if audio_language_combo is not None:
+                try:
+                    self._set_combobox_enabled(audio_language_combo, False)
+                except (tk.TclError, RuntimeError):
+                    audio_language_combo.configure(state="disabled")
+            self.network_timeout_entry.configure(state="disabled")
+            self.network_retries_entry.configure(state="disabled")
+            self.retry_backoff_entry.configure(state="disabled")
         else:
             self.browse_button.state(["!disabled"])
             self.paste_button.state(["!disabled"])
+            if audio_language_combo is not None:
+                try:
+                    self._set_combobox_enabled(audio_language_combo, True)
+                except (tk.TclError, RuntimeError):
+                    audio_language_combo.configure(state="normal")
+            self.network_timeout_entry.configure(state="normal")
+            self.network_retries_entry.configure(state="normal")
+            self.retry_backoff_entry.configure(state="normal")
+        custom_filename_entry = getattr(self, "custom_filename_entry", None)
+        if custom_filename_entry is not None:
+            if self.is_downloading or is_playlist_url:
+                custom_filename_entry.configure(state="disabled")
+            else:
+                custom_filename_entry.configure(state="normal")
+        self.diagnostics_button.state(["!disabled"])
+        self._update_history_buttons_state()
 
     def _set_playlist_ui(self, is_playlist: bool) -> None:
         self.is_playlist = is_playlist
@@ -956,6 +1097,29 @@ class YtDlpGui:
             PROGRESS_ANIM_MS, self._progress_anim_tick
         )
 
+    def _snapshot_download_options(self) -> DownloadOptions:
+        custom_filename_var = getattr(self, "custom_filename_var", None)
+        custom_filename = ""
+        if custom_filename_var is not None:
+            try:
+                custom_filename = str(custom_filename_var.get())
+            except (tk.TclError, RuntimeError, TypeError, ValueError, AttributeError):
+                custom_filename = ""
+        return core_options.build_download_options(
+            network_timeout_raw=self.network_timeout_var.get(),
+            network_retries_raw=self.network_retries_var.get(),
+            retry_backoff_raw=self.retry_backoff_var.get(),
+            subtitle_languages_raw=self.subtitle_languages_var.get(),
+            write_subtitles_requested=bool(self.write_subtitles_var.get()),
+            embed_subtitles_requested=bool(self.embed_subtitles_var.get()),
+            is_video_mode=self.mode_var.get() == "video",
+            audio_language_raw=self.audio_language_var.get(),
+            custom_filename_raw=custom_filename,
+            timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
+            retries_default=download.YDL_ATTEMPT_RETRIES,
+            backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
+        )
+
     def _on_start(self) -> None:
         if self.is_downloading:
             return
@@ -977,6 +1141,7 @@ class YtDlpGui:
         playlist_enabled = bool(self.playlist_enabled_var.get())
         playlist_items_raw = (self.playlist_items_var.get() or "").strip()
         convert_to_mp4 = bool(self.convert_to_mp4_var.get())
+        options = self._snapshot_download_options()
 
         self.is_downloading = True
         self._cancel_requested = False
@@ -998,6 +1163,14 @@ class YtDlpGui:
                 "playlist_enabled": playlist_enabled,
                 "playlist_items_raw": playlist_items_raw,
                 "convert_to_mp4": convert_to_mp4,
+                "network_timeout_s": options["network_timeout_s"],
+                "network_retries": options["network_retries"],
+                "retry_backoff_s": options["retry_backoff_s"],
+                "subtitle_languages": options["subtitle_languages"],
+                "write_subtitles": options["write_subtitles"],
+                "embed_subtitles": options["embed_subtitles"],
+                "audio_language": options["audio_language"],
+                "custom_filename": options["custom_filename"],
             },
             daemon=True,
         )
@@ -1007,38 +1180,20 @@ class YtDlpGui:
         if self.is_downloading:
             return
         url = self._strip_url_whitespace(self.url_var.get())
-        if not url:
-            self.status_var.set("Queue add failed: missing URL")
-            self._log("[queue] missing URL")
-            return
-        if self.is_playlist or self._is_playlist_url(url):
-            self.status_var.set("Queue add failed: playlists not allowed")
-            self._log("[queue] playlists cannot be added (use single video URLs)")
-            return
-        if not self.formats.filtered_lookup:
-            self.status_var.set("Queue add failed: formats not loaded")
-            self._log("[queue] formats not loaded")
-            return
         settings = self._capture_queue_settings()
-        mode = settings.get("mode")
-        if mode not in {"audio", "video"}:
-            self.status_var.set("Queue add failed: choose audio or video mode first")
-            self._log("[queue] missing mode (audio/video)")
-            return
-        if mode == "video" and not settings.get("codec_filter"):
-            self.status_var.set("Queue add failed: choose a codec first")
-            self._log("[queue] missing codec")
-            return
-        if not settings.get("format_filter"):
-            self.status_var.set("Queue add failed: choose a container first")
-            self._log("[queue] missing container")
-            return
-        if not settings.get("format_label"):
-            self.status_var.set("Queue add failed: choose a format first")
-            self._log("[queue] missing format")
+        issue = core_queue_logic.queue_add_issue(
+            url=url,
+            playlist_mode=bool(self.is_playlist or self._is_playlist_url(url)),
+            formats_loaded=bool(self.formats.filtered_lookup),
+            settings=settings,
+        )
+        if issue:
+            status_text, log_text = core_queue_logic.queue_add_feedback(issue)
+            self.status_var.set(status_text)
+            self._log(log_text)
             return
 
-        self.queue_items.append({"url": url, "settings": settings})
+        self.queue_items.append(core_queue_logic.queue_item(url, settings))
         self._queue_refresh()
         self._update_controls_state()
 
@@ -1056,154 +1211,95 @@ class YtDlpGui:
         self._log("[cancel] Cancellation requested.")
         self._update_controls_state()
 
-    def _capture_queue_settings(self) -> dict:
-        return {
-            "mode": self.mode_var.get(),
-            "format_filter": self.format_filter_var.get(),
-            "codec_filter": self.codec_filter_var.get(),
-            "convert_to_mp4": bool(self.convert_to_mp4_var.get()),
-            "format_label": self.format_var.get(),
-            "output_dir": self.output_dir_var.get(),
-            "playlist_items": (self.playlist_items_var.get() or "").strip(),
-        }
+    def _export_diagnostics(self) -> None:
+        timestamp = datetime.now()
+        base_dir = Path(self.output_dir_var.get() or Path.home() / "Downloads").expanduser()
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            base_dir = Path.home() / "Downloads"
+            try:
+                base_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                self._log(f"[diag] export failed: {exc}")
+                self.status_var.set("Diagnostics export failed")
+                messagebox.showerror("Diagnostics export failed", str(exc))
+                return
+        output_path = base_dir / f"yt-dlp-gui-diagnostics-{timestamp:%Y%m%d-%H%M%S}.txt"
 
-    def _resolve_format_for_url(self, url: str, settings: dict) -> dict:
-        info = helpers.fetch_info(url)
-        formats = formats_mod.formats_from_info(info)
-        if not formats:
-            raise RuntimeError("No formats found for URL.")
-
-        mode = settings.get("mode")
-        format_filter = settings.get("format_filter")
-        codec_filter = settings.get("codec_filter") or ""
-        desired_label = settings.get("format_label") or ""
-
-        video_formats, audio_formats = helpers.split_and_filter_formats(formats)
-        video_labeled = helpers.build_labeled_formats(video_formats)
-        audio_labeled = helpers.build_labeled_formats(audio_formats)
-        audio_labeled.insert(
-            0,
-            (
-                "Best audio only",
-                {"custom_format": "bestaudio/best", "is_audio_only": True},
-            ),
+        options = self._snapshot_download_options()
+        payload = diagnostics.build_report_payload(
+            generated_at=timestamp,
+            status=self.status_var.get(),
+            simple_state=self.simple_state_var.get(),
+            url=self.url_var.get(),
+            mode=self.mode_var.get(),
+            container=self.format_filter_var.get(),
+            codec=self.codec_filter_var.get(),
+            format_label=self.format_var.get(),
+            queue_items=self.queue_items,
+            queue_active=self.queue_active,
+            is_downloading=self.is_downloading,
+            preview_title=self.formats.preview_title,
+            options=options,
+            history_items=self.download_history,
+            logs_text=self.logs.get_text(),
         )
 
-        if mode == "audio":
-            labels = [label for label, _ in audio_labeled]
-            lookup = {label: fmt for label, fmt in audio_labeled}
-            if desired_label in labels:
-                label = desired_label
-            elif labels:
-                label = labels[0]
-                if desired_label:
-                    self._log(
-                        f"[queue] format '{desired_label}' missing; using '{label}'"
-                    )
-            else:
-                label = "Best audio only"
-            return {
-                "fmt_label": label,
-                "fmt_info": lookup.get(label) or {"custom_format": "bestaudio/best"},
-                "format_filter": format_filter,
-                "is_playlist": info.get("_type") == "playlist" or info.get("entries") is not None,
-                "title": info.get("title") or url,
-            }
+        try:
+            output_path.write_text(payload, encoding="utf-8")
+        except OSError as exc:
+            self._log(f"[diag] export failed: {exc}")
+            self.status_var.set("Diagnostics export failed")
+            messagebox.showerror("Diagnostics export failed", str(exc))
+            return
+        self._log(f"[diag] exported {output_path}")
+        self.status_var.set("Diagnostics exported")
+        messagebox.showinfo("Diagnostics exported", f"Saved to:\n{output_path}")
 
-        labels = [label for label, _ in video_labeled]
-        lookup = {label: fmt for label, fmt in video_labeled}
+    def _capture_queue_settings(self) -> QueueSettings:
+        fmt_label = self.format_var.get()
+        fmt_info = self.formats.filtered_lookup.get(fmt_label) or {}
+        estimated_size = helpers.humanize_bytes(helpers.estimate_filesize_bytes(fmt_info))
+        options = self._snapshot_download_options()
+        return core_options.build_queue_settings(
+            mode=self.mode_var.get(),
+            format_filter=self.format_filter_var.get(),
+            codec_filter=self.codec_filter_var.get(),
+            convert_to_mp4=bool(self.convert_to_mp4_var.get()),
+            format_label=fmt_label,
+            estimated_size=estimated_size,
+            output_dir=self.output_dir_var.get(),
+            playlist_items=self.playlist_items_var.get(),
+            options=options,
+        )
 
-        filtered_labels: list[str] = []
-        filtered_lookup: dict[str, dict] = {}
-
-        def apply_filters(allow_any_codec: bool) -> None:
-            filtered_labels.clear()
-            filtered_lookup.clear()
-            if format_filter in {"mp4", "webm"} and (allow_any_codec or codec_filter):
-                for label in labels:
-                    info = lookup.get(label) or {}
-                    if info.get("custom_format"):
-                        filtered_labels.append(label)
-                        filtered_lookup[label] = info
-                        continue
-                    ext = (info.get("ext") or "").lower()
-                    if format_filter == "mp4" and ext != "mp4":
-                        continue
-                    if format_filter == "webm" and ext != "webm":
-                        continue
-                    if not allow_any_codec and codec_filter.lower() != "any":
-                        vcodec = (info.get("vcodec") or "").lower()
-                        if codec_filter.lower().startswith("avc1") and "avc1" not in vcodec:
-                            continue
-                        if codec_filter.lower().startswith("av01") and "av01" not in vcodec:
-                            continue
-                    filtered_labels.append(label)
-                    filtered_lookup[label] = info
-
-        apply_filters(allow_any_codec=False)
-        if (
-            format_filter in {"mp4", "webm"}
-            and codec_filter
-            and not filtered_labels
-        ):
-            self._log(
-                "[queue] chosen codec not available; using any codec for container"
-            )
-            apply_filters(allow_any_codec=True)
-
-        if not filtered_labels:
-            filtered_labels.append("Best available")
-            filtered_lookup["Best available"] = {
-                "custom_format": "bestvideo+bestaudio/best"
-            }
-
-        if desired_label in filtered_labels:
-            label = desired_label
-        else:
-            label = filtered_labels[0]
-            if desired_label:
-                self._log(
-                    f"[queue] format '{desired_label}' missing; using '{label}'"
-                )
-
-        return {
-            "fmt_label": label,
-            "fmt_info": filtered_lookup.get(label) or {"custom_format": "best"},
-            "format_filter": format_filter,
-            "is_playlist": info.get("_type") == "playlist" or info.get("entries") is not None,
-            "title": info.get("title") or url,
-        }
+    def _resolve_format_for_url(
+        self, url: str, settings: QueueSettings
+    ) -> dict[str, object]:
+        info = helpers.fetch_info(url)
+        formats = formats_mod.formats_from_info(info)
+        return core_format_selection.resolve_format_for_info(
+            info=info,
+            formats=formats,
+            settings=settings,
+            log=self._log,
+        )
 
     def _start_queue_download(self) -> None:
         if self.is_downloading or not self.queue_items:
             return
-        for idx, item in enumerate(self.queue_items, start=1):
-            settings = (item or {}).get("settings") or {}
-            mode = settings.get("mode")
-            if mode not in {"audio", "video"}:
-                messagebox.showerror(
-                    "Missing settings",
-                    f"Queue item {idx} is missing audio/video mode.",
-                )
-                return
-            if mode == "video" and not settings.get("codec_filter"):
-                messagebox.showerror(
-                    "Missing settings",
-                    f"Queue item {idx} is missing a codec choice.",
-                )
-                return
-            if not settings.get("format_filter"):
-                messagebox.showerror(
-                    "Missing settings",
-                    f"Queue item {idx} is missing a container choice.",
-                )
-                return
-            if not settings.get("format_label"):
-                messagebox.showerror(
-                    "Missing settings",
-                    f"Queue item {idx} is missing a format choice.",
-                )
-                return
+        invalid = core_queue_logic.first_invalid_queue_item(self.queue_items)
+        if invalid is not None:
+            idx, issue = invalid
+            messagebox.showerror(
+                "Missing settings",
+                (
+                    "Queue item "
+                    f"{idx} is missing {core_queue_logic.queue_start_missing_detail(issue)}."
+                ),
+            )
+            return
 
         self.queue_active = True
         self.queue_index = 0
@@ -1224,14 +1320,14 @@ class YtDlpGui:
     def _start_next_queue_item(self) -> None:
         if not self.queue_active or self.queue_index is None:
             return
-        while self.queue_index < len(self.queue_items):
-            url = str(self.queue_items[self.queue_index].get("url", "")).strip()
-            if url:
-                break
-            self.queue_index += 1
-        if self.queue_index >= len(self.queue_items):
+        next_index = core_queue_logic.next_non_empty_queue_index(
+            self.queue_items, self.queue_index
+        )
+        if next_index is None:
             self._finish_queue()
             return
+        self.queue_index = next_index
+        url = str(self.queue_items[self.queue_index].get("url", "")).strip()
         settings = self.queue_items[self.queue_index].get("settings") or {}
         total = len(self.queue_items)
         self._log(f"[queue] item {self.queue_index + 1}/{total} {url}")
@@ -1252,7 +1348,7 @@ class YtDlpGui:
     def _run_queue_download(
         self,
         url: str,
-        settings: dict,
+        settings: QueueSettings,
         index: int,
         total: int,
         default_output_dir: str,
@@ -1264,26 +1360,42 @@ class YtDlpGui:
             title = resolved.get("title") or url
             item_text = f"{index}/{total} {title}"
             self._post_ui(self.progress_item_var.set, item_text)
-            output_dir = Path(settings.get("output_dir") or default_output_dir).expanduser()
+            request = core_download_plan.build_queue_download_request(
+                url=url,
+                settings=settings,
+                resolved=resolved,
+                default_output_dir=default_output_dir,
+                timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
+                retries_default=download.YDL_ATTEMPT_RETRIES,
+                backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
+            )
+            output_dir = request["output_dir"]
             output_dir.mkdir(parents=True, exist_ok=True)
-            playlist_enabled = bool(resolved.get("is_playlist"))
-            playlist_items = settings.get("playlist_items") or None
-            if playlist_enabled:
+            if request["playlist_enabled"]:
                 self._log(
-                    f"[playlist] enabled=1 items={playlist_items or 'none'}"
+                    f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
                 )
             result = download.run_download(
-                url=url,
+                url=request["url"],
                 output_dir=output_dir,
-                fmt_info=resolved["fmt_info"],
-                fmt_label=resolved["fmt_label"],
-                format_filter=resolved["format_filter"],
-                convert_to_mp4=bool(settings.get("convert_to_mp4")),
-                playlist_enabled=playlist_enabled,
-                playlist_items=playlist_items,
+                fmt_info=request["fmt_info"],
+                fmt_label=request["fmt_label"],
+                format_filter=request["format_filter"],
+                convert_to_mp4=bool(request["convert_to_mp4"]),
+                playlist_enabled=bool(request["playlist_enabled"]),
+                playlist_items=request["playlist_items"],
                 cancel_event=self._cancel_event,
                 log=self._log,
                 update_progress=lambda u: self._post_ui(self._on_progress_update, u),
+                network_retries=int(request["network_retries"]),
+                network_timeout_s=int(request["network_timeout_s"]),
+                retry_backoff_s=float(request["retry_backoff_s"]),
+                subtitle_languages=list(request["subtitle_languages"]),
+                write_subtitles=bool(request["write_subtitles"]),
+                embed_subtitles=bool(request["embed_subtitles"]),
+                audio_language=str(request["audio_language"]),
+                custom_filename=str(request["custom_filename"]),
+                record_output=lambda p: self._post_ui(self._record_download_output, p, url),
             )
             had_error = result == download.DOWNLOAD_ERROR
             cancelled = result == download.DOWNLOAD_CANCELLED
@@ -1347,14 +1459,34 @@ class YtDlpGui:
         playlist_enabled: bool,
         playlist_items_raw: str,
         convert_to_mp4: bool,
+        network_timeout_s: int = download.YDL_SOCKET_TIMEOUT_SECONDS,
+        network_retries: int = download.YDL_ATTEMPT_RETRIES,
+        retry_backoff_s: float = download.YDL_RETRY_BACKOFF_SECONDS,
+        subtitle_languages: list[str] | None = None,
+        write_subtitles: bool = False,
+        embed_subtitles: bool = False,
+        audio_language: str = "",
+        custom_filename: str = "",
     ) -> None:
-        playlist_items = re.sub(r"\s+", "", playlist_items_raw)
-        if playlist_items_raw and playlist_items != playlist_items_raw:
+        playlist_items, was_normalized = core_download_plan.normalize_playlist_items(
+            playlist_items_raw
+        )
+        if was_normalized:
             self._log("[info] Playlist items normalized (spaces removed).")
         if playlist_enabled:
             self._log(f"[playlist] enabled=1 items={playlist_items or 'none'}")
 
-        result = download.run_download(
+        options: DownloadOptions = {
+            "network_timeout_s": network_timeout_s,
+            "network_retries": network_retries,
+            "retry_backoff_s": retry_backoff_s,
+            "subtitle_languages": list(subtitle_languages or []),
+            "write_subtitles": bool(write_subtitles),
+            "embed_subtitles": bool(embed_subtitles),
+            "audio_language": audio_language,
+            "custom_filename": custom_filename,
+        }
+        request = core_download_plan.build_single_download_request(
             url=url,
             output_dir=output_dir,
             fmt_info=fmt_info,
@@ -1362,10 +1494,31 @@ class YtDlpGui:
             format_filter=format_filter,
             convert_to_mp4=convert_to_mp4,
             playlist_enabled=playlist_enabled,
-            playlist_items=playlist_items or None,
+            playlist_items_raw=playlist_items or "",
+            options=options,
+        )
+
+        result = download.run_download(
+            url=request["url"],
+            output_dir=request["output_dir"],
+            fmt_info=request["fmt_info"],
+            fmt_label=request["fmt_label"],
+            format_filter=request["format_filter"],
+            convert_to_mp4=request["convert_to_mp4"],
+            playlist_enabled=request["playlist_enabled"],
+            playlist_items=request["playlist_items"],
             cancel_event=self._cancel_event,
             log=self._log,
             update_progress=lambda u: self._post_ui(self._on_progress_update, u),
+            network_retries=request["network_retries"],
+            network_timeout_s=request["network_timeout_s"],
+            retry_backoff_s=request["retry_backoff_s"],
+            subtitle_languages=list(request["subtitle_languages"]),
+            write_subtitles=bool(request["write_subtitles"]),
+            embed_subtitles=bool(request["embed_subtitles"]),
+            audio_language=(request["audio_language"] or "").strip(),
+            custom_filename=(request["custom_filename"] or "").strip(),
+            record_output=lambda p: self._post_ui(self._record_download_output, p, url),
         )
         if result == download.DOWNLOAD_ERROR:
             self._log("[status] Download finished with errors.")
@@ -1402,15 +1555,23 @@ class YtDlpGui:
             pass
         try:
             self.logs.shutdown()
-        except Exception:
+        except (tk.TclError, RuntimeError, AttributeError):
+            pass
+        try:
+            self.settings_panel.shutdown()
+        except (tk.TclError, RuntimeError, AttributeError):
             pass
         try:
             self.queue_panel.shutdown()
-        except Exception:
+        except (tk.TclError, RuntimeError, AttributeError):
+            pass
+        try:
+            self.history_panel.shutdown()
+        except (tk.TclError, RuntimeError, AttributeError):
             pass
         try:
             self.root.destroy()
-        except Exception:
+        except (tk.TclError, RuntimeError):
             pass
 
 

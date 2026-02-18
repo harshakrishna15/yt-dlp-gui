@@ -120,11 +120,14 @@ def label_format(fmt: FormatInfo) -> str:
     fps = fmt.get("fps")
     note = fmt.get("format_note") or ""
     abr = fmt.get("abr") or fmt.get("tbr")
+    size_estimate = estimate_filesize_bytes(fmt)
+    size_text = humanize_bytes(size_estimate) if size_estimate else ""
 
     if vcodec == "none":
         quality = f"{int(abr)}k" if abr else "Audio"
         codec = acodec or "audio"
-        return f"Audio {ext} {quality} ({codec}) [{fmt_id}]"
+        size_part = f" ~{size_text}" if size_text else ""
+        return f"Audio {ext} {quality} ({codec}){size_part} [{fmt_id}]"
 
     res = f"{height}p" if height else "Video"
     if height and width:
@@ -136,10 +139,41 @@ def label_format(fmt: FormatInfo) -> str:
         parts.append(fps_txt)
     if note:
         parts.append(f"[{note}]")
+    if size_text:
+        parts.append(f"~{size_text}")
     if codec_txt:
         parts.append(f"({codec_txt})")
     label = " ".join(parts)
     return f"{label} [{fmt_id}]"
+
+
+def estimate_filesize_bytes(fmt: FormatInfo) -> int | None:
+    value = fmt.get("filesize")
+    if not value:
+        value = fmt.get("filesize_approx")
+    try:
+        size_i = int(value)
+    except Exception:
+        return None
+    if size_i <= 0:
+        return None
+    return size_i
+
+
+def humanize_bytes(size_bytes: int | None) -> str:
+    if not size_bytes:
+        return ""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    units = ["KiB", "MiB", "GiB", "TiB"]
+    value = float(size_bytes)
+    unit_idx = -1
+    while value >= 1024.0 and unit_idx < len(units) - 1:
+        value /= 1024.0
+        unit_idx += 1
+    if unit_idx <= 0:
+        return f"{value:.0f} {units[max(0, unit_idx)]}"
+    return f"{value:.1f} {units[unit_idx]}"
 
 
 def build_labeled_formats(formats: list[FormatInfo]) -> list[tuple[str, FormatInfo]]:
@@ -156,3 +190,23 @@ def build_labeled_formats(formats: list[FormatInfo]) -> list[tuple[str, FormatIn
         seen_labels.add(label)
         labeled.append((label, fmt))
     return labeled
+
+
+def extract_audio_languages(formats: list[FormatInfo]) -> list[str]:
+    """Collect normalized audio language codes from available audio formats."""
+    seen: set[str] = set()
+    languages: list[str] = []
+    for fmt in formats:
+        if (fmt.get("vcodec") or "") != "none":
+            continue
+        lang_raw = fmt.get("language")
+        if not isinstance(lang_raw, str):
+            continue
+        lang = lang_raw.strip().lower()
+        if not lang or lang in {"none", "und", "unknown", "n/a", "na"}:
+            continue
+        if lang in seen:
+            continue
+        seen.add(lang)
+        languages.append(lang)
+    return sorted(languages)

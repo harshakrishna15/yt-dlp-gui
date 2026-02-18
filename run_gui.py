@@ -22,7 +22,7 @@ def main() -> None:
     if not package_dir.exists():
         sys.stderr.write("Could not find gui/\n")
         sys.exit(1)
-    os.execv(str(python_bin), [str(python_bin), "-m", "gui"])
+    os.execv(str(python_bin), [str(python_bin), "-m", "gui", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

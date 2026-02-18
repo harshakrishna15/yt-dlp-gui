@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -8,7 +9,7 @@ from .sidebar_host import SidebarHost, SidebarSizeSpec
 SIDEBAR_ANIM_MS = 16
 
 
-class QueueSidebar:
+class HistorySidebar:
     def __init__(
         self,
         root: tk.Tk,
@@ -20,9 +21,8 @@ class QueueSidebar:
         text_fg: str,
         entry_border: str,
         fonts: dict[str, tuple],
-        on_remove: callable,
-        on_move_up: callable,
-        on_move_down: callable,
+        on_open_file: callable,
+        on_open_folder: callable,
         on_clear: callable,
     ) -> None:
         self.root = root
@@ -33,14 +33,13 @@ class QueueSidebar:
         self._entry_border = entry_border
         self._fonts = fonts
 
-        self._on_remove_cb = on_remove
-        self._on_move_up_cb = on_move_up
-        self._on_move_down_cb = on_move_down
+        self._on_open_file_cb = on_open_file
+        self._on_open_folder_cb = on_open_folder
         self._on_clear_cb = on_clear
 
         self._selected_index: int | None = None
         self._row_widgets: list[dict] = []
-        self._editable = True
+        self._items: list[dict] = []
 
         self._build_header_controls(header_button)
         self._host = SidebarHost(
@@ -67,7 +66,7 @@ class QueueSidebar:
         header.columnconfigure(0, weight=1)
         ttk.Label(
             header,
-            text="Queue",
+            text="Download History",
             style="Subheader.TLabel",
             font=self._fonts["subheader"],
         ).grid(column=0, row=0, sticky="w")
@@ -103,6 +102,29 @@ class QueueSidebar:
         )
         self.list_inner.bind("<Configure>", self._on_list_inner_configure, add=True)
         self.list_canvas.bind("<Configure>", self._on_list_canvas_configure, add=True)
+        self._bind_scroll_events(self.list_canvas)
+        self._bind_scroll_events(self.list_inner)
+
+        actions = ttk.Frame(self._sidebar_content, style="Card.TFrame", padding=0)
+        actions.grid(column=0, row=2, sticky="e", pady=(6, 0))
+        self.open_file_button = ttk.Button(
+            actions, text="Open file", command=self._open_file_selected
+        )
+        self.open_file_button.grid(column=0, row=0, padx=(0, 8))
+        self.open_folder_button = ttk.Button(
+            actions, text="Open folder", command=self._open_folder_selected
+        )
+        self.open_folder_button.grid(column=1, row=0)
+
+    def _open_file_selected(self) -> None:
+        if self._selected_index is None:
+            return
+        self._on_open_file_cb()
+
+    def _open_folder_selected(self) -> None:
+        if self._selected_index is None:
+            return
+        self._on_open_folder_cb()
 
     def _on_list_inner_configure(self, _event: tk.Event) -> None:
         try:
@@ -135,6 +157,33 @@ class QueueSidebar:
             if self._scrollbar.winfo_ismapped():
                 self._scrollbar.grid_remove()
 
+    def _bind_scroll_events(self, widget: tk.Widget) -> None:
+        widget.bind("<MouseWheel>", self._on_mousewheel, add=True)
+        widget.bind("<Button-4>", self._on_mousewheel, add=True)
+        widget.bind("<Button-5>", self._on_mousewheel, add=True)
+
+    def _on_mousewheel(self, event: tk.Event) -> str:
+        units = 0
+        num = getattr(event, "num", None)
+        if num == 4:
+            units = -1
+        elif num == 5:
+            units = 1
+        else:
+            delta = int(getattr(event, "delta", 0) or 0)
+            if delta == 0:
+                return "break"
+            if sys.platform == "darwin":
+                units = -1 if delta > 0 else 1
+            else:
+                units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+        if units != 0:
+            try:
+                self.list_canvas.yview_scroll(units, "units")
+            except (tk.TclError, RuntimeError):
+                return "break"
+        return "break"
+
     def _update_row_wrap(self, width: int | None = None) -> None:
         if width is None:
             try:
@@ -143,7 +192,7 @@ class QueueSidebar:
                 width = 0
         if width <= 0:
             return
-        wrap = max(100, width - 120)
+        wrap = max(120, width - 24)
         for row in self._row_widgets:
             row["label"].configure(wraplength=wrap)
 
@@ -159,6 +208,26 @@ class QueueSidebar:
             row = self._row_widgets[index]
             row["frame"].configure(background=self._palette["base_bg"])
             row["label"].configure(background=self._palette["base_bg"])
+        self._update_action_buttons()
+
+    def get_selected_index(self) -> int | None:
+        return self._selected_index
+
+    def _update_action_buttons(self) -> None:
+        has_items = bool(self._items)
+        selected = self._selected_index is not None and self._selected_index < len(
+            self._items
+        )
+        if has_items:
+            self.clear_button.state(["!disabled"])
+        else:
+            self.clear_button.state(["disabled"])
+        if selected:
+            self.open_file_button.state(["!disabled"])
+            self.open_folder_button.state(["!disabled"])
+        else:
+            self.open_file_button.state(["disabled"])
+            self.open_folder_button.state(["disabled"])
 
     def toggle(self) -> None:
         self._host.toggle()
@@ -178,72 +247,27 @@ class QueueSidebar:
     def on_root_configure(self, event: tk.Event) -> None:
         self._host.on_root_configure(event)
 
-    def refresh(
-        self,
-        items: list[dict],
-        active_index: int | None = None,
-        editable: bool = True,
-    ) -> None:
-        self._editable = editable
-        if self._editable:
-            self.clear_button.state(["!disabled"])
-        else:
-            self.clear_button.state(["disabled"])
+    def refresh(self, items: list[dict]) -> None:
+        self._items = list(items)
         for child in self.list_inner.winfo_children():
             child.destroy()
         self._row_widgets.clear()
-        for idx, item in enumerate(items):
-            url = item.get("url", "")
-            prefix = ">> " if active_index is not None and idx == active_index else ""
-            settings = item.get("settings") or {}
-            mode = str(settings.get("mode") or "").strip()
-            container = str(settings.get("format_filter") or "").strip()
-            size_text = str(settings.get("estimated_size") or "").strip()
-            format_label = str(settings.get("format_label") or "").strip()
 
-            details: list[str] = []
-            if mode:
-                details.append(mode)
-            if container:
-                details.append(container)
-            if size_text:
-                details.append(f"~{size_text}")
+        for idx, item in enumerate(self._items):
+            ts = str(item.get("timestamp") or "").strip()
+            name = str(item.get("name") or item.get("path") or "").strip()
+            source = str(item.get("source_url") or "").strip()
+            source_short = source[:56] + "..." if len(source) > 59 else source
 
-            label_text = f"{prefix}{idx + 1}. {url}"
-            if details:
-                label_text = f"{label_text}\n   {' | '.join(details)}"
-            if format_label:
-                label_text = f"{label_text}\n   {format_label}"
+            label_text = name
+            if ts:
+                label_text = f"{ts} | {name}"
+            if source_short:
+                label_text = f"{label_text}\n{source_short}"
 
             row = tk.Frame(self.list_inner, background=self._palette["panel_bg"])
             row.grid(column=0, row=idx, sticky="ew", pady=2)
-            row.columnconfigure(1, weight=1)
-            button_wrap = ttk.Frame(row, style="Card.TFrame", padding=0)
-            button_wrap.grid(column=0, row=0, sticky="w", padx=(0, 8))
-            delete_button = ttk.Button(
-                button_wrap,
-                text="Delete",
-                command=lambda i=idx: self._on_remove_cb([i]),
-            )
-            delete_button.grid(column=0, row=0, sticky="w")
-            move_up_button = ttk.Button(
-                button_wrap,
-                text="↑",
-                command=lambda i=idx: self._on_move_up_cb([i]),
-                width=2,
-            )
-            move_up_button.grid(column=1, row=0, sticky="w", padx=(4, 0))
-            move_down_button = ttk.Button(
-                button_wrap,
-                text="↓",
-                command=lambda i=idx: self._on_move_down_cb([i]),
-                width=2,
-            )
-            move_down_button.grid(column=2, row=0, sticky="w", padx=(2, 0))
-            if not self._editable:
-                delete_button.state(["disabled"])
-                move_up_button.state(["disabled"])
-                move_down_button.state(["disabled"])
+            row.columnconfigure(0, weight=1)
             label = tk.Label(
                 row,
                 text=label_text,
@@ -252,19 +276,29 @@ class QueueSidebar:
                 foreground=self._text_fg,
                 justify="left",
             )
-            label.grid(column=1, row=0, sticky="ew")
+            label.grid(column=0, row=0, sticky="ew")
 
             row.bind("<Button-1>", lambda _event, i=idx: self._set_selected_index(i))
             label.bind("<Button-1>", lambda _event, i=idx: self._set_selected_index(i))
+            row.bind(
+                "<Double-Button-1>",
+                lambda _event, i=idx: (self._set_selected_index(i), self._on_open_file_cb()),
+            )
+            label.bind(
+                "<Double-Button-1>",
+                lambda _event, i=idx: (self._set_selected_index(i), self._on_open_file_cb()),
+            )
+            self._bind_scroll_events(row)
+            self._bind_scroll_events(label)
 
             self._row_widgets.append({"frame": row, "label": label})
 
         self._update_row_wrap()
-        if self._selected_index is not None and self._selected_index < len(items):
+        if self._selected_index is not None and self._selected_index < len(self._items):
             self._set_selected_index(self._selected_index)
         else:
             self._set_selected_index(None)
-
+        self._update_action_buttons()
 
     def shutdown(self) -> None:
         self._host.shutdown()

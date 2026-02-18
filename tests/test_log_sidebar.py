@@ -14,6 +14,15 @@ class _FakeRoot:
         return "after-id"
 
 
+class _FakeRootWithCancel:
+    def __init__(self) -> None:
+        self.cancelled: list[str] = []
+
+    def after_cancel(self, after_id: str) -> None:
+        self.cancelled.append(after_id)
+        raise ValueError("invalid after id")
+
+
 class _FakeText:
     def __init__(self) -> None:
         self.lines: list[str] = []
@@ -35,6 +44,9 @@ class _FakeText:
 
     def delete(self, _start: str, end: str) -> None:
         # end is expected like "<line>.0"; remove up to line-1.
+        if end == "end":
+            self.lines = []
+            return
         line_s = end.split(".", 1)[0]
         line_i = int(line_s)
         delete_count = max(0, line_i - 1)
@@ -42,6 +54,11 @@ class _FakeText:
 
     def see(self, _pos: str) -> None:
         return None
+
+
+class _FakeTextGetError(_FakeText):
+    def get(self, _start: str, _end: str) -> str:
+        raise RuntimeError("widget unavailable")
 
 
 class TestLogSidebarPolling(unittest.TestCase):
@@ -107,6 +124,39 @@ class TestLogSidebarAppend(unittest.TestCase):
             sidebar._append_batch(["x", "y"])
 
         sidebar._set_unread.assert_called_once_with(True)
+
+    def test_clear_empties_pending_queue(self) -> None:
+        sidebar = object.__new__(LogSidebar)
+        sidebar._set_unread = Mock()
+        sidebar.text = _FakeText()
+        sidebar._queue = queue.Queue()
+        sidebar._queue.put("line-1")
+        sidebar._queue.put("line-2")
+
+        sidebar.clear()
+
+        self.assertTrue(sidebar._queue.empty())
+        sidebar._set_unread.assert_called_once_with(False)
+
+    def test_get_text_returns_empty_when_widget_errors(self) -> None:
+        sidebar = object.__new__(LogSidebar)
+        sidebar.text = _FakeTextGetError()
+        self.assertEqual(sidebar.get_text(), "")
+
+    def test_shutdown_ignores_after_cancel_errors(self) -> None:
+        sidebar = object.__new__(LogSidebar)
+        sidebar._shutdown = False
+        sidebar.root = _FakeRootWithCancel()
+        sidebar._poll_after_id = "poll-1"
+        sidebar._layout_anim_after_id = "anim-1"
+        sidebar._host = Mock()
+
+        sidebar.shutdown()
+
+        self.assertTrue(sidebar._shutdown)
+        self.assertIsNone(sidebar._poll_after_id)
+        self.assertIsNone(sidebar._layout_anim_after_id)
+        sidebar._host.shutdown.assert_called_once()
 
 
 if __name__ == "__main__":

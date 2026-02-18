@@ -157,6 +157,102 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertEqual(opts["playlist_end"], 6)
         self.assertEqual(opts["merge_output_format"], "mp4")
 
+    @patch("gui.download.resolve_binary")
+    def test_build_opts_uses_custom_filename_for_single_video(self, mock_resolve_binary) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            custom_filename="My Clip.mp4",
+        )
+        self.assertTrue(
+            str(opts["outtmpl"]).endswith("My Clip_%(epoch)s.%(ext)s")
+        )
+
+    @patch("gui.download.resolve_binary")
+    def test_build_opts_ignores_custom_filename_for_playlists(self, mock_resolve_binary) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/playlist",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=True,
+            playlist_items="1-2",
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            custom_filename="My Clip",
+        )
+        self.assertTrue(
+            str(opts["outtmpl"]).endswith("%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s")
+        )
+
+    @patch("gui.download.resolve_binary")
+    def test_build_opts_includes_subtitle_language_and_audio_language(self, mock_resolve_binary) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={
+                "format_id": "22",
+                "vcodec": "avc1.640028",
+                "acodec": "mp4a.40.2",
+                "ext": "mp4",
+            },
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            network_timeout_s=7,
+            subtitle_languages=["en", "es"],
+            write_subtitles=True,
+            embed_subtitles=True,
+            audio_language="es",
+        )
+        self.assertEqual(opts["socket_timeout"], 7)
+        self.assertTrue(opts["writesubtitles"])
+        self.assertTrue(opts["writeautomaticsub"])
+        self.assertEqual(opts["subtitleslangs"], ["en", "es"])
+        self.assertIn({"key": "FFmpegEmbedSubtitle"}, opts["postprocessors"])
+        self.assertEqual(opts["format_sort"], ["lang:es"])
+
+    @patch("gui.download.resolve_binary")
+    def test_build_opts_does_not_embed_subtitles_for_audio_only(self, mock_resolve_binary) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/audio",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "251", "vcodec": "none", "acodec": "opus", "ext": "webm"},
+            fmt_label="Audio WEBM",
+            format_filter="opus",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            write_subtitles=True,
+            embed_subtitles=True,
+        )
+        self.assertTrue(opts["writesubtitles"])
+        self.assertNotIn({"key": "FFmpegEmbedSubtitle"}, opts["postprocessors"])
+
 
 class TestRunDownload(unittest.TestCase):
     def setUp(self) -> None:
@@ -282,6 +378,91 @@ class TestRunDownload(unittest.TestCase):
         self.assertEqual(result, download.DOWNLOAD_SUCCESS)
         self.assertTrue(any("[done] Download complete." in l for l in self.logs))
 
+    @patch("gui.download.build_ydl_opts")
+    @patch("gui.download.YoutubeDL")
+    def test_run_download_passes_custom_filename_to_build_opts(
+        self, mock_ytdl, mock_build_opts
+    ) -> None:
+        mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
+
+        class _FakeYDL:
+            def __init__(self, _opts: dict) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def download(self, _urls: list[str]) -> None:
+                return None
+
+        mock_ytdl.side_effect = _FakeYDL
+        result = download.run_download(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22"},
+            fmt_label="label",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            custom_filename="Renamed clip",
+        )
+
+        self.assertEqual(result, download.DOWNLOAD_SUCCESS)
+        self.assertEqual(
+            mock_build_opts.call_args.kwargs.get("custom_filename"),
+            "Renamed clip",
+        )
+
+    @patch("gui.download.build_ydl_opts")
+    @patch("gui.download.YoutubeDL")
+    def test_run_download_retries_then_succeeds(self, mock_ytdl, mock_build_opts) -> None:
+        mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
+        attempts = {"count": 0}
+
+        class _FakeYDL:
+            def __init__(self, _opts: dict) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def download(self, _urls: list[str]) -> None:
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    raise RuntimeError("transient")
+                return None
+
+        mock_ytdl.side_effect = _FakeYDL
+        result = download.run_download(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22"},
+            fmt_label="label",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            network_retries=1,
+            retry_backoff_s=0.0,
+        )
+
+        self.assertEqual(result, download.DOWNLOAD_SUCCESS)
+        self.assertEqual(attempts["count"], 2)
+        self.assertTrue(any("[retry]" in line for line in self.logs))
+
 
 class TestUtilityFormatting(unittest.TestCase):
     def test_format_duration(self) -> None:
@@ -319,6 +500,80 @@ class TestProgressHookResilience(unittest.TestCase):
         )
         hook({"status": "finished", "info_dict": {"title": "Done"}})
         self.assertTrue(any("[progress] UI update failed: ui fail" in x for x in logs))
+
+    def test_progress_hook_records_output_filename(self) -> None:
+        outputs: list[Path] = []
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=lambda _payload: None,
+            cancel_event=None,
+            ranges=[],
+            record_output=outputs.append,
+        )
+        hook(
+            {
+                "status": "finished",
+                "filename": "/tmp/example.mp4",
+                "info_dict": {"title": "Done"},
+            }
+        )
+        self.assertEqual(outputs, [Path("/tmp/example.mp4")])
+
+    def test_progress_hook_handles_invalid_eta_and_percent_values(self) -> None:
+        updates: list[dict] = []
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=updates.append,
+            cancel_event=None,
+            ranges=[],
+        )
+        hook(
+            {
+                "status": "downloading",
+                "downloaded_bytes": object(),
+                "total_bytes": 100,
+                "speed": 1024,
+                "eta": "bad",
+                "info_dict": {"playlist_index": 1, "title": "Title"},
+            }
+        )
+        downloading_updates = [u for u in updates if u.get("status") == "downloading"]
+        self.assertTrue(downloading_updates)
+        self.assertIsNone(downloading_updates[-1]["percent"])
+        self.assertEqual(downloading_updates[-1]["eta"], "—")
+
+    def test_progress_hook_ignores_record_output_runtime_error(self) -> None:
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=lambda _payload: None,
+            cancel_event=None,
+            ranges=[],
+            record_output=lambda _path: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        hook(
+            {
+                "status": "finished",
+                "filename": "/tmp/example.mp4",
+                "info_dict": {"title": "Done"},
+            }
+        )
+
+
+class TestPostprocessorHook(unittest.TestCase):
+    def test_postprocessor_hook_logs_rename_failure(self) -> None:
+        logs: list[str] = []
+        hook = download._postprocessor_hook_factory(logs.append)
+        with patch.object(Path, "exists", return_value=False), patch.object(
+            Path, "rename", side_effect=OSError("rename failed")
+        ):
+            hook(
+                {
+                    "status": "finished",
+                    "filename": "/tmp/example_12345.mp4",
+                    "info_dict": {"epoch": 12345},
+                }
+            )
+        self.assertTrue(any("[rename] Failed to rename: rename failed" in line for line in logs))
 
 
 if __name__ == "__main__":

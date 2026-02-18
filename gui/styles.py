@@ -61,6 +61,43 @@ def _make_solid_image(root: tk.Tk, *, fill: str, size: int = 7) -> tk.PhotoImage
     return img
 
 
+def _make_rounded_rect_image(
+    root: tk.Tk,
+    *,
+    fill: str,
+    size: int = 11,
+    radius: int = 4,
+) -> tk.PhotoImage:
+    """Create a rounded rectangle with transparent corners for softer buttons."""
+    radius = max(1, int(radius))
+    size = max((radius * 2) + 1, int(size))
+    img = tk.PhotoImage(master=root, width=size, height=size)
+
+    # Fill center bars first.
+    img.put(fill, to=(radius, 0, size - radius, size))
+    img.put(fill, to=(0, radius, size, size - radius))
+
+    # Fill quarter-circle corners.
+    r2 = float(radius) * float(radius)
+    for y in range(radius):
+        for x in range(radius):
+            dx = float((radius - 1) - x)
+            dy = float((radius - 1) - y)
+            if (dx * dx) + (dy * dy) > r2:
+                continue
+            # top-left
+            img.put(fill, to=(x, y, x + 1, y + 1))
+            # top-right
+            rx = (size - radius) + x
+            img.put(fill, to=(rx, y, rx + 1, y + 1))
+            # bottom-left
+            by = (size - radius) + y
+            img.put(fill, to=(x, by, x + 1, by + 1))
+            # bottom-right
+            img.put(fill, to=(rx, by, rx + 1, by + 1))
+    return img
+
+
 def _pick_first_existing(
     candidates: tuple[str, ...], available: set[str]
 ) -> str | None:
@@ -256,7 +293,7 @@ def _apply_connected_corner_frames(
     except tk.TclError:
         pass
 
-    for frame_style in ("Accent.TFrame",):
+    for frame_style in ("Accent.TFrame", "Card.TFrame"):
         style.configure(frame_style, relief="flat", borderwidth=0)
         style.layout(
             frame_style,
@@ -280,8 +317,9 @@ def _apply_connected_corner_buttons(
     active_fill: str,
     pressed_fill: str,
     disabled_fill: str,
+    radius: int = 4,
 ) -> None:
-    """Make buttons render as clean rectangles (no theme bevels)."""
+    """Make buttons render as rounded, friendly surfaces without theme bevels."""
     available = set(style.element_names())
     button_padding = _pick_first_existing(("Button.padding",), available)
     button_label = _pick_first_existing(("Button.label",), available)
@@ -289,10 +327,10 @@ def _apply_connected_corner_buttons(
         return
 
     cache = _theme_image_cache(root)
-    normal_img = _make_solid_image(root, fill=normal_fill)
-    active_img = _make_solid_image(root, fill=active_fill)
-    pressed_img = _make_solid_image(root, fill=pressed_fill)
-    disabled_img = _make_solid_image(root, fill=disabled_fill)
+    normal_img = _make_rounded_rect_image(root, fill=normal_fill, radius=radius)
+    active_img = _make_rounded_rect_image(root, fill=active_fill, radius=radius)
+    pressed_img = _make_rounded_rect_image(root, fill=pressed_fill, radius=radius)
+    disabled_img = _make_rounded_rect_image(root, fill=disabled_fill, radius=radius)
     cache.extend(
         [
             normal_img,
@@ -316,10 +354,10 @@ def _apply_connected_corner_buttons(
     except tk.TclError:
         pass
 
-    # Remove theme bevels and rely on our image for borders/corners.
+    # Remove theme bevels and rely on our image for rounded corners.
     style.configure("TButton", relief="flat", borderwidth=0)
 
-    for button_style in ("TButton",):
+    for button_style in ("TButton", "TMenubutton"):
         style.layout(
             button_style,
             [
@@ -389,12 +427,19 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     except tk.TclError:
         pass
 
-    base_bg = "#f6f1e8"
-    panel_bg = base_bg
-    accent = "#2b4c7e"
-    text_fg = "#2a2a2a"
-    entry_bg = "#fefbf5"
-    entry_border = "#cbbd9f"
+    # Friendly unified palette.
+    base_bg = "#e3edf8"
+    panel_bg = "#ffffff"
+    accent = "#5a8eea"
+    accent_hover = "#4d7ed5"
+    accent_pressed = "#426db8"
+    accent_soft = "#e9f0fb"
+    text_fg = "#23364b"
+    muted_fg = "#6f839e"
+    # Slightly tint fields so they stand apart from white cards.
+    entry_bg = "#f4f8ff"
+    entry_border = "#c7d7ea"
+    danger_fg = "#c2410c"
 
     font_family, using_plex_mono = _pick_font_family(root)
     if require_plex_mono and not using_plex_mono:
@@ -418,43 +463,57 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     root.option_add("*Font", base_font)
 
     style.configure(".", background=base_bg, foreground=text_fg)
-    style.configure("TFrame", background=base_bg)
+    style.configure("TFrame", background=panel_bg)
+    style.configure("HeaderBar.TFrame", background=panel_bg, borderwidth=0, relief="flat")
     style.configure("Accent.TFrame", background=panel_bg, borderwidth=1, relief="solid")
     style.configure(
-        "TLabel", background=base_bg, foreground=text_fg, padding=(0, 0), font=base_font
+        "TLabel", background=panel_bg, foreground=text_fg, padding=(0, 0), font=base_font
     )
     style.configure(
-        "Title.TLabel", font=title_font, foreground=accent, background=base_bg
+        "Title.TLabel", font=title_font, foreground=accent, background=panel_bg
     )
     style.configure(
-        "Header.TLabel", font=header_font, foreground=accent, background=base_bg
+        "Header.TLabel", font=header_font, foreground=accent, background=panel_bg
     )
     style.configure(
-        "Subheader.TLabel", font=subheader_font, foreground=text_fg, background=base_bg
+        "Subheader.TLabel", font=subheader_font, foreground=text_fg, background=panel_bg
     )
     style.configure(
-        "Alert.TLabel", foreground="#b42318", background=base_bg, font=base_font
+        "Alert.TLabel", foreground=danger_fg, background=panel_bg, font=base_font
     )
-    style.configure("Muted.TLabel", foreground="#94a3b8", background=base_bg)
+    style.configure("Muted.TLabel", foreground=muted_fg, background=panel_bg)
     style.configure(
-        "TRadiobutton", background=base_bg, foreground=text_fg, font=base_font
+        "TRadiobutton", background=panel_bg, foreground=text_fg, font=base_font
     )
     style.configure(
-        "TCheckbutton", background=base_bg, foreground=text_fg, font=base_font
+        "TCheckbutton", background=panel_bg, foreground=text_fg, font=base_font
     )
 
     style.configure(
         "TButton",
-        padding=(2, 2),
+        padding=(12, 6),
         background=accent,
-        foreground="#fdfaf5",
+        foreground="#ffffff",
         borderwidth=0,
         font=base_font,
     )
     style.map(
         "TButton",
-        background=[("active", "#243c63"), ("disabled", "#e5e7eb")],
-        foreground=[("disabled", "#8b8b8b")],
+        background=[("active", accent_hover), ("disabled", "#e9eff6")],
+        foreground=[("active", "#ffffff"), ("disabled", "#97a5b6")],
+    )
+    style.configure(
+        "TMenubutton",
+        padding=(12, 6),
+        background=accent,
+        foreground="#ffffff",
+        borderwidth=0,
+        font=base_font,
+    )
+    style.map(
+        "TMenubutton",
+        background=[("active", accent_hover), ("disabled", "#e9eff6")],
+        foreground=[("active", "#ffffff"), ("disabled", "#97a5b6")],
     )
     style.configure(
         "TEntry",
@@ -507,42 +566,42 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         _safe_style_configure(
             style,
             combo_style,
-            bordercolor=base_bg,
-            lightcolor=base_bg,
-            darkcolor=base_bg,
-            focuscolor=base_bg,
+            bordercolor=panel_bg,
+            lightcolor=panel_bg,
+            darkcolor=panel_bg,
+            focuscolor=panel_bg,
         )
         _safe_style_map(
             style,
             combo_style,
             bordercolor=[
-                ("focus", base_bg),
-                ("!focus", base_bg),
-                ("readonly", base_bg),
+                ("focus", panel_bg),
+                ("!focus", panel_bg),
+                ("readonly", panel_bg),
             ],
             lightcolor=[
-                ("focus", base_bg),
-                ("!focus", base_bg),
-                ("readonly", base_bg),
+                ("focus", panel_bg),
+                ("!focus", panel_bg),
+                ("readonly", panel_bg),
             ],
             darkcolor=[
-                ("focus", base_bg),
-                ("!focus", base_bg),
-                ("readonly", base_bg),
+                ("focus", panel_bg),
+                ("!focus", panel_bg),
+                ("readonly", panel_bg),
             ],
             focuscolor=[
-                ("focus", base_bg),
-                ("!focus", base_bg),
-                ("readonly", base_bg),
+                ("focus", panel_bg),
+                ("!focus", panel_bg),
+                ("readonly", panel_bg),
             ],
         )
     # Ensure readonly comboboxes don't look "disabled"/greyed out.
     for combo_style in ("TCombobox", "Clean.TCombobox"):
         style.map(
             combo_style,
-            fieldbackground=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
-            background=[("readonly", entry_bg), ("disabled", "#e5e7eb")],
-            foreground=[("disabled", "#8b8b8b")],
+            fieldbackground=[("readonly", entry_bg), ("disabled", "#eef2f7")],
+            background=[("readonly", entry_bg), ("disabled", "#eef2f7")],
+            foreground=[("disabled", muted_fg)],
         )
     style.configure(
         "Dark.TEntry",
@@ -573,8 +632,8 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         "Placeholder.Dark.TEntry",
         fieldbackground=entry_bg,
         background=entry_bg,
-        foreground="#94a3b8",
-        insertcolor="#94a3b8",
+        foreground=muted_fg,
+        insertcolor=muted_fg,
         relief="flat",
         borderwidth=0,
     )
@@ -597,33 +656,33 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
     style.configure(
         "Card.TFrame",
         background=panel_bg,
-        borderwidth=0,
+        borderwidth=1,
         relief="flat",
-        padding=4,
+        padding=10,
     )
     style.configure(
         "Link.TButton",
         foreground=accent,
         background=panel_bg,
-        padding=(2, 2),
+        padding=(4, 2),
         borderwidth=0,
         relief="flat",
         font=base_font,
     )
     style.map(
         "Link.TButton",
-        foreground=[("active", "#1f3558"), ("disabled", "#8b8b8b")],
+        foreground=[("active", accent_hover), ("disabled", muted_fg)],
         background=[("active", panel_bg)],
     )
     style.configure(
         "OutputPath.TFrame",
-        background=panel_bg,
+        background=accent_soft,
         borderwidth=0,
         relief="flat",
     )
     style.configure(
         "OutputPath.TLabel",
-        background=panel_bg,
+        background=accent_soft,
         foreground=accent,
         padding=(0, 0),
         font=base_font,
@@ -636,9 +695,10 @@ def apply_theme(root: tk.Tk, *, require_plex_mono: bool = False) -> dict[str, st
         root,
         style,
         normal_fill=accent,
-        active_fill="#243c63",
-        pressed_fill="#243c63",
+        active_fill=accent_hover,
+        pressed_fill=accent_pressed,
         disabled_fill="#e5e7eb",
+        radius=8,
     )
 
     return {

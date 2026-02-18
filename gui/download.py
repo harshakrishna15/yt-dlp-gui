@@ -21,6 +21,8 @@ YDL_RETRIES = 10
 YDL_FRAGMENT_RETRIES = 10
 YDL_EXTRACTOR_RETRIES = 5
 YDL_FILE_ACCESS_RETRIES = 3
+YDL_ATTEMPT_RETRIES = 1
+YDL_RETRY_BACKOFF_SECONDS = 1.5
 
 
 def build_ydl_opts(
@@ -36,6 +38,13 @@ def build_ydl_opts(
     cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
+    network_timeout_s: int = YDL_SOCKET_TIMEOUT_SECONDS,
+    subtitle_languages: list[str] | None = None,
+    write_subtitles: bool = False,
+    embed_subtitles: bool = False,
+    audio_language: str = "",
+    custom_filename: str = "",
+    record_output: Callable[[Path], None] | None = None,
 ) -> dict[str, Any]:
     fmt_id = fmt_info.get("format_id") if fmt_info else None
     is_audio_only = bool(
@@ -94,8 +103,11 @@ def build_ydl_opts(
         ]
         pp_args = ["-movflags", "+faststart"]
 
+    custom_stem = _sanitize_outtmpl_stem(custom_filename)
     if playlist_enabled:
         outtmpl = str(output_dir / "%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s")
+    elif custom_stem:
+        outtmpl = str(output_dir / f"{custom_stem}_%(epoch)s.%(ext)s")
     else:
         outtmpl = str(output_dir / "%(title)s_%(epoch)s.%(ext)s")
 
@@ -113,14 +125,22 @@ def build_ydl_opts(
         "outtmpl": outtmpl,
         "format": fmt,
         "progress_hooks": [
-            _progress_hook_factory(log, update_progress, cancel_event, ranges)
+            _progress_hook_factory(
+                log,
+                update_progress,
+                cancel_event,
+                ranges,
+                record_output=record_output,
+            )
         ],
-        "postprocessor_hooks": [_postprocessor_hook_factory(log)],
+        "postprocessor_hooks": [
+            _postprocessor_hook_factory(log, record_output=record_output)
+        ],
         "noplaylist": not playlist_enabled,
         "merge_output_format": merge_output_format,
         "postprocessors": postprocessors,
         "postprocessor_args": pp_args,
-        "socket_timeout": YDL_SOCKET_TIMEOUT_SECONDS,
+        "socket_timeout": max(1, int(network_timeout_s)),
         "retries": YDL_RETRIES,
         "fragment_retries": YDL_FRAGMENT_RETRIES,
         "extractor_retries": YDL_EXTRACTOR_RETRIES,
@@ -128,6 +148,16 @@ def build_ydl_opts(
         "skip_unavailable_fragments": True,
         "continuedl": True,
     }
+    if write_subtitles:
+        opts["writesubtitles"] = True
+        opts["writeautomaticsub"] = True
+        if subtitle_languages:
+            opts["subtitleslangs"] = subtitle_languages
+        if embed_subtitles and not is_audio_only:
+            postprocessors.append({"key": "FFmpegEmbedSubtitle"})
+    audio_lang_clean = (audio_language or "").strip()
+    if audio_lang_clean and audio_lang_clean.lower() not in {"any", "auto"}:
+        opts["format_sort"] = [f"lang:{audio_lang_clean.lower()}"]
     if ffmpeg_path:
         opts["ffmpeg_location"] = str(ffmpeg_path)
         log(f"[ffmpeg] source={ffmpeg_source} path={ffmpeg_path}")
@@ -168,41 +198,83 @@ def run_download(
     cancel_event: threading.Event | None,
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
+    network_retries: int = YDL_ATTEMPT_RETRIES,
+    network_timeout_s: int = YDL_SOCKET_TIMEOUT_SECONDS,
+    retry_backoff_s: float = YDL_RETRY_BACKOFF_SECONDS,
+    subtitle_languages: list[str] | None = None,
+    write_subtitles: bool = False,
+    embed_subtitles: bool = False,
+    audio_language: str = "",
+    custom_filename: str = "",
+    record_output: Callable[[Path], None] | None = None,
 ) -> str:
     """Run a yt-dlp download with progress callbacks."""
-    opts = build_ydl_opts(
-        url=url,
-        output_dir=output_dir,
-        fmt_info=fmt_info,
-        fmt_label=fmt_label,
-        format_filter=format_filter,
-        convert_to_mp4=convert_to_mp4,
-        playlist_enabled=playlist_enabled,
-        playlist_items=playlist_items,
-        cancel_event=cancel_event,
-        log=log,
-        update_progress=update_progress,
-    )
     start_ts = time.time()
     result = DOWNLOAD_SUCCESS
-    try:
-        with YoutubeDL(opts) as ydl:
-            ydl.download([url])
-    except DownloadCancelled:
-        result = DOWNLOAD_CANCELLED
-        log("[cancelled] Download cancelled.")
+    attempts = max(1, int(network_retries) + 1)
+    for attempt in range(1, attempts + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            result = DOWNLOAD_CANCELLED
+            log("[cancelled] Download cancelled.")
+            break
+        opts = build_ydl_opts(
+            url=url,
+            output_dir=output_dir,
+            fmt_info=fmt_info,
+            fmt_label=fmt_label,
+            format_filter=format_filter,
+            convert_to_mp4=convert_to_mp4,
+            playlist_enabled=playlist_enabled,
+            playlist_items=playlist_items,
+            cancel_event=cancel_event,
+            log=log,
+            update_progress=update_progress,
+            network_timeout_s=network_timeout_s,
+            subtitle_languages=subtitle_languages,
+            write_subtitles=write_subtitles,
+            embed_subtitles=embed_subtitles,
+            audio_language=audio_language,
+            custom_filename=custom_filename,
+            record_output=record_output,
+        )
         try:
-            update_progress({"status": "cancelled"})
-        except Exception:
-            pass
-    except Exception as exc:  # broad to surface in UI
-        result = DOWNLOAD_ERROR
-        log(f"[error] {exc}")
-    else:
-        log("[done] Download complete.")
-    finally:
-        elapsed = time.time() - start_ts
-        log(f"[time] Elapsed: {format_duration(elapsed)}")
+            with YoutubeDL(opts) as ydl:
+                ydl.download([url])
+        except DownloadCancelled:
+            result = DOWNLOAD_CANCELLED
+            log("[cancelled] Download cancelled.")
+            try:
+                update_progress({"status": "cancelled"})
+            except Exception:
+                pass
+            break
+        except Exception as exc:  # broad to surface in UI
+            result = DOWNLOAD_ERROR
+            log(f"[error] {exc}")
+            if attempt >= attempts:
+                break
+            wait_s = max(0.0, float(retry_backoff_s)) * (2 ** (attempt - 1))
+            log(
+                f"[retry] Attempt {attempt}/{attempts - 1} failed; "
+                f"retrying in {wait_s:.1f}s"
+            )
+            if wait_s > 0:
+                deadline = time.time() + wait_s
+                while time.time() < deadline:
+                    if cancel_event is not None and cancel_event.is_set():
+                        result = DOWNLOAD_CANCELLED
+                        log("[cancelled] Download cancelled.")
+                        break
+                    time.sleep(0.1)
+                if result == DOWNLOAD_CANCELLED:
+                    break
+            continue
+        else:
+            result = DOWNLOAD_SUCCESS
+            log("[done] Download complete.")
+            break
+    elapsed = time.time() - start_ts
+    log(f"[time] Elapsed: {format_duration(elapsed)}")
     return result
 
 
@@ -211,6 +283,8 @@ def _progress_hook_factory(
     update_progress: Callable[[ProgressUpdate], None],
     cancel_event: threading.Event | None,
     ranges: list[tuple[int, int | None]],
+    *,
+    record_output: Callable[[Path], None] | None = None,
 ) -> Callable[[dict], None]:
     last_log = {"ts": 0.0}
     last_item = {"key": None}
@@ -244,7 +318,7 @@ def _progress_hook_factory(
             return "—"
         try:
             seconds_i = int(max(0, seconds))
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return "—"
         m, s = divmod(seconds_i, 60)
         h, m = divmod(m, 60)
@@ -286,7 +360,7 @@ def _progress_hook_factory(
                 total = status.get("total_bytes") or status.get("total_bytes_estimate")
                 try:
                     pct_val = (float(downloaded) / float(total) * 100.0) if downloaded and total else None
-                except Exception:
+                except (TypeError, ValueError, ZeroDivisionError):
                     pct_val = None
                 speed_bps = status.get("speed")
                 eta_s = status.get("eta")
@@ -300,12 +374,33 @@ def _progress_hook_factory(
                 )
         elif status.get("status") == "finished":
             log("[progress] Download finished, post-processing...")
+            filename = status.get("filename")
+            if filename and record_output is not None:
+                try:
+                    record_output(Path(filename))
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
             _safe_update({"status": "finished"})
 
     return hook
 
 
-def _postprocessor_hook_factory(log: Callable[[str], None]) -> Callable[[dict], None]:
+def _sanitize_outtmpl_stem(value: str) -> str:
+    stem = re.sub(r"\s+", " ", (value or "").strip())
+    stem = re.sub(r'[\\/:*?"<>|]+', " ", stem)
+    stem = stem.strip().strip(".")
+    stem = re.sub(r"\s+", " ", stem).strip()
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", stem).strip()
+    if stem in {"", ".", ".."}:
+        return ""
+    return stem[:160]
+
+
+def _postprocessor_hook_factory(
+    log: Callable[[str], None],
+    *,
+    record_output: Callable[[Path], None] | None = None,
+) -> Callable[[dict], None]:
     def hook(status: dict) -> None:
         if status.get("status") != "finished":
             return
@@ -321,11 +416,21 @@ def _postprocessor_hook_factory(log: Callable[[str], None]) -> Callable[[dict], 
         cleaned_stem = path.stem.replace(suffix, "")
         clean_path = path.with_name(f"{cleaned_stem}{path.suffix}")
         if clean_path.exists():
+            if record_output is not None:
+                try:
+                    record_output(clean_path)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
             return
         try:
             path.rename(clean_path)
             log(f"[rename] {clean_path.name}")
-        except Exception as exc:
+            if record_output is not None:
+                try:
+                    record_output(clean_path)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
+        except OSError as exc:
             log(f"[rename] Failed to rename: {exc}")
 
     return hook

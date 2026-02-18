@@ -18,6 +18,7 @@ class FormatState:
     video_lookup: FormatLookup = field(default_factory=dict)
     audio_labels: list[str] = field(default_factory=list)
     audio_lookup: FormatLookup = field(default_factory=dict)
+    audio_languages: list[str] = field(default_factory=list)
 
     # Filtered formats shown in the dropdown (depends on mode/container/codec).
     filtered_labels: list[str] = field(default_factory=list)
@@ -25,3 +26,4 @@ class FormatState:
 
     # Cache processed formats per URL to avoid repeated probes.
     cache: dict[str, FormatsCacheEntry] = field(default_factory=dict)
+    preview_title: str = ""

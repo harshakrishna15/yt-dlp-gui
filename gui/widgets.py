@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 
 TOOLTIP_DELAY_MS = 450
+TOOLTIP_VISIBLE_MS = 1800
 SCROLLBAR_PAD_PX = 4
 SCROLL_OVERFLOW_PX = 2
 
@@ -14,25 +15,31 @@ class Tooltip:
         text: str,
         *,
         delay_ms: int = TOOLTIP_DELAY_MS,
+        visible_ms: int = TOOLTIP_VISIBLE_MS,
     ) -> None:
         self.root = root
         self.widget = widget
         self.text = text
         self.delay_ms = delay_ms
+        self.visible_ms = visible_ms
         self._after_id: str | None = None
+        self._hide_after_id: str | None = None
         self._tip: tk.Toplevel | None = None
         self._last_xy: tuple[int, int] | None = None
+        self._hovering = False
 
         widget.bind("<Enter>", self._on_enter, add=True)
         widget.bind("<Leave>", self._on_leave, add=True)
         widget.bind("<Motion>", self._on_motion, add=True)
 
     def _on_enter(self, event: tk.Event) -> None:
+        self._hovering = True
         self._last_xy = (
             int(getattr(event, "x_root", 0)),
             int(getattr(event, "y_root", 0)),
         )
-        self._schedule()
+        if self._tip is None:
+            self._schedule()
 
     def _on_motion(self, event: tk.Event) -> None:
         self._last_xy = (
@@ -41,16 +48,22 @@ class Tooltip:
         )
         if self._tip is not None:
             self._position()
+            return
+        self._schedule()
 
     def _on_leave(self, _event: tk.Event) -> None:
-        self._cancel()
+        self._hovering = False
+        self._cancel_show()
+        self._cancel_hide()
         self._hide()
 
     def _schedule(self) -> None:
-        self._cancel()
+        self._cancel_show()
+        if not self._hovering:
+            return
         self._after_id = self.root.after(self.delay_ms, self._show)
 
-    def _cancel(self) -> None:
+    def _cancel_show(self) -> None:
         if self._after_id is None:
             return
         try:
@@ -58,6 +71,23 @@ class Tooltip:
         except Exception:
             pass
         self._after_id = None
+
+    def _schedule_hide(self) -> None:
+        self._cancel_hide()
+        self._hide_after_id = self.root.after(self.visible_ms, self._auto_hide)
+
+    def _cancel_hide(self) -> None:
+        if self._hide_after_id is None:
+            return
+        try:
+            self.root.after_cancel(self._hide_after_id)
+        except Exception:
+            pass
+        self._hide_after_id = None
+
+    def _auto_hide(self) -> None:
+        self._hide_after_id = None
+        self._hide()
 
     def _position(self) -> None:
         if self._tip is None:
@@ -69,6 +99,8 @@ class Tooltip:
 
     def _show(self) -> None:
         self._after_id = None
+        if not self._hovering:
+            return
         if self._tip is not None:
             return
         self._tip = tk.Toplevel(self.root)
@@ -91,8 +123,10 @@ class Tooltip:
         )
         label.pack()
         self._position()
+        self._schedule_hide()
 
     def _hide(self) -> None:
+        self._cancel_hide()
         if self._tip is None:
             return
         try:

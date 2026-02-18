@@ -1,5 +1,6 @@
 import queue
 import threading
+import tempfile
 import sys
 import types
 import unittest
@@ -53,6 +54,7 @@ class TestFetchRaceGuard(unittest.TestCase):
         app = object.__new__(YtDlpGui)
         app.formats = FormatState()
         app.status_var = _Var("Idle")
+        app.preview_title_var = _Var("")
         app._set_playlist_ui = Mock()
         app._apply_mode_formats = Mock()
         app._update_controls_state = Mock()
@@ -68,14 +70,14 @@ class TestFetchRaceGuard(unittest.TestCase):
         app.formats.video_lookup = {"keep me": {"format_id": "x"}}
         app._active_fetch_request_id = 2
 
-        with patch("gui.app.helpers.split_and_filter_formats") as split_mock:
+        with patch("gui.app.format_pipeline.build_format_collections") as build_mock:
             app._set_formats(
                 [{"format_id": "new"}],
                 fetch_url="https://old.example",
                 request_id=1,
             )
 
-        split_mock.assert_not_called()
+        build_mock.assert_not_called()
         self.assertTrue(app.formats.is_fetching)
         self.assertEqual(app.formats.last_fetched_url, "https://new.example")
         self.assertEqual(app.formats.video_labels, ["keep me"])
@@ -91,14 +93,17 @@ class TestFetchRaceGuard(unittest.TestCase):
         audio_fmt = {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus"}
 
         with patch(
-            "gui.app.helpers.split_and_filter_formats",
-            return_value=([video_fmt], [audio_fmt]),
-        ), patch(
-            "gui.app.helpers.build_labeled_formats",
-            side_effect=[
-                [("Video 1080p", video_fmt)],
-                [("Audio opus", audio_fmt)],
-            ],
+            "gui.app.format_pipeline.build_format_collections",
+            return_value={
+                "video_labels": ["Video 1080p"],
+                "video_lookup": {"Video 1080p": video_fmt},
+                "audio_labels": ["Best audio only", "Audio opus"],
+                "audio_lookup": {
+                    "Best audio only": {"custom_format": "bestaudio/best", "is_audio_only": True},
+                    "Audio opus": audio_fmt,
+                },
+                "audio_languages": [],
+            },
         ):
             app._set_formats(
                 [video_fmt, audio_fmt],
@@ -110,6 +115,7 @@ class TestFetchRaceGuard(unittest.TestCase):
         self.assertIsNone(app._active_fetch_request_id)
         self.assertIn(fetch_url, app.formats.cache)
         self.assertEqual(app.formats.cache[fetch_url]["video_labels"], ["Video 1080p"])
+        self.assertEqual(app.preview_title_var.get(), "")
 
     def test_set_formats_for_old_url_refetches_current_url(self) -> None:
         app = self._base_app()
@@ -120,18 +126,48 @@ class TestFetchRaceGuard(unittest.TestCase):
         scheduled: list[tuple[int, object]] = []
         app._safe_after = lambda delay, callback: scheduled.append((delay, callback)) or "after-2"
 
-        with patch("gui.app.helpers.split_and_filter_formats") as split_mock:
+        with patch("gui.app.format_pipeline.build_format_collections") as build_mock:
             app._set_formats(
                 [{"format_id": "stale"}],
                 fetch_url="https://stale.example",
                 request_id=9,
             )
 
-        split_mock.assert_not_called()
+        build_mock.assert_not_called()
         self.assertFalse(app.formats.is_fetching)
         self.assertIsNone(app._active_fetch_request_id)
         self.assertEqual(scheduled[0][0], 0)
         self.assertEqual(scheduled[0][1], app._start_fetch_formats)
+
+    def test_set_formats_applies_preview_metadata(self) -> None:
+        app = self._base_app()
+        app.formats.is_fetching = True
+        app._active_fetch_request_id = 11
+        app.url_var = _Var("https://example.com/watch?v=123")
+
+        video_fmt = {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none"}
+        audio_fmt = {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus"}
+        with patch(
+            "gui.app.format_pipeline.build_format_collections",
+            return_value={
+                "video_labels": ["Video 1080p"],
+                "video_lookup": {"Video 1080p": video_fmt},
+                "audio_labels": ["Best audio only", "Audio opus"],
+                "audio_lookup": {
+                    "Best audio only": {"custom_format": "bestaudio/best", "is_audio_only": True},
+                    "Audio opus": audio_fmt,
+                },
+                "audio_languages": [],
+            },
+        ):
+            app._set_formats(
+                [video_fmt, audio_fmt],
+                fetch_url="https://example.com/watch?v=123",
+                request_id=11,
+                preview_title="Sample title",
+            )
+
+        self.assertEqual(app.preview_title_var.get(), "Sample title")
 
 
 class TestUiEventQueue(unittest.TestCase):
@@ -171,6 +207,20 @@ class TestUiEventQueue(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertEqual(scheduled[-1][0], 0)
         self.assertEqual(app._ui_event_queue.qsize(), 1)
+
+
+class TestCodecPreferenceMatching(unittest.TestCase):
+    def test_codec_match_accepts_h264_alias_for_avc1(self) -> None:
+        self.assertTrue(YtDlpGui._codec_matches_preference("h264", "avc1"))
+        self.assertTrue(YtDlpGui._codec_matches_preference("avc1.640028", "avc1"))
+
+    def test_codec_match_accepts_av1_alias_for_av01(self) -> None:
+        self.assertTrue(YtDlpGui._codec_matches_preference("av1", "av01"))
+        self.assertTrue(YtDlpGui._codec_matches_preference("av01.0.08M.08", "av01"))
+
+    def test_codec_match_rejects_different_codecs(self) -> None:
+        self.assertFalse(YtDlpGui._codec_matches_preference("vp9", "avc1"))
+        self.assertFalse(YtDlpGui._codec_matches_preference("h264", "av01"))
 
 
 class TestFormatCacheBounded(unittest.TestCase):
@@ -214,6 +264,7 @@ class TestFormatCacheBounded(unittest.TestCase):
     def test_load_cached_formats_copies_values(self) -> None:
         app = object.__new__(YtDlpGui)
         app.formats = FormatState()
+        app.preview_title_var = _Var("")
         app._touch_cached_url = Mock()
         app._reset_format_selections = Mock()
         app._apply_mode_formats = Mock()
@@ -262,6 +313,7 @@ class TestWorkerSnapshotPaths(unittest.TestCase):
                 playlist_enabled=True,
                 playlist_items_raw="1, 2, 3",
                 convert_to_mp4=True,
+                custom_filename="Renamed File",
             )
 
         kwargs = mock_run.call_args.kwargs
@@ -269,8 +321,134 @@ class TestWorkerSnapshotPaths(unittest.TestCase):
         self.assertTrue(kwargs["convert_to_mp4"])
         self.assertTrue(kwargs["playlist_enabled"])
         self.assertEqual(kwargs["playlist_items"], "1,2,3")
+        self.assertEqual(kwargs["custom_filename"], "Renamed File")
+        self.assertEqual(kwargs["network_timeout_s"], 20)
+        self.assertEqual(kwargs["network_retries"], 1)
+        self.assertEqual(kwargs["retry_backoff_s"], 1.5)
         self.assertEqual(posted[0][0], on_progress)
         self.assertEqual(posted[-1][0], on_finish)
+
+
+class TestAdvancedOptionsAndHistory(unittest.TestCase):
+    def test_snapshot_download_options_parses_and_clamps(self) -> None:
+        app = object.__new__(YtDlpGui)
+        app.mode_var = _Var("video")
+        app.subtitle_languages_var = _Var("en, es, en")
+        app.write_subtitles_var = _Var(True)
+        app.embed_subtitles_var = _Var(True)
+        app.audio_language_var = _Var(" es ")
+        app.custom_filename_var = _Var("  my clip.mp4  ")
+        app.network_timeout_var = _Var("999")
+        app.network_retries_var = _Var("2")
+        app.retry_backoff_var = _Var("0.5")
+
+        options = app._snapshot_download_options()
+        self.assertEqual(options["network_timeout_s"], 300)
+        self.assertEqual(options["network_retries"], 2)
+        self.assertEqual(options["retry_backoff_s"], 0.5)
+        self.assertEqual(options["subtitle_languages"], ["en", "es"])
+        self.assertTrue(options["write_subtitles"])
+        self.assertTrue(options["embed_subtitles"])
+        self.assertEqual(options["audio_language"], "es")
+        self.assertEqual(options["custom_filename"], "my clip")
+
+    def test_record_download_output_deduplicates_paths(self) -> None:
+        app = object.__new__(YtDlpGui)
+        app.download_history = []
+        app._history_seen_paths = set()
+        app._refresh_history_panel = Mock()
+
+        app._record_download_output(Path("/tmp/a.mp4"), "https://example.com/video")
+        app._record_download_output(Path("/tmp/a.mp4"), "https://example.com/video")
+        app._record_download_output(Path("/tmp/b.mp4"), "https://example.com/video2")
+
+        self.assertEqual(len(app.download_history), 2)
+        self.assertEqual(app.download_history[0]["name"], "b.mp4")
+        self.assertEqual(app.download_history[1]["name"], "a.mp4")
+        self.assertGreaterEqual(app._refresh_history_panel.call_count, 2)
+
+    def test_capture_queue_settings_includes_estimated_size_and_advanced_options(self) -> None:
+        app = object.__new__(YtDlpGui)
+        app.mode_var = _Var("video")
+        app.format_filter_var = _Var("mp4")
+        app.codec_filter_var = _Var("avc1 (H.264)")
+        app.convert_to_mp4_var = _Var(False)
+        app.format_var = _Var("Video 1080p")
+        app.output_dir_var = _Var("/tmp/out")
+        app.playlist_items_var = _Var("")
+        app.subtitle_languages_var = _Var("en,es")
+        app.write_subtitles_var = _Var(True)
+        app.embed_subtitles_var = _Var(False)
+        app.audio_language_var = _Var("en")
+        app.custom_filename_var = _Var("Queued Name")
+        app.network_timeout_var = _Var("20")
+        app.network_retries_var = _Var("1")
+        app.retry_backoff_var = _Var("1.5")
+        app.formats = FormatState()
+        app.formats.filtered_lookup = {
+            "Video 1080p": {"format_id": "137", "filesize_approx": 3 * 1024 * 1024}
+        }
+
+        settings = app._capture_queue_settings()
+        self.assertEqual(settings["estimated_size"], "3.0 MiB")
+        self.assertEqual(settings["subtitle_languages"], ["en", "es"])
+        self.assertEqual(settings["network_retries"], 1)
+        self.assertEqual(settings["audio_language"], "en")
+        self.assertEqual(settings["custom_filename"], "Queued Name")
+
+    def test_export_diagnostics_writes_report_file(self) -> None:
+        app = object.__new__(YtDlpGui)
+        app._log = Mock()
+        app.status_var = _Var("Idle")
+        app.simple_state_var = _Var("Idle")
+        app.url_var = _Var("https://www.youtube.com/watch?v=abc123&t=45")
+        app.mode_var = _Var("video")
+        app.format_filter_var = _Var("mp4")
+        app.codec_filter_var = _Var("avc1 (H.264)")
+        app.format_var = _Var("1080p")
+        app.queue_items = [{"url": "https://example.com/a", "settings": {"mode": "video"}}]
+        app.queue_active = False
+        app.is_downloading = False
+        app.formats = FormatState()
+        app.formats.preview_title = "Example Video"
+        app.download_history = [
+            {
+                "timestamp": "2026-02-17 12:00:00",
+                "name": "a.mp4",
+                "path": "/tmp/a.mp4",
+                "source_url": "https://www.youtube.com/watch?v=abc123&token=secret",
+            }
+        ]
+        app.logs = Mock()
+        app.logs.get_text.return_value = "line one\nline two"
+        app._snapshot_download_options = Mock(
+            return_value={
+                "network_timeout_s": 20,
+                "network_retries": 1,
+                "retry_backoff_s": 1.5,
+                "write_subtitles": False,
+                "embed_subtitles": False,
+                "subtitle_languages": [],
+                "audio_language": "",
+                "custom_filename": "",
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "gui.app.messagebox.showinfo"
+        ) as info_mock:
+            app.output_dir_var = _Var(tmpdir)
+            app._export_diagnostics()
+
+            exported = sorted(Path(tmpdir).glob("yt-dlp-gui-diagnostics-*.txt"))
+            self.assertEqual(len(exported), 1)
+            report = exported[0].read_text(encoding="utf-8")
+            self.assertIn("generated_at=", report)
+            self.assertIn("[logs]", report)
+            self.assertIn("line one", report)
+            self.assertIn("watch?v=abc123", report)
+            self.assertNotIn("token=secret", report)
+            info_mock.assert_called_once()
 
 
 class TestQueueMutationLockout(unittest.TestCase):
@@ -413,6 +591,37 @@ class TestQueueStartStability(unittest.TestCase):
             )
 
         self.assertEqual(posted[-1][1], (False, True))
+
+    def test_run_queue_download_passes_custom_filename(self) -> None:
+        app = object.__new__(YtDlpGui)
+        app._cancel_event = None
+        app._log = lambda _msg: None
+        app.progress_item_var = _Var("—")
+        posted: list[tuple[object, tuple]] = []
+        app._post_ui = lambda callback, *args, **kwargs: posted.append((callback, args))
+        app._on_queue_item_finish = lambda *_args, **_kwargs: None
+        app._on_progress_update = lambda _payload: None
+        app._resolve_format_for_url = lambda _url, _settings: {
+            "title": "Video",
+            "is_playlist": False,
+            "fmt_info": {"format_id": "22"},
+            "fmt_label": "Label",
+            "format_filter": "mp4",
+        }
+
+        with patch("gui.app.download.run_download", return_value="success") as mock_run:
+            app._run_queue_download(
+                url="https://example.com/video",
+                settings={"output_dir": "/tmp/out", "custom_filename": "Queued Name"},
+                index=1,
+                total=3,
+                default_output_dir="/tmp/out",
+            )
+
+        self.assertEqual(
+            mock_run.call_args.kwargs.get("custom_filename"),
+            "Queued Name",
+        )
 
 
 class TestQueueCompletionFlow(unittest.TestCase):

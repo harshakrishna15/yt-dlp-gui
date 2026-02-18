@@ -100,9 +100,12 @@ class TestFormatHelpers(unittest.TestCase):
                 "vcodec": "none",
                 "acodec": "opus",
                 "abr": 160,
+                "filesize_approx": 5 * 1024 * 1024,
             }
         )
-        self.assertIn("Audio WEBM 160k (opus) [251]", audio_label)
+        self.assertIn("Audio WEBM 160k (opus)", audio_label)
+        self.assertIn("[251]", audio_label)
+        self.assertIn("~5.0 MiB", audio_label)
 
         video_label = helpers.label_format(
             {
@@ -118,6 +121,13 @@ class TestFormatHelpers(unittest.TestCase):
         self.assertIn("1080p 1920x1080 MP4 30fps", video_label)
         self.assertIn("[137]", video_label)
 
+    def test_estimate_filesize_and_humanize_bytes(self) -> None:
+        size = helpers.estimate_filesize_bytes({"filesize": 1536})
+        self.assertEqual(size, 1536)
+        self.assertEqual(helpers.humanize_bytes(size), "2 KiB")
+        approx_only = helpers.estimate_filesize_bytes({"filesize_approx": 3 * 1024 * 1024})
+        self.assertEqual(helpers.humanize_bytes(approx_only), "3.0 MiB")
+
     def test_build_labeled_formats_filters_missing_format_id(self) -> None:
         labeled = helpers.build_labeled_formats(
             [
@@ -127,6 +137,17 @@ class TestFormatHelpers(unittest.TestCase):
         )
         self.assertEqual(len(labeled), 1)
         self.assertEqual(labeled[0][1]["format_id"], "22")
+
+    def test_extract_audio_languages_unique_and_sorted(self) -> None:
+        formats = [
+            {"format_id": "v1", "vcodec": "avc1", "language": "fr"},
+            {"format_id": "a1", "vcodec": "none", "language": "ES"},
+            {"format_id": "a2", "vcodec": "none", "language": "en"},
+            {"format_id": "a3", "vcodec": "none", "language": "es"},
+            {"format_id": "a4", "vcodec": "none", "language": "und"},
+            {"format_id": "a5", "vcodec": "none", "language": ""},
+        ]
+        self.assertEqual(helpers.extract_audio_languages(formats), ["en", "es"])
 
 
 class TestTooling(unittest.TestCase):

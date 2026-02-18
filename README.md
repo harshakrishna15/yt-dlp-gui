@@ -14,6 +14,7 @@ Paste a URL, pick a format, and download.
 - Python 3.10+ (with Tk/Tkinter)
 - Dependencies from `requirements.txt`
 - `ffmpeg` and `ffprobe` available in `PATH`
+- Optional for Qt spike UI: `requirements-qt.txt`
 
 ### Set Up From Source (Developer Setup)
 
@@ -38,6 +39,17 @@ py -3 -m venv .venv
 pip install -r requirements.txt
 ```
 
+### Optional: Install Qt Spike UI
+
+This is an alternate frontend experiment (`PySide6`) to evaluate a cleaner layout.
+It does not yet replace the full Tk feature set.
+
+- macOS / Windows
+
+```bash
+pip install -r requirements-qt.txt
+```
+
 ### Run From Source
 
 - macOS
@@ -52,6 +64,22 @@ python3 run_gui.py
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python run_gui.py
+```
+
+Run the Qt spike frontend:
+
+- macOS
+
+```bash
+source .venv/bin/activate
+python3 run_gui.py --ui qt
+```
+
+- Windows
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python run_gui.py --ui qt
 ```
 
 ### Run Tests
