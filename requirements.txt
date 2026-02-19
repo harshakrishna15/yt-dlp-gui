@@ -1,4 +1,5 @@
 yt-dlp==2026.1.29
+PySide6>=6.10.1,<6.11
 brotli==1.2.0
 certifi==2026.1.4
 charset-normalizer==3.4.4

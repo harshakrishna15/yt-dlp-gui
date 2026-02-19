@@ -1,7 +1,7 @@
 from datetime import datetime
 import unittest
 
-from gui import diagnostics
+from gui.common import diagnostics
 
 
 class TestDiagnostics(unittest.TestCase):

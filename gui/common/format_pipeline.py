@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import yt_dlp_helpers as helpers
-from .shared_types import FormatInfo, FormatLookup
+from .types import FormatInfo, FormatLookup
 
 BEST_AUDIO_LABEL = "Best audio only"
 BEST_AUDIO_INFO: FormatInfo = {

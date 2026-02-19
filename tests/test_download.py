@@ -1,40 +1,15 @@
 import threading
 import unittest
-import sys
-import types
 from pathlib import Path
 from unittest.mock import patch
 
-if "yt_dlp" not in sys.modules:
-    yt_dlp_stub = types.ModuleType("yt_dlp")
-    yt_dlp_utils_stub = types.ModuleType("yt_dlp.utils")
+from _yt_dlp_stub import ensure_yt_dlp_stub
 
-    class _DownloadCancelled(Exception):
-        pass
-
-    class _YoutubeDL:
-        def __init__(self, _opts: dict | None = None) -> None:
-            self.opts = _opts or {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def download(self, _urls: list[str]) -> None:
-            return None
-
-    yt_dlp_utils_stub.DownloadCancelled = _DownloadCancelled
-    yt_dlp_stub.YoutubeDL = _YoutubeDL
-    yt_dlp_stub.utils = yt_dlp_utils_stub
-    yt_dlp_stub.version = types.SimpleNamespace(__version__="stub")
-    sys.modules["yt_dlp"] = yt_dlp_stub
-    sys.modules["yt_dlp.utils"] = yt_dlp_utils_stub
+ensure_yt_dlp_stub()
 
 from yt_dlp.utils import DownloadCancelled
 
-from gui import download
+from gui.common import download
 
 
 class TestPlaylistParsing(unittest.TestCase):
@@ -81,7 +56,7 @@ class TestBuildYdlOptions(unittest.TestCase):
     def _update(self, payload: dict) -> None:
         self.updates.append(payload)
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_audio_extract(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (Path("/usr/bin/ffmpeg"), "system")
         opts = download.build_ydl_opts(
@@ -111,7 +86,7 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertEqual(opts["skip_unavailable_fragments"], True)
         self.assertEqual(opts["continuedl"], True)
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_playlist_items_sets_filters(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(
@@ -137,7 +112,7 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertTrue(str(opts["outtmpl"]).endswith("%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s"))
         self.assertIn("[ffmpeg] source=missing (some merges/conversions may fail)", self.logs)
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_simple_range_sets_start_end(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(
@@ -157,7 +132,7 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertEqual(opts["playlist_end"], 6)
         self.assertEqual(opts["merge_output_format"], "mp4")
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_uses_custom_filename_for_single_video(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(
@@ -178,7 +153,7 @@ class TestBuildYdlOptions(unittest.TestCase):
             str(opts["outtmpl"]).endswith("My Clip_%(epoch)s.%(ext)s")
         )
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_ignores_custom_filename_for_playlists(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(
@@ -199,7 +174,7 @@ class TestBuildYdlOptions(unittest.TestCase):
             str(opts["outtmpl"]).endswith("%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s")
         )
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_includes_subtitle_language_and_audio_language(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(
@@ -232,7 +207,7 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertIn({"key": "FFmpegEmbedSubtitle"}, opts["postprocessors"])
         self.assertEqual(opts["format_sort"], ["lang:es"])
 
-    @patch("gui.download.resolve_binary")
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_does_not_embed_subtitles_for_audio_only(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(
@@ -265,8 +240,8 @@ class TestRunDownload(unittest.TestCase):
     def _update(self, payload: dict) -> None:
         self.updates.append(payload)
 
-    @patch("gui.download.build_ydl_opts")
-    @patch("gui.download.YoutubeDL")
+    @patch("gui.common.download.build_ydl_opts")
+    @patch("gui.common.download.YoutubeDL")
     def test_run_download_cancelled(self, mock_ytdl, mock_build_opts) -> None:
         mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
 
@@ -304,8 +279,8 @@ class TestRunDownload(unittest.TestCase):
         self.assertIn({"status": "cancelled"}, self.updates)
         self.assertTrue(any(l.startswith("[time] Elapsed: ") for l in self.logs))
 
-    @patch("gui.download.build_ydl_opts")
-    @patch("gui.download.YoutubeDL")
+    @patch("gui.common.download.build_ydl_opts")
+    @patch("gui.common.download.YoutubeDL")
     def test_run_download_error(self, mock_ytdl, mock_build_opts) -> None:
         mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
 
@@ -342,8 +317,8 @@ class TestRunDownload(unittest.TestCase):
         self.assertTrue(any("[error] boom" in l for l in self.logs))
         self.assertTrue(any(l.startswith("[time] Elapsed: ") for l in self.logs))
 
-    @patch("gui.download.build_ydl_opts")
-    @patch("gui.download.YoutubeDL")
+    @patch("gui.common.download.build_ydl_opts")
+    @patch("gui.common.download.YoutubeDL")
     def test_run_download_success(self, mock_ytdl, mock_build_opts) -> None:
         mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
 
@@ -378,8 +353,8 @@ class TestRunDownload(unittest.TestCase):
         self.assertEqual(result, download.DOWNLOAD_SUCCESS)
         self.assertTrue(any("[done] Download complete." in l for l in self.logs))
 
-    @patch("gui.download.build_ydl_opts")
-    @patch("gui.download.YoutubeDL")
+    @patch("gui.common.download.build_ydl_opts")
+    @patch("gui.common.download.YoutubeDL")
     def test_run_download_passes_custom_filename_to_build_opts(
         self, mock_ytdl, mock_build_opts
     ) -> None:
@@ -420,8 +395,8 @@ class TestRunDownload(unittest.TestCase):
             "Renamed clip",
         )
 
-    @patch("gui.download.build_ydl_opts")
-    @patch("gui.download.YoutubeDL")
+    @patch("gui.common.download.build_ydl_opts")
+    @patch("gui.common.download.YoutubeDL")
     def test_run_download_retries_then_succeeds(self, mock_ytdl, mock_build_opts) -> None:
         mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
         attempts = {"count": 0}

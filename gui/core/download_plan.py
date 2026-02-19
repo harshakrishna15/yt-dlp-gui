@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..shared_types import DownloadOptions, DownloadRequest, QueueSettings, ResolvedFormat
+from ..common.types import DownloadOptions, DownloadRequest, QueueSettings, ResolvedFormat
 from . import options as core_options
 
 

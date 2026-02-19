@@ -1,6 +1,6 @@
 from typing import Any
 
-from .shared_types import FormatInfo
+from .types import FormatInfo
 from .tooling import resolve_binary
 
 try:

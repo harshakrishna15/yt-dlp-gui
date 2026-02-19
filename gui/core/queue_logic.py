@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ..shared_types import QueueItem, QueueSettings
+from ..common.types import QueueItem, QueueSettings
 
 
 QUEUE_ADD_STATUS_BY_ISSUE = {

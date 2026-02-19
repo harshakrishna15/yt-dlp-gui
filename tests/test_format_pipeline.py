@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from gui import format_pipeline
+from gui.common import format_pipeline
 
 
 class TestFormatPipeline(unittest.TestCase):
@@ -21,10 +21,10 @@ class TestFormatPipeline(unittest.TestCase):
         video_fmt = {"format_id": "137"}
         audio_fmt = {"format_id": "251"}
         with patch(
-            "gui.format_pipeline.helpers.split_and_filter_formats",
+            "gui.common.format_pipeline.helpers.split_and_filter_formats",
             return_value=([video_fmt], [audio_fmt]),
         ), patch(
-            "gui.format_pipeline.helpers.build_labeled_formats",
+            "gui.common.format_pipeline.helpers.build_labeled_formats",
             side_effect=[
                 [("Video 1080p", video_fmt)],
                 [("Audio Opus", audio_fmt)],
@@ -45,10 +45,10 @@ class TestFormatPipeline(unittest.TestCase):
             ("Audio Opus", {"format_id": "251"}),
         ]
         with patch(
-            "gui.format_pipeline.build_labeled_sets",
+            "gui.common.format_pipeline.build_labeled_sets",
             return_value=(video_labeled, audio_labeled),
         ), patch(
-            "gui.format_pipeline.helpers.extract_audio_languages",
+            "gui.common.format_pipeline.helpers.extract_audio_languages",
             return_value=["en", "es"],
         ):
             collections = format_pipeline.build_format_collections([{"format_id": "137"}])

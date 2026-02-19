@@ -9,14 +9,9 @@ try:
     from PySide6.QtGui import QCloseEvent
     from PySide6.QtWidgets import QApplication, QMessageBox
 
-    from gui import download
-    from gui.qt_app import (
-        PREVIEW_TITLE_TOOLTIP_DEFAULT,
-        QtYtDlpGui,
-        _is_mixed_url,
-        _strip_list_param,
-        _to_playlist_url,
-    )
+    from gui.common import download
+    from gui.core import urls as core_urls
+    from gui.qt.app import PREVIEW_TITLE_TOOLTIP_DEFAULT, QtYtDlpGui
 
     HAS_QT = True
 except ModuleNotFoundError:
@@ -40,13 +35,13 @@ class TestQtApp(unittest.TestCase):
 
     def test_mixed_url_helpers(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
-        self.assertTrue(_is_mixed_url(mixed))
+        self.assertTrue(core_urls.is_mixed_url(mixed))
         self.assertEqual(
-            _strip_list_param(mixed),
+            core_urls.strip_list_param(mixed),
             "https://www.youtube.com/watch?v=abc123",
         )
         self.assertEqual(
-            _to_playlist_url(mixed),
+            core_urls.to_playlist_url(mixed),
             "https://www.youtube.com/playlist?list=PLXYZ",
         )
 
@@ -104,7 +99,7 @@ class TestQtApp(unittest.TestCase):
 
         event = QCloseEvent()
         with patch(
-            "gui.qt_app.QMessageBox.question",
+            "gui.qt.app.QMessageBox.question",
             return_value=QMessageBox.StandardButton.Yes,
         ):
             self.window.closeEvent(event)
@@ -119,7 +114,7 @@ class TestQtApp(unittest.TestCase):
         self.window._is_downloading = True
         self.window._close_after_cancel = True
 
-        with patch("gui.qt_app.QTimer.singleShot", side_effect=lambda _ms, cb: cb()):
+        with patch("gui.qt.app.QTimer.singleShot", side_effect=lambda _ms, cb: cb()):
             with patch.object(self.window, "close") as close_mock:
                 self.window._on_download_done(download.DOWNLOAD_CANCELLED)
 

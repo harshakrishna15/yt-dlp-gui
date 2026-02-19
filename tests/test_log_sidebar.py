@@ -2,7 +2,10 @@ import queue
 import unittest
 from unittest.mock import Mock, patch
 
-from gui.log_sidebar import LogSidebar, POLL_MS
+try:
+    from gui.tkinter.log_sidebar import LogSidebar, POLL_MS
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class _FakeRoot:
@@ -73,7 +76,7 @@ class TestLogSidebarPolling(unittest.TestCase):
         sidebar.root = _FakeRoot()
         sidebar._poll_after_id = None
 
-        with patch("gui.log_sidebar.LOG_BATCH_MAX", 2):
+        with patch("gui.tkinter.log_sidebar.LOG_BATCH_MAX", 2):
             sidebar._poll_queue()
 
         sidebar._append_batch.assert_called_once_with(["a", "b"])
@@ -108,7 +111,7 @@ class TestLogSidebarAppend(unittest.TestCase):
         sidebar._set_unread = Mock()
         sidebar.text = _FakeText()
 
-        with patch("gui.log_sidebar.LOG_MAX_LINES", 3):
+        with patch("gui.tkinter.log_sidebar.LOG_MAX_LINES", 3):
             sidebar._append_batch(["l1", "l2", "l3", "l4"])
 
         self.assertEqual(sidebar.text.lines, ["l2", "l3", "l4"])
@@ -120,7 +123,7 @@ class TestLogSidebarAppend(unittest.TestCase):
         sidebar._set_unread = Mock()
         sidebar.text = _FakeText()
 
-        with patch("gui.log_sidebar.LOG_MAX_LINES", 10):
+        with patch("gui.tkinter.log_sidebar.LOG_MAX_LINES", 10):
             sidebar._append_batch(["x", "y"])
 
         sidebar._set_unread.assert_called_once_with(True)

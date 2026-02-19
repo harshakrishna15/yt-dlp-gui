@@ -1,6 +1,9 @@
 import unittest
 
-from gui.ui import _HeaderPanelSwitcher
+try:
+    from gui.tkinter.ui import _HeaderPanelSwitcher
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class _FakePanel:

@@ -1,38 +1,13 @@
 import unittest
-import sys
-import types
 from unittest.mock import patch
 
-if "yt_dlp" not in sys.modules:
-    yt_dlp_stub = types.ModuleType("yt_dlp")
-    yt_dlp_utils_stub = types.ModuleType("yt_dlp.utils")
+from _yt_dlp_stub import ensure_yt_dlp_stub
 
-    class _DownloadCancelled(Exception):
-        pass
+ensure_yt_dlp_stub()
 
-    class _YoutubeDL:
-        def __init__(self, _opts: dict | None = None) -> None:
-            self.opts = _opts or {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def extract_info(self, _url: str, download: bool, process: bool) -> dict:
-            return {}
-
-    yt_dlp_utils_stub.DownloadCancelled = _DownloadCancelled
-    yt_dlp_stub.YoutubeDL = _YoutubeDL
-    yt_dlp_stub.utils = yt_dlp_utils_stub
-    yt_dlp_stub.version = types.SimpleNamespace(__version__="stub")
-    sys.modules["yt_dlp"] = yt_dlp_stub
-    sys.modules["yt_dlp.utils"] = yt_dlp_utils_stub
-
-from gui import formats as formats_mod
-from gui import tooling
-from gui import yt_dlp_helpers as helpers
+from gui.common import formats as formats_mod
+from gui.common import tooling
+from gui.common import yt_dlp_helpers as helpers
 
 
 class TestFormatsFromInfo(unittest.TestCase):
@@ -151,14 +126,14 @@ class TestFormatHelpers(unittest.TestCase):
 
 
 class TestTooling(unittest.TestCase):
-    @patch("gui.tooling.shutil.which")
+    @patch("gui.common.tooling.shutil.which")
     def test_resolve_binary_uses_path_lookup(self, mock_which) -> None:
         mock_which.return_value = "/usr/local/bin/ffmpeg"
         path, source = tooling.resolve_binary("ffmpeg")
         self.assertEqual(str(path), "/usr/local/bin/ffmpeg")
         self.assertEqual(source, "system")
 
-    @patch("gui.tooling.resolve_binary")
+    @patch("gui.common.tooling.resolve_binary")
     def test_missing_required_binaries(self, mock_resolve_binary) -> None:
         def _fake(tool: str):
             if tool == "ffmpeg":

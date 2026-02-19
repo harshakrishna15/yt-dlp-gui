@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .. import format_pipeline
+from ..common import format_pipeline
 
 
 @dataclass(frozen=True)

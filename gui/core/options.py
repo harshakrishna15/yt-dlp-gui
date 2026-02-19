@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from ..shared_types import DownloadOptions, QueueSettings
+from ..common.types import DownloadOptions, QueueSettings
 
 
 def parse_int_setting(

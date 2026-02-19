@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from gui import history_store
+from gui.common import history_store
 
 
 class TestHistoryStore(unittest.TestCase):

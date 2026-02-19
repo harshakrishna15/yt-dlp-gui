@@ -1,6 +1,6 @@
 import unittest
 
-from gui import format_pipeline
+from gui.common import format_pipeline
 from gui.core import format_selection
 
 

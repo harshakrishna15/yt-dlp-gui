@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .shared_types import HistoryItem
+from .types import HistoryItem
 
 
 def normalize_output_path(output_path: Path) -> str:

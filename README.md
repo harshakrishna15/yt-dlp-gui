@@ -11,10 +11,9 @@ Paste a URL, pick a format, and download.
 
 ### Prerequisites
 
-- Python 3.10+ (with Tk/Tkinter)
+- Python 3.10+
 - Dependencies from `requirements.txt`
 - `ffmpeg` and `ffprobe` available in `PATH`
-- Optional for Qt spike UI: `requirements-qt.txt`
 
 ### Set Up From Source (Developer Setup)
 
@@ -39,17 +38,6 @@ py -3 -m venv .venv
 pip install -r requirements.txt
 ```
 
-### Optional: Install Qt Spike UI
-
-This is an alternate frontend experiment (`PySide6`) to evaluate a cleaner layout.
-It does not yet replace the full Tk feature set.
-
-- macOS / Windows
-
-```bash
-pip install -r requirements-qt.txt
-```
-
 ### Run From Source
 
 - macOS
@@ -66,21 +54,10 @@ python3 run_gui.py
 python run_gui.py
 ```
 
-Run the Qt spike frontend:
+Run deprecated Tk frontend (temporary compatibility only):
 
-- macOS
-
-```bash
-source .venv/bin/activate
-python3 run_gui.py --ui qt
-```
-
-- Windows
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python run_gui.py --ui qt
-```
+- macOS: `python3 run_gui.py --ui tk`
+- Windows: `python run_gui.py --ui tk`
 
 ### Run Tests
 
@@ -99,6 +76,16 @@ python3 -m unittest discover -s tests -v
 .\.venv\Scripts\Activate.ps1
 python -m unittest discover -s tests -v
 ```
+
+### Code Structure
+
+Core logic is shared across frontends to avoid Tk/Qt rewrites:
+
+- `gui/common/`: shared helpers, download/runtime integration, types, diagnostics/history stores
+- `gui/core/`: UI-agnostic logic (queue checks, download planning, URL helpers, format selection, option parsing)
+- `gui/services/`: shared orchestration used by both frontends (request building/execution, history recording)
+- `gui/qt/`: Qt-specific frontend modules
+- `gui/tkinter/`: Tkinter-specific frontend modules (legacy compatibility)
 
 ### Build Packaged App
 
@@ -131,15 +118,22 @@ Install with `brew install ffmpeg`, then restart your terminal.
 Windows:
 Install with `winget install ffmpeg`, then open a new PowerShell window so `PATH` refreshes.
 
-#### 2) Tkinter is missing
+#### 2) PySide6 is missing
 
 macOS:
-If you use Homebrew Python and Tk is missing, install matching Tk support (example: `brew install python-tk@3.11`).
+Activate your virtual environment and reinstall dependencies:
+`pip install -r requirements.txt`
 
 Windows:
-Reinstall Python from `python.org` and make sure Tcl/Tk is included (default installer option), then recreate `.venv`.
+Activate your virtual environment and reinstall dependencies:
+`pip install -r requirements.txt`
 
-#### 3) Build/run command differences
+#### 3) Tk deprecation notice
+
+The Tk frontend is deprecated and planned for removal in a future release.
+Use the default Qt frontend unless you are temporarily relying on legacy behavior.
+
+#### 4) Build/run command differences
 
 macOS:
 Use `source .venv/bin/activate`. Paths use `/`.
@@ -147,7 +141,7 @@ Use `source .venv/bin/activate`. Paths use `/`.
 Windows:
 Use `.venv\Scripts\Activate.ps1`. Paths use `\`.
 
-#### 4) PowerShell blocks the Windows build script (unsigned script policy)
+#### 5) PowerShell blocks the Windows build script (unsigned script policy)
 
 If the script is blocked because there is no trusted signature, run the build with:
 
@@ -180,8 +174,8 @@ By using this app, you are responsible for complying with local law and platform
 
 See:
 
-- `licenses/LICENSE`
-- `licenses/NOTICE`
-- `licenses/THIRD_PARTY_NOTICES.md`
-- `licenses/mutagen-GPL-2.0-or-later.txt`
-- `licenses/RELEASE_COMPLIANCE_CHECKLIST.md`
+- `docs/licenses/LICENSE`
+- `docs/licenses/NOTICE`
+- `docs/licenses/THIRD_PARTY_NOTICES.md`
+- `docs/licenses/mutagen-GPL-2.0-or-later.txt`
+- `docs/licenses/RELEASE_COMPLIANCE_CHECKLIST.md`

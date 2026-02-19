@@ -31,24 +31,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import (
+from ..common import (
     diagnostics,
     download,
     format_pipeline,
     formats as formats_mod,
-    history_store,
-    qt_panels,
-    qt_style,
     yt_dlp_helpers as helpers,
 )
-from .core import download_plan as core_download_plan
-from .core import format_selection as core_format_selection
-from .core import options as core_options
-from .core import queue_logic as core_queue_logic
-from .core import urls as core_urls
-from .qt_state import PREVIEW_TITLE_TOOLTIP_DEFAULT, preview_title_fields
-from .qt_widgets import _NativeComboBox, _PanelSelectorComboBox, _QtSignals
-from .shared_types import DownloadOptions, DownloadRequest, HistoryItem, QueueItem, QueueSettings
+from . import panels as qt_panels
+from . import style as qt_style
+from ..core import format_selection as core_format_selection
+from ..core import queue_logic as core_queue_logic
+from ..core import urls as core_urls
+from ..core import ui_state as core_ui_state
+from ..core import workflow as core_workflow
+from ..services import app_service
+from .state import PREVIEW_TITLE_TOOLTIP_DEFAULT, preview_title_fields
+from .widgets import _NativeComboBox, _PanelSelectorComboBox, _QtSignals
+from ..common.types import DownloadOptions, DownloadRequest, HistoryItem, QueueItem, QueueSettings
 
 VIDEO_CONTAINERS = ("mp4", "webm")
 AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
@@ -58,25 +58,6 @@ FETCH_DEBOUNCE_MS = 600
 HISTORY_MAX_ENTRIES = 250
 LOG_MAX_LINES = 1000
 PANEL_SELECTOR_PLACEHOLDER = "Panel"
-
-def _is_playlist_url(url: str) -> bool:
-    return core_urls.is_playlist_url(url)
-
-
-def _is_mixed_url(url: str) -> bool:
-    return core_urls.is_mixed_url(url)
-
-
-def _strip_list_param(url: str) -> str:
-    return core_urls.strip_list_param(url)
-
-
-def _to_playlist_url(url: str) -> str:
-    return core_urls.to_playlist_url(url)
-
-
-def _strip_url_whitespace(url: str) -> str:
-    return core_urls.strip_url_whitespace(url)
 
 
 class QtYtDlpGui(QMainWindow):
@@ -157,7 +138,7 @@ class QtYtDlpGui(QMainWindow):
         brand_layout.setSpacing(2)
         title = QLabel("yt-dlp-gui", brand_col)
         title.setObjectName("titleLabel")
-        subtitle = QLabel("Qt frontend with Tk feature parity.", brand_col)
+        subtitle = QLabel("Desktop frontend for yt-dlp.", brand_col)
         subtitle.setObjectName("subtleLabel")
         brand_layout.addWidget(title)
         brand_layout.addWidget(subtitle)
@@ -786,15 +767,15 @@ class QtYtDlpGui(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if choice == QMessageBox.StandardButton.Yes:
-            return _to_playlist_url(url)
-        return _strip_list_param(url)
+            return core_urls.to_playlist_url(url)
+        return core_urls.strip_list_param(url)
 
     def _paste_url(self) -> None:
         clip = QApplication.clipboard().text().strip()
         if not clip:
             self._set_status("Clipboard is empty")
             return
-        self.url_edit.setText(_strip_url_whitespace(clip))
+        self.url_edit.setText(core_urls.strip_url_whitespace(clip))
         self._set_status("URL pasted")
 
     def _pick_folder(self) -> None:
@@ -804,16 +785,16 @@ class QtYtDlpGui(QMainWindow):
 
     def _on_url_changed(self) -> None:
         current = self.url_edit.text()
-        normalized = _strip_url_whitespace(current)
+        normalized = core_urls.strip_url_whitespace(current)
         if normalized != current:
             self.url_edit.blockSignals(True)
             self.url_edit.setText(normalized)
             self.url_edit.blockSignals(False)
-        if normalized and _is_mixed_url(normalized):
+        if normalized and core_urls.is_mixed_url(normalized):
             if normalized != self._last_mixed_prompt_url:
                 self._last_mixed_prompt_url = normalized
                 resolved = self._resolve_mixed_url_choice(normalized)
-                resolved = _strip_url_whitespace(resolved)
+                resolved = core_urls.strip_url_whitespace(resolved)
                 if resolved and resolved != normalized:
                     self.url_edit.blockSignals(True)
                     self.url_edit.setText(resolved)
@@ -826,7 +807,7 @@ class QtYtDlpGui(QMainWindow):
         self._fetch_request_seq += 1
         self._active_fetch_request_id = self._fetch_request_seq
         self._is_fetching = False
-        self._playlist_mode = _is_playlist_url(normalized)
+        self._playlist_mode = core_urls.is_playlist_url(normalized)
 
         self._set_mode_unselected()
         self._set_combo_items(
@@ -985,10 +966,6 @@ class QtYtDlpGui(QMainWindow):
         value = (self.codec_combo.currentData() or "").strip().lower()
         return value
 
-    @staticmethod
-    def _codec_matches_preference(vcodec_raw: str, codec_pref: str) -> bool:
-        return core_format_selection.codec_matches_preference(vcodec_raw, codec_pref)
-
     def _set_combo_items(
         self,
         combo: QComboBox,
@@ -1075,7 +1052,7 @@ class QtYtDlpGui(QMainWindow):
         return self._filtered_lookup.get(label)
 
     def _snapshot_download_options(self) -> DownloadOptions:
-        return core_options.build_download_options(
+        return app_service.build_download_options(
             network_timeout_raw=self.network_timeout_edit.text(),
             network_retries_raw=self.network_retries_edit.text(),
             retry_backoff_raw=self.retry_backoff_edit.text(),
@@ -1085,25 +1062,19 @@ class QtYtDlpGui(QMainWindow):
             is_video_mode=self._current_mode() == "video",
             audio_language_raw=self.audio_language_combo.currentText(),
             custom_filename_raw=self.filename_edit.text(),
-            timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
-            retries_default=download.YDL_ATTEMPT_RETRIES,
-            backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
         )
 
     def _capture_queue_settings(self) -> QueueSettings:
         fmt_label = self._selected_format_label()
         fmt_info = self._selected_format_info() or {}
-        estimated_size = helpers.humanize_bytes(
-            helpers.estimate_filesize_bytes(fmt_info)
-        )
         options = self._snapshot_download_options()
-        return core_options.build_queue_settings(
+        return app_service.build_queue_settings(
             mode=self._current_mode(),
             format_filter=self._current_container(),
             codec_filter=self._current_codec(),
             convert_to_mp4=bool(self.convert_check.isChecked()),
             format_label=fmt_label,
-            estimated_size=estimated_size,
+            format_info=fmt_info,
             output_dir=self.output_dir_edit.text().strip(),
             playlist_items=self.playlist_items_edit.text(),
             options=options,
@@ -1113,15 +1084,13 @@ class QtYtDlpGui(QMainWindow):
         if self._is_downloading:
             return
         url = self.url_edit.text().strip()
-        if not url:
-            QMessageBox.critical(
-                self, "Missing URL", "Please paste a video URL to download."
-            )
-            return
-        if not self._filtered_lookup:
-            QMessageBox.critical(
-                self, "Formats unavailable", "Formats have not been loaded yet."
-            )
+        issue = core_workflow.single_start_issue(
+            url=url,
+            formats_loaded=bool(self._filtered_lookup),
+        )
+        if issue is not None:
+            title, message = core_workflow.single_start_error_text(issue)
+            QMessageBox.critical(self, title, message)
             return
 
         output_dir = Path(self.output_dir_edit.text().strip()).expanduser()
@@ -1145,7 +1114,7 @@ class QtYtDlpGui(QMainWindow):
         self._set_status("Downloading...")
         self._update_controls_state()
 
-        request = core_download_plan.build_single_download_request(
+        request, was_normalized = app_service.build_single_download_request(
             url=url,
             output_dir=output_dir,
             fmt_info=self._selected_format_info(),
@@ -1156,6 +1125,12 @@ class QtYtDlpGui(QMainWindow):
             playlist_items_raw=self.playlist_items_edit.text(),
             options=options,
         )
+        if was_normalized:
+            self._append_log("[info] Playlist items normalized (spaces removed).")
+        if request["playlist_enabled"]:
+            self._append_log(
+                f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
+            )
         thread = threading.Thread(
             target=self._run_single_download_worker,
             kwargs={"request": request},
@@ -1164,26 +1139,11 @@ class QtYtDlpGui(QMainWindow):
         thread.start()
 
     def _run_single_download_worker(self, *, request: DownloadRequest) -> None:
-        result = download.run_download(
-            url=request["url"],
-            output_dir=request["output_dir"],
-            fmt_info=request["fmt_info"],
-            fmt_label=request["fmt_label"],
-            format_filter=request["format_filter"],
-            convert_to_mp4=request["convert_to_mp4"],
-            playlist_enabled=request["playlist_enabled"],
-            playlist_items=request["playlist_items"],
+        result = app_service.run_download_request(
+            request=request,
             cancel_event=self._cancel_event,
             log=lambda msg: self._signals.log.emit(str(msg)),
             update_progress=lambda payload: self._signals.progress.emit(dict(payload)),
-            network_timeout_s=int(request["network_timeout_s"]),
-            network_retries=int(request["network_retries"]),
-            retry_backoff_s=float(request["retry_backoff_s"]),
-            subtitle_languages=list(request["subtitle_languages"]),
-            write_subtitles=bool(request["write_subtitles"]),
-            embed_subtitles=bool(request["embed_subtitles"]),
-            audio_language=str(request["audio_language"]),
-            custom_filename=str(request["custom_filename"]),
             record_output=lambda p: self._signals.record_output.emit(
                 str(p), str(request["url"])
             ),
@@ -1225,12 +1185,12 @@ class QtYtDlpGui(QMainWindow):
     def _on_add_to_queue(self) -> None:
         if self._is_downloading:
             return
-        url = _strip_url_whitespace(self.url_edit.text().strip())
+        url = core_urls.strip_url_whitespace(self.url_edit.text().strip())
 
         settings = self._capture_queue_settings()
         issue = core_queue_logic.queue_add_issue(
             url=url,
-            playlist_mode=bool(self._playlist_mode or _is_playlist_url(url)),
+            playlist_mode=bool(self._playlist_mode or core_urls.is_playlist_url(url)),
             formats_loaded=bool(self._filtered_lookup),
             settings=settings,
         )
@@ -1249,17 +1209,20 @@ class QtYtDlpGui(QMainWindow):
         self._start_queue_download()
 
     def _start_queue_download(self) -> None:
-        if self._is_downloading or not self.queue_items:
-            return
-        invalid = core_queue_logic.first_invalid_queue_item(self.queue_items)
-        if invalid is not None:
-            idx, issue = invalid
+        queue_check = core_workflow.validate_queue_start(
+            is_downloading=self._is_downloading,
+            queue_items=self.queue_items,
+        )
+        if not queue_check.can_start:
+            if queue_check.invalid_index is None or queue_check.invalid_issue is None:
+                return
             QMessageBox.critical(
                 self,
                 "Missing settings",
                 (
                     "Queue item "
-                    f"{idx} is missing {core_queue_logic.queue_start_missing_detail(issue)}."
+                    f"{queue_check.invalid_index} is missing "
+                    f"{core_queue_logic.queue_start_missing_detail(queue_check.invalid_issue)}."
                 ),
             )
             return
@@ -1281,29 +1244,24 @@ class QtYtDlpGui(QMainWindow):
     def _start_next_queue_item(self) -> None:
         if not self.queue_active or self.queue_index is None:
             return
-        next_index = core_queue_logic.next_non_empty_queue_index(
-            self.queue_items, self.queue_index
-        )
-        if next_index is None:
+        next_item = core_workflow.next_queue_run_item(self.queue_items, self.queue_index)
+        if next_item is None:
             self._finish_queue()
             return
-        self.queue_index = next_index
-
-        item = self.queue_items[self.queue_index]
-        url = str(item.get("url", "")).strip()
-        settings = item.get("settings") or {}
-        total = len(self.queue_items)
-        self._append_log(f"[queue] item {self.queue_index + 1}/{total} {url}")
-        self.item_label.setText(f"Current item: {self.queue_index + 1}/{total}")
+        self.queue_index = next_item.index
+        self._append_log(
+            f"[queue] item {next_item.display_index}/{next_item.total} {next_item.url}"
+        )
+        self.item_label.setText(f"Current item: {next_item.display_index}/{next_item.total}")
         self._refresh_queue_panel()
 
         thread = threading.Thread(
             target=self._run_queue_download_worker,
             kwargs={
-                "url": url,
-                "settings": settings,
-                "index": self.queue_index + 1,
-                "total": total,
+                "url": next_item.url,
+                "settings": next_item.settings,
+                "index": next_item.display_index,
+                "total": next_item.total,
                 "default_output_dir": self.output_dir_edit.text().strip(),
             },
             daemon=True,
@@ -1313,11 +1271,8 @@ class QtYtDlpGui(QMainWindow):
     def _resolve_format_for_url(
         self, url: str, settings: QueueSettings
     ) -> dict[str, object]:
-        info = helpers.fetch_info(url)
-        formats = formats_mod.formats_from_info(info)
-        return core_format_selection.resolve_format_for_info(
-            info=info,
-            formats=formats,
+        return app_service.resolve_format_for_url(
+            url=url,
             settings=settings,
             log=lambda msg: self._signals.log.emit(msg),
         )
@@ -1338,41 +1293,26 @@ class QtYtDlpGui(QMainWindow):
             item_text = f"{index}/{total} {resolved.get('title') or url}"
             self._signals.progress.emit({"status": "item", "item": item_text})
 
-            request = core_download_plan.build_queue_download_request(
+            request = app_service.build_queue_download_request(
                 url=url,
                 settings=settings,
                 resolved=resolved,
                 default_output_dir=default_output_dir,
-                timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
-                retries_default=download.YDL_ATTEMPT_RETRIES,
-                backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
             )
-            output_dir = request["output_dir"]
-            output_dir.mkdir(parents=True, exist_ok=True)
 
-            result = download.run_download(
-                url=request["url"],
-                output_dir=output_dir,
-                fmt_info=request["fmt_info"],
-                fmt_label=request["fmt_label"],
-                format_filter=request["format_filter"],
-                convert_to_mp4=bool(request["convert_to_mp4"]),
-                playlist_enabled=bool(request["playlist_enabled"]),
-                playlist_items=request["playlist_items"],
+            if request["playlist_enabled"]:
+                self._signals.log.emit(
+                    f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
+                )
+            result = app_service.run_download_request(
+                request=request,
                 cancel_event=self._cancel_event,
                 log=lambda msg: self._signals.log.emit(str(msg)),
                 update_progress=lambda payload: self._signals.progress.emit(
                     dict(payload)
                 ),
-                network_retries=int(request["network_retries"]),
-                network_timeout_s=int(request["network_timeout_s"]),
-                retry_backoff_s=float(request["retry_backoff_s"]),
-                subtitle_languages=list(request["subtitle_languages"]),
-                write_subtitles=bool(request["write_subtitles"]),
-                embed_subtitles=bool(request["embed_subtitles"]),
-                audio_language=str(request["audio_language"]),
-                custom_filename=str(request["custom_filename"]),
                 record_output=lambda p: self._signals.record_output.emit(str(p), url),
+                ensure_output_dir=True,
             )
             had_error = result == download.DOWNLOAD_ERROR
             cancelled = result == download.DOWNLOAD_CANCELLED
@@ -1385,16 +1325,24 @@ class QtYtDlpGui(QMainWindow):
     def _on_queue_item_done(self, had_error: bool, cancelled: bool) -> None:
         if not self.queue_active or self.queue_index is None:
             return
-        if had_error:
-            self._queue_failed_items += 1
-        if cancelled:
-            self._cancel_requested = True
-        if self._cancel_requested:
-            self._append_log("[queue] cancelled")
-            self._finish_queue(cancelled=True)
+        progress = core_workflow.advance_queue_progress(
+            queue_length=len(self.queue_items),
+            current_index=self.queue_index,
+            failed_items=self._queue_failed_items,
+            cancel_requested=self._cancel_requested,
+            had_error=had_error,
+            cancelled=cancelled,
+        )
+        self._queue_failed_items = progress.failed_items
+        self._cancel_requested = progress.cancel_requested
+        if progress.should_finish:
+            if progress.finish_cancelled:
+                self._append_log("[queue] cancelled")
+            self._finish_queue(cancelled=progress.finish_cancelled)
             return
-        self.queue_index += 1
-        if self.queue_index >= len(self.queue_items):
+        self.queue_index = progress.next_index
+        if self.queue_index is None:
+            self._append_log("[queue] cancelled")
             self._finish_queue()
             return
         self._reset_progress_summary()
@@ -1410,10 +1358,14 @@ class QtYtDlpGui(QMainWindow):
         self._cancel_requested = False
         self._cancel_event = None
 
-        if cancelled:
+        outcome = core_workflow.queue_finish_outcome(
+            cancelled=cancelled,
+            failed_items=failed_items,
+        )
+        if outcome == "cancelled":
             self._append_log("[queue] stopped by cancellation")
             self._set_status("Queue cancelled")
-        elif failed_items:
+        elif outcome == "failed":
             self._append_log(f"[queue] finished with {failed_items} failed item(s)")
             self._set_status("Queue finished with errors")
         else:
@@ -1503,17 +1455,15 @@ class QtYtDlpGui(QMainWindow):
         self._record_download_output(Path(output_path_raw), source_url)
 
     def _record_download_output(self, output_path: Path, source_url: str = "") -> None:
-        normalized = history_store.normalize_output_path(output_path)
-        if not normalized:
-            return
-        history_store.upsert_history_entry(
-            self.download_history,
-            self._history_seen_paths,
-            normalized_path=normalized,
+        recorded = app_service.record_history_output(
+            history=self.download_history,
+            seen_paths=self._history_seen_paths,
+            output_path=output_path,
             source_url=source_url,
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             max_entries=HISTORY_MAX_ENTRIES,
         )
+        if not recorded:
+            return
         self._refresh_history_panel()
 
     def _refresh_history_panel(self) -> None:
@@ -1633,87 +1583,67 @@ class QtYtDlpGui(QMainWindow):
         url_present = bool(self.url_edit.text().strip())
         has_formats_data = bool(self._video_labels or self._audio_labels)
         mode = self._current_mode()
-        is_audio_mode = mode == "audio"
-        is_video_mode = mode == "video"
-        mode_chosen = is_audio_mode or is_video_mode
         container_value = self._current_container()
-        if is_audio_mode and container_value not in AUDIO_CONTAINERS:
+        if mode == "audio" and container_value not in AUDIO_CONTAINERS:
             container_value = ""
-        filter_chosen = container_value in (
-            AUDIO_CONTAINERS if is_audio_mode else VIDEO_CONTAINERS
-        )
-        codec_chosen = bool(self._current_codec())
-        format_available = bool(self._filtered_labels)
-        format_selected = bool(self._selected_format_label())
-        queue_ready = bool(self.queue_items)
-
-        base_ready = (
-            (not self._is_fetching) and (not self._is_downloading) and mode_chosen
-        )
-        single_ready = base_ready and url_present and has_formats_data
-
-        can_start_single = (
-            single_ready
-            and filter_chosen
-            and format_selected
-            and (is_audio_mode or codec_chosen)
-        )
-        is_playlist_url = self._playlist_mode or _is_playlist_url(
+        is_playlist_url = self._playlist_mode or core_urls.is_playlist_url(
             self.url_edit.text().strip()
         )
-        can_add_queue = can_start_single and (not is_playlist_url)
-        can_start_queue = queue_ready and (not self._is_downloading)
-        can_cancel = self._is_downloading and (not self._cancel_requested)
-
-        self.start_button.setEnabled(can_start_single)
-        self.add_queue_button.setEnabled(can_add_queue and not self.queue_active)
-        self.start_queue_button.setEnabled(can_start_queue)
-        self.cancel_button.setEnabled(can_cancel)
-
-        mode_enabled = url_present and (not self._is_downloading) and has_formats_data
-        self.video_radio.setEnabled(mode_enabled)
-        self.audio_radio.setEnabled(mode_enabled)
-
-        self.container_combo.setEnabled(base_ready)
-        self.codec_combo.setEnabled(is_video_mode and base_ready and filter_chosen)
-        self.convert_check.setEnabled(
-            base_ready and filter_chosen and container_value == "webm"
+        state = core_ui_state.compute_control_state(
+            url_present=url_present,
+            has_formats_data=has_formats_data,
+            mode=mode,
+            container_value=container_value,
+            codec_value=self._current_codec(),
+            format_available=bool(self._filtered_labels),
+            format_selected=bool(self._selected_format_label()),
+            queue_ready=bool(self.queue_items),
+            queue_active=self.queue_active,
+            is_fetching=self._is_fetching,
+            is_downloading=self._is_downloading,
+            cancel_requested=self._cancel_requested,
+            is_playlist_url=is_playlist_url,
+            mixed_prompt_active=False,
+            playlist_items_requested=bool(self._playlist_mode),
+            write_subtitles_requested=bool(self.write_subtitles_check.isChecked()),
+            allow_queue_input_context=False,
+            audio_containers=AUDIO_CONTAINERS,
+            video_containers=VIDEO_CONTAINERS,
         )
+
+        self.start_button.setEnabled(state.can_start_single)
+        self.add_queue_button.setEnabled(state.can_add_queue)
+        self.start_queue_button.setEnabled(state.can_start_queue)
+        self.cancel_button.setEnabled(state.can_cancel)
+
+        self.video_radio.setEnabled(state.mode_enabled)
+        self.audio_radio.setEnabled(state.mode_enabled)
+
+        self.container_combo.setEnabled(state.container_enabled)
+        self.codec_combo.setEnabled(state.codec_enabled)
+        self.convert_check.setEnabled(state.convert_enabled)
         if not self.convert_check.isEnabled():
             self.convert_check.setChecked(False)
 
-        self.format_combo.setEnabled(
-            single_ready
-            and filter_chosen
-            and format_available
-            and (is_audio_mode or codec_chosen)
-        )
+        self.format_combo.setEnabled(state.format_enabled)
 
-        self.playlist_items_edit.setEnabled(
-            self._playlist_mode and (not self._is_downloading)
-        )
-        self.filename_edit.setEnabled(
-            (not self._is_downloading) and (not is_playlist_url)
-        )
+        self.playlist_items_edit.setEnabled(state.playlist_items_enabled)
+        self.filename_edit.setEnabled(state.filename_enabled)
 
-        self.url_edit.setEnabled(not self._is_downloading)
-        self.paste_button.setEnabled(not self._is_downloading)
-        self.browse_button.setEnabled(not self._is_downloading)
+        self.url_edit.setEnabled(state.input_fields_enabled)
+        self.paste_button.setEnabled(state.input_fields_enabled)
+        self.browse_button.setEnabled(state.input_fields_enabled)
 
-        subtitle_controls_enabled = is_video_mode and (not self._is_downloading)
-        self.subtitle_languages_edit.setEnabled(subtitle_controls_enabled)
-        self.write_subtitles_check.setEnabled(subtitle_controls_enabled)
-        embed_allowed = (
-            subtitle_controls_enabled and self.write_subtitles_check.isChecked()
-        )
-        self.embed_subtitles_check.setEnabled(embed_allowed)
-        if not embed_allowed:
+        self.subtitle_languages_edit.setEnabled(state.subtitle_controls_enabled)
+        self.write_subtitles_check.setEnabled(state.subtitle_controls_enabled)
+        self.embed_subtitles_check.setEnabled(state.embed_allowed)
+        if not state.embed_allowed:
             self.embed_subtitles_check.setChecked(False)
 
-        self.audio_language_combo.setEnabled(not self._is_downloading)
-        self.network_timeout_edit.setEnabled(not self._is_downloading)
-        self.network_retries_edit.setEnabled(not self._is_downloading)
-        self.retry_backoff_edit.setEnabled(not self._is_downloading)
+        self.audio_language_combo.setEnabled(state.input_fields_enabled)
+        self.network_timeout_edit.setEnabled(state.input_fields_enabled)
+        self.network_retries_edit.setEnabled(state.input_fields_enabled)
+        self.retry_backoff_edit.setEnabled(state.input_fields_enabled)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self._is_downloading:

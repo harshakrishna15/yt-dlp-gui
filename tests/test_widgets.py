@@ -2,7 +2,10 @@ import types
 import unittest
 from unittest.mock import patch
 
-from gui.widgets import Tooltip
+try:
+    from gui.tkinter.widgets import Tooltip
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class _FakeRoot:
@@ -68,8 +71,8 @@ class TestTooltip(unittest.TestCase):
     def test_auto_hide_then_motion_reschedules_tooltip(self) -> None:
         root = _FakeRoot()
         widget = _FakeWidget()
-        with patch("gui.widgets.tk.Toplevel", _FakeTopLevel), patch(
-            "gui.widgets.tk.Label", _FakeLabel
+        with patch("gui.tkinter.widgets.tk.Toplevel", _FakeTopLevel), patch(
+            "gui.tkinter.widgets.tk.Label", _FakeLabel
         ):
             tooltip = Tooltip(root, widget, "hello", delay_ms=10, visible_ms=15)
             tooltip._on_enter(types.SimpleNamespace(x_root=100, y_root=120))
@@ -94,8 +97,8 @@ class TestTooltip(unittest.TestCase):
     def test_leave_cancels_pending_show_and_active_hide(self) -> None:
         root = _FakeRoot()
         widget = _FakeWidget()
-        with patch("gui.widgets.tk.Toplevel", _FakeTopLevel), patch(
-            "gui.widgets.tk.Label", _FakeLabel
+        with patch("gui.tkinter.widgets.tk.Toplevel", _FakeTopLevel), patch(
+            "gui.tkinter.widgets.tk.Label", _FakeLabel
         ):
             tooltip = Tooltip(root, widget, "hello", delay_ms=10, visible_ms=15)
             tooltip._on_enter(types.SimpleNamespace(x_root=50, y_root=60))

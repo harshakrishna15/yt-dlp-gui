@@ -15,11 +15,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import download
-from .qt_widgets import _NativeComboBox
+from ..common import download
+from .widgets import _NativeComboBox
 
 if TYPE_CHECKING:
-    from .qt_app import QtYtDlpGui
+    from .app import QtYtDlpGui
 
 
 def build_settings_panel(window: "QtYtDlpGui") -> QWidget:

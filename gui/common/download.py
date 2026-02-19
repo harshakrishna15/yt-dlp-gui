@@ -7,7 +7,8 @@ import re
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadCancelled
 
-from .shared_types import FormatInfo, ProgressUpdate
+from ..core import options as core_options
+from .types import FormatInfo, ProgressUpdate
 from .tooling import resolve_binary
 
 AUDIO_OUTPUT_CODECS = {"m4a", "mp3", "opus", "wav", "flac"}
@@ -103,7 +104,7 @@ def build_ydl_opts(
         ]
         pp_args = ["-movflags", "+faststart"]
 
-    custom_stem = _sanitize_outtmpl_stem(custom_filename)
+    custom_stem = core_options.sanitize_custom_filename(custom_filename)
     if playlist_enabled:
         outtmpl = str(output_dir / "%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s")
     elif custom_stem:
@@ -383,18 +384,6 @@ def _progress_hook_factory(
             _safe_update({"status": "finished"})
 
     return hook
-
-
-def _sanitize_outtmpl_stem(value: str) -> str:
-    stem = re.sub(r"\s+", " ", (value or "").strip())
-    stem = re.sub(r'[\\/:*?"<>|]+', " ", stem)
-    stem = stem.strip().strip(".")
-    stem = re.sub(r"\s+", " ", stem).strip()
-    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", stem).strip()
-    if stem in {"", ".", ".."}:
-        return ""
-    return stem[:160]
-
 
 def _postprocessor_hook_factory(
     log: Callable[[str], None],

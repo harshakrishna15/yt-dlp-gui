@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .shared_types import FormatInfo
+from .types import FormatInfo
 
 
 def formats_from_info(info: dict[str, Any]) -> list[FormatInfo]:

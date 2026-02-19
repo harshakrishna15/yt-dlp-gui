@@ -1,6 +1,9 @@
 import unittest
 
-from gui.queue_sidebar import QueueSidebar
+try:
+    from gui.tkinter.queue_sidebar import QueueSidebar
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class _FakeScrollbar:

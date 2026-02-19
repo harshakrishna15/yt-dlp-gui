@@ -1,41 +1,20 @@
 import queue
 import threading
 import tempfile
-import sys
-import types
 import unittest
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-if "yt_dlp" not in sys.modules:
-    yt_dlp_stub = types.ModuleType("yt_dlp")
-    yt_dlp_utils_stub = types.ModuleType("yt_dlp.utils")
+from _yt_dlp_stub import ensure_yt_dlp_stub
 
-    class _DownloadCancelled(Exception):
-        pass
+ensure_yt_dlp_stub()
 
-    class _YoutubeDL:
-        def __init__(self, _opts: dict | None = None) -> None:
-            self.opts = _opts or {}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def download(self, _urls: list[str]) -> None:
-            return None
-
-    yt_dlp_utils_stub.DownloadCancelled = _DownloadCancelled
-    yt_dlp_stub.YoutubeDL = _YoutubeDL
-    yt_dlp_stub.utils = yt_dlp_utils_stub
-    yt_dlp_stub.version = types.SimpleNamespace(__version__="stub")
-    sys.modules["yt_dlp"] = yt_dlp_stub
-    sys.modules["yt_dlp.utils"] = yt_dlp_utils_stub
-
-from gui.app import FORMAT_CACHE_MAX_ENTRIES, UI_EVENT_POLL_MS, YtDlpGui
-from gui.state import FormatState
+from gui.core import format_selection as core_format_selection
+try:
+    from gui.tkinter.app import FORMAT_CACHE_MAX_ENTRIES, UI_EVENT_POLL_MS, YtDlpGui
+    from gui.tkinter.state import FormatState
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class _Var:
@@ -70,7 +49,7 @@ class TestFetchRaceGuard(unittest.TestCase):
         app.formats.video_lookup = {"keep me": {"format_id": "x"}}
         app._active_fetch_request_id = 2
 
-        with patch("gui.app.format_pipeline.build_format_collections") as build_mock:
+        with patch("gui.tkinter.app.format_pipeline.build_format_collections") as build_mock:
             app._set_formats(
                 [{"format_id": "new"}],
                 fetch_url="https://old.example",
@@ -93,7 +72,7 @@ class TestFetchRaceGuard(unittest.TestCase):
         audio_fmt = {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus"}
 
         with patch(
-            "gui.app.format_pipeline.build_format_collections",
+            "gui.tkinter.app.format_pipeline.build_format_collections",
             return_value={
                 "video_labels": ["Video 1080p"],
                 "video_lookup": {"Video 1080p": video_fmt},
@@ -126,7 +105,7 @@ class TestFetchRaceGuard(unittest.TestCase):
         scheduled: list[tuple[int, object]] = []
         app._safe_after = lambda delay, callback: scheduled.append((delay, callback)) or "after-2"
 
-        with patch("gui.app.format_pipeline.build_format_collections") as build_mock:
+        with patch("gui.tkinter.app.format_pipeline.build_format_collections") as build_mock:
             app._set_formats(
                 [{"format_id": "stale"}],
                 fetch_url="https://stale.example",
@@ -148,7 +127,7 @@ class TestFetchRaceGuard(unittest.TestCase):
         video_fmt = {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none"}
         audio_fmt = {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus"}
         with patch(
-            "gui.app.format_pipeline.build_format_collections",
+            "gui.tkinter.app.format_pipeline.build_format_collections",
             return_value={
                 "video_labels": ["Video 1080p"],
                 "video_lookup": {"Video 1080p": video_fmt},
@@ -201,7 +180,7 @@ class TestUiEventQueue(unittest.TestCase):
         app._post_ui(calls.append, 1)
         app._post_ui(calls.append, 2)
 
-        with patch("gui.app.UI_EVENT_MAX_PER_TICK", 1):
+        with patch("gui.tkinter.app.UI_EVENT_MAX_PER_TICK", 1):
             app._drain_ui_events()
 
         self.assertEqual(calls, [1])
@@ -211,16 +190,20 @@ class TestUiEventQueue(unittest.TestCase):
 
 class TestCodecPreferenceMatching(unittest.TestCase):
     def test_codec_match_accepts_h264_alias_for_avc1(self) -> None:
-        self.assertTrue(YtDlpGui._codec_matches_preference("h264", "avc1"))
-        self.assertTrue(YtDlpGui._codec_matches_preference("avc1.640028", "avc1"))
+        self.assertTrue(core_format_selection.codec_matches_preference("h264", "avc1"))
+        self.assertTrue(
+            core_format_selection.codec_matches_preference("avc1.640028", "avc1")
+        )
 
     def test_codec_match_accepts_av1_alias_for_av01(self) -> None:
-        self.assertTrue(YtDlpGui._codec_matches_preference("av1", "av01"))
-        self.assertTrue(YtDlpGui._codec_matches_preference("av01.0.08M.08", "av01"))
+        self.assertTrue(core_format_selection.codec_matches_preference("av1", "av01"))
+        self.assertTrue(
+            core_format_selection.codec_matches_preference("av01.0.08M.08", "av01")
+        )
 
     def test_codec_match_rejects_different_codecs(self) -> None:
-        self.assertFalse(YtDlpGui._codec_matches_preference("vp9", "avc1"))
-        self.assertFalse(YtDlpGui._codec_matches_preference("h264", "av01"))
+        self.assertFalse(core_format_selection.codec_matches_preference("vp9", "avc1"))
+        self.assertFalse(core_format_selection.codec_matches_preference("h264", "av01"))
 
 
 class TestFormatCacheBounded(unittest.TestCase):
@@ -303,7 +286,7 @@ class TestWorkerSnapshotPaths(unittest.TestCase):
         def _fake_run_download(**kwargs) -> None:
             kwargs["update_progress"]({"status": "downloading", "percent": 55.0})
 
-        with patch("gui.app.download.run_download", side_effect=_fake_run_download) as mock_run:
+        with patch("gui.tkinter.app.download.run_download", side_effect=_fake_run_download) as mock_run:
             app._run_download(
                 url="https://example.com/video",
                 output_dir=Path("/tmp/out"),
@@ -435,7 +418,7 @@ class TestAdvancedOptionsAndHistory(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "gui.app.messagebox.showinfo"
+            "gui.tkinter.app.messagebox.showinfo"
         ) as info_mock:
             app.output_dir_var = _Var(tmpdir)
             app._export_diagnostics()
@@ -524,7 +507,7 @@ class TestQueueStartStability(unittest.TestCase):
             def start(self):
                 started["called"] = True
 
-        with patch("gui.app.threading.Thread", side_effect=lambda **kw: _FakeThread(**kw)):
+        with patch("gui.tkinter.app.threading.Thread", side_effect=lambda **kw: _FakeThread(**kw)):
             app._start_next_queue_item()
 
         self.assertEqual(app.queue_index, 2)
@@ -552,7 +535,7 @@ class TestQueueStartStability(unittest.TestCase):
             "format_filter": "mp4",
         }
 
-        with patch("gui.app.download.run_download", return_value="error"):
+        with patch("gui.tkinter.app.download.run_download", return_value="error"):
             app._run_queue_download(
                 url="https://example.com/video",
                 settings={"output_dir": "/tmp/out"},
@@ -581,7 +564,7 @@ class TestQueueStartStability(unittest.TestCase):
             "format_filter": "mp4",
         }
 
-        with patch("gui.app.download.run_download", return_value="cancelled"):
+        with patch("gui.tkinter.app.download.run_download", return_value="cancelled"):
             app._run_queue_download(
                 url="https://example.com/video",
                 settings={"output_dir": "/tmp/out"},
@@ -609,7 +592,7 @@ class TestQueueStartStability(unittest.TestCase):
             "format_filter": "mp4",
         }
 
-        with patch("gui.app.download.run_download", return_value="success") as mock_run:
+        with patch("gui.tkinter.app.download.run_download", return_value="success") as mock_run:
             app._run_queue_download(
                 url="https://example.com/video",
                 settings={"output_dir": "/tmp/out", "custom_filename": "Queued Name"},
@@ -714,7 +697,7 @@ class TestCloseBehavior(unittest.TestCase):
         app._ui_event_queue = queue.Queue()
         app._ui_event_queue.put(("x", (), {}))
 
-        with patch("gui.app.messagebox.askokcancel", return_value=False):
+        with patch("gui.tkinter.app.messagebox.askokcancel", return_value=False):
             app._on_close()
 
         self.assertFalse(app._closing)
@@ -739,7 +722,7 @@ class TestCloseBehavior(unittest.TestCase):
         app._ui_event_queue.put(("x", (), {}))
         app._cancel_requested = False
 
-        with patch("gui.app.messagebox.askokcancel", return_value=True):
+        with patch("gui.tkinter.app.messagebox.askokcancel", return_value=True):
             app._on_close()
 
         self.assertTrue(app._closing)
@@ -784,8 +767,8 @@ class TestOutputDirValidation(unittest.TestCase):
         app.status_var = _Var("Idle")
         app._log = Mock()
 
-        with patch("gui.app.Path.mkdir", side_effect=PermissionError("denied")), patch(
-            "gui.app.messagebox.showerror"
+        with patch("gui.tkinter.app.Path.mkdir", side_effect=PermissionError("denied")), patch(
+            "gui.tkinter.app.messagebox.showerror"
         ) as showerror:
             result = app._ensure_output_dir("/tmp/locked")
 

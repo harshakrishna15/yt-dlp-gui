@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse, urlencode
 
-from .shared_types import DownloadOptions, HistoryItem, QueueItem
+from .types import DownloadOptions, HistoryItem, QueueItem
 
 
 def sanitize_url_for_report(value: str) -> str:

@@ -1,6 +1,9 @@
 import unittest
 
-from gui.sidebar_host import SidebarHost
+try:
+    from gui.tkinter.sidebar_host import SidebarHost
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class TestSidebarWidthPolicy(unittest.TestCase):

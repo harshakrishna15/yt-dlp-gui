@@ -2,7 +2,10 @@ import types
 import unittest
 from unittest.mock import Mock
 
-from gui.history_sidebar import HistorySidebar
+try:
+    from gui.tkinter.history_sidebar import HistorySidebar
+except ModuleNotFoundError as exc:
+    raise unittest.SkipTest("Tk frontend module not available") from exc
 
 
 class _FakeScrollbar:
