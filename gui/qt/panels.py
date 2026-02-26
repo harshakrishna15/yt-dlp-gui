@@ -89,6 +89,10 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
     window.ui_layout_combo.currentTextChanged.connect(window._apply_header_layout)
     layout.addRow("UI layout", window.ui_layout_combo)
 
+    window.show_header_icons_check = QCheckBox("Show top action icons", panel)
+    window.show_header_icons_check.setChecked(True)
+    layout.addRow("Header icons", window.show_header_icons_check)
+
     window.open_folder_after_download_check = QCheckBox(
         "Open output folder after downloads", panel
     )

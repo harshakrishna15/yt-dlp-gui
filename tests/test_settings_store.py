@@ -18,6 +18,7 @@ class TestSettingsStore(unittest.TestCase):
         self.assertEqual(loaded["output_dir"], "/tmp/out")
         self.assertEqual(loaded["ui_layout"], "Simple")
         self.assertEqual(loaded["concurrent_fragments"], "4")
+        self.assertTrue(loaded["show_header_icons"])
         self.assertFalse(loaded["open_folder_after_download"])
 
     def test_save_and_load_round_trip(self) -> None:
@@ -36,6 +37,7 @@ class TestSettingsStore(unittest.TestCase):
                         "retry_backoff": "2.5",
                         "concurrent_fragments": "3",
                         "ui_layout": "Classic",
+                        "show_header_icons": False,
                         "open_folder_after_download": True,
                     },
                     default_output_dir="/tmp/default",
@@ -52,6 +54,7 @@ class TestSettingsStore(unittest.TestCase):
         self.assertEqual(loaded["retry_backoff"], "2.5")
         self.assertEqual(loaded["concurrent_fragments"], "3")
         self.assertEqual(loaded["ui_layout"], "Classic")
+        self.assertFalse(loaded["show_header_icons"])
         self.assertTrue(loaded["open_folder_after_download"])
 
     def test_load_settings_sanitizes_invalid_values(self) -> None:
@@ -65,6 +68,7 @@ class TestSettingsStore(unittest.TestCase):
                     '"network_retries":"",'
                     '"retry_backoff":"",'
                     '"concurrent_fragments":"999",'
+                    '"show_header_icons":0,'
                     '"open_folder_after_download":"yes"'
                     "}"
                 ),
@@ -80,6 +84,7 @@ class TestSettingsStore(unittest.TestCase):
         self.assertEqual(loaded["network_retries"], defaults["network_retries"])
         self.assertEqual(loaded["retry_backoff"], defaults["retry_backoff"])
         self.assertEqual(loaded["concurrent_fragments"], "4")
+        self.assertFalse(loaded["show_header_icons"])
         self.assertTrue(loaded["open_folder_after_download"])
 
 

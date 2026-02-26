@@ -244,6 +244,154 @@ class TestQtApp(unittest.TestCase):
                             ),
                         )
 
+    def test_min_window_downloading_state_has_no_overlap_or_cutoff(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        self.window._show_progress_item = True
+        self.window._set_metrics_visible(True)
+        self.window._set_current_item_display(progress="1/3", title="Example")
+        self.window._on_progress_update(
+            {
+                "status": "downloading",
+                "percent": 42.0,
+                "speed": "2.0 MiB/s",
+                "eta": "0:09",
+            }
+        )
+        QApplication.processEvents()
+        self.assertTrue(self.window.metrics_strip.isVisible())
+        self.assertTrue(self.window.item_label.isVisible())
+        self.assertTrue(self.window.progress_label.isVisible())
+        self.assertTrue(self.window.speed_label.isVisible())
+        self.assertTrue(self.window.eta_label.isVisible())
+
+        scan_types = (QLineEdit, QComboBox, QPushButton, QCheckBox, QRadioButton)
+        run_section = self.window.main_page.findChild(QWidget, "runSection")
+        self.assertIsNotNone(run_section)
+        assert run_section is not None
+
+        for section in (self.window.output_section, run_section):
+            section_rect = section.rect().adjusted(0, 0, -1, -1)
+            controls = []
+            for control_type in scan_types:
+                controls.extend(
+                    widget
+                    for widget in section.findChildren(control_type)
+                    if widget.isVisible()
+                )
+
+            mapped = []
+            for widget in controls:
+                top_left = widget.mapTo(section, widget.rect().topLeft())
+                bottom_right = widget.mapTo(section, widget.rect().bottomRight())
+                rect = QRect(top_left, bottom_right).normalized()
+                mapped.append((widget, rect))
+                self.assertTrue(
+                    section_rect.contains(rect),
+                    f"{type(widget).__name__} is clipped outside {section.objectName()} at 900x760",
+                )
+
+            for idx, (left_widget, left_rect) in enumerate(mapped):
+                for right_widget, right_rect in mapped[idx + 1 :]:
+                    if (
+                        left_widget.parentWidget() is right_widget
+                        or right_widget.parentWidget() is left_widget
+                    ):
+                        continue
+                    overlap = left_rect.intersected(right_rect)
+                    self.assertFalse(
+                        overlap.width() > 2 and overlap.height() > 2,
+                        (
+                            "Unexpected overlap in minimum downloading layout: "
+                            f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
+                        ),
+                    )
+
+    def test_min_window_top_actions_have_icons_and_no_overlap(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        def map_rect_to_actions(widget: QWidget) -> QRect:
+            top_left = widget.mapTo(self.window.top_actions, widget.rect().topLeft())
+            bottom_right = widget.mapTo(
+                self.window.top_actions, widget.rect().bottomRight()
+            )
+            return QRect(top_left, bottom_right).normalized()
+
+        action_sets = (
+            ("Classic", [self.window.settings_button, self.window.queue_button, self.window.history_button, self.window.logs_button]),
+            ("Simple", [self.window.simple_panel_tabs]),
+        )
+
+        for mode, controls in action_sets:
+            self.window.ui_layout_combo.setCurrentText(mode)
+            self.window._apply_header_layout()
+            QApplication.processEvents()
+
+            actions_rect = self.window.top_actions.rect()
+            visible_controls = [widget for widget in controls if widget.isVisible()]
+            self.assertTrue(visible_controls, f"No visible controls in {mode} layout")
+            mapped = []
+            for widget in visible_controls:
+                rect = map_rect_to_actions(widget)
+                mapped.append((widget, rect))
+                self.assertTrue(
+                    actions_rect.contains(rect),
+                    f"{type(widget).__name__} is clipped in {mode} layout at 900x760",
+                )
+                if isinstance(widget, QPushButton):
+                    self.assertFalse(
+                        widget.icon().isNull(),
+                        f"{widget.text()} icon is missing in {mode} layout",
+                    )
+
+            for idx, (left_widget, left_rect) in enumerate(mapped):
+                for right_widget, right_rect in mapped[idx + 1 :]:
+                    if (
+                        left_widget.parentWidget() is right_widget
+                        or right_widget.parentWidget() is left_widget
+                    ):
+                        continue
+                    overlap = left_rect.intersected(right_rect)
+                    self.assertFalse(
+                        overlap.width() > 2 and overlap.height() > 2,
+                        (
+                            f"Unexpected top action overlap in {mode} layout: "
+                            f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
+                        ),
+                    )
+
+    def test_header_icons_can_be_disabled_and_restored(self) -> None:
+        self.assertFalse(self.window.settings_button.icon().isNull())
+        self.assertFalse(self.window.queue_button.icon().isNull())
+        self.assertFalse(self.window.history_button.icon().isNull())
+
+        self.window.show_header_icons_check.setChecked(False)
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.settings_button.icon().isNull())
+        self.assertTrue(self.window.queue_button.icon().isNull())
+        self.assertTrue(self.window.history_button.icon().isNull())
+        self.assertTrue(self.window.logs_button.icon().isNull())
+        logs_idx = self.window._simple_tab_name_to_index["logs"]
+        self.assertGreaterEqual(logs_idx, 0)
+        self.assertTrue(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
+
+        self.window._append_log("[error] network timeout")
+        self.assertFalse(self.window.logs_button.icon().isNull())
+        self.assertFalse(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
+
+        self.window.show_header_icons_check.setChecked(True)
+        QApplication.processEvents()
+        self.assertFalse(self.window.settings_button.icon().isNull())
+        self.assertFalse(self.window.queue_button.icon().isNull())
+        self.assertFalse(self.window.history_button.icon().isNull())
+
     def test_on_url_changed_invalidates_fetch_and_resets_selection_state(self) -> None:
         self.window.video_radio.setChecked(True)
         mp4_index = self.window.container_combo.findData("mp4")
@@ -320,13 +468,37 @@ class TestQtApp(unittest.TestCase):
         close_mock.assert_called_once()
         self.assertFalse(self.window._close_after_cancel)
 
+    def test_record_output_updates_latest_download_card(self) -> None:
+        output_path = Path("/tmp/test-video.mp4")
+
+        self.window._record_download_output(output_path, "https://example.com/video")
+
+        self.assertFalse(self.window.download_result_card.isHidden())
+        self.assertTrue(self.window.download_result_path.text().endswith(".mp4"))
+        self.assertEqual(
+            self.window.download_result_path.toolTip(),
+            str(output_path),
+        )
+        self.assertTrue(self.window.copy_output_path_button.isEnabled())
+
+    def test_clearing_latest_output_hides_download_card(self) -> None:
+        output_path = Path("/tmp/test-video.mp4")
+        self.window._record_download_output(output_path, "https://example.com/video")
+        self.assertFalse(self.window.download_result_card.isHidden())
+
+        self.window._clear_last_output_path()
+
+        self.assertTrue(self.window.download_result_card.isHidden())
+        self.assertEqual(self.window.download_result_path.text(), "-")
+        self.assertFalse(self.window.copy_output_path_button.isEnabled())
+
     def test_on_download_done_resets_progress_details(self) -> None:
         self.window._is_downloading = True
         self.window.progress_bar.setValue(724)
         self.window.progress_label.setText("Progress: 92.4%")
         self.window.speed_label.setText("Speed: 3.5 MiB/s")
         self.window.eta_label.setText("ETA: 00:09")
-        self.window.item_label.setText("Current item: 1/5\nTitle: example.mp4")
+        self.window.item_label.setText("Item: 1/5 - example.mp4")
 
         self.window._on_download_done(download.DOWNLOAD_SUCCESS)
 
@@ -334,7 +506,7 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.progress_label.text(), "Progress: -")
         self.assertEqual(self.window.speed_label.text(), "Speed: -")
         self.assertEqual(self.window.eta_label.text(), "ETA: -")
-        self.assertEqual(self.window.item_label.text(), "Current item: -\nTitle: -")
+        self.assertEqual(self.window.item_label.text(), "Item: -")
 
     def test_finished_progress_update_does_not_force_full_bar(self) -> None:
         self.window.progress_bar.setValue(250)
@@ -345,7 +517,7 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(self.window.progress_bar.value(), 250)
         self.assertEqual(self.window.progress_label.text(), "Progress: 25.0%")
-        self.assertEqual(self.window.eta_label.text(), "ETA: Finalizing...")
+        self.assertEqual(self.window.eta_label.text(), "ETA: Finalizing")
 
     def test_item_progress_update_splits_index_and_title(self) -> None:
         self.window._show_progress_item = True
@@ -357,25 +529,29 @@ class TestQtApp(unittest.TestCase):
         )
         self.assertEqual(
             self.window.item_label.text(),
-            "Current item: 41/169\nTitle: #41 Festival Plaza Mission Complete! - Pokemon",
+            "Item: 41/169 - #41 Festival Plaza Mission Complete! - Pokemon",
         )
 
     def test_attention_log_shows_logs_alert_icon(self) -> None:
+        self.assertFalse(self.window._logs_alert_active)
         self.window._append_log("[error] network timeout")
 
+        self.assertTrue(self.window._logs_alert_active)
         self.assertFalse(self.window.logs_button.icon().isNull())
-        logs_idx = self.window.simple_panel_selector.findText("Logs")
+        logs_idx = self.window._simple_tab_name_to_index["logs"]
         self.assertGreaterEqual(logs_idx, 0)
-        self.assertFalse(self.window.simple_panel_selector.itemIcon(logs_idx).isNull())
+        self.assertFalse(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
 
     def test_opening_logs_clears_logs_alert_icon(self) -> None:
         self.window._append_log("[error] could not fetch formats")
+        self.assertTrue(self.window._logs_alert_active)
         self.window._open_panel("logs")
 
-        self.assertTrue(self.window.logs_button.icon().isNull())
-        logs_idx = self.window.simple_panel_selector.findText("Logs")
+        self.assertFalse(self.window._logs_alert_active)
+        self.assertFalse(self.window.logs_button.icon().isNull())
+        logs_idx = self.window._simple_tab_name_to_index["logs"]
         self.assertGreaterEqual(logs_idx, 0)
-        self.assertTrue(self.window.simple_panel_selector.itemIcon(logs_idx).isNull())
+        self.assertFalse(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
 
 
 if __name__ == "__main__":

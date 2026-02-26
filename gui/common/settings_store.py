@@ -33,6 +33,7 @@ def default_settings(*, default_output_dir: str | None = None) -> dict[str, Any]
         "retry_backoff": backoff,
         "concurrent_fragments": fragments,
         "ui_layout": _DEFAULT_UI_LAYOUT,
+        "show_header_icons": True,
         "open_folder_after_download": False,
     }
 
@@ -98,6 +99,9 @@ def _normalize_settings(
     if layout in _VALID_UI_LAYOUTS:
         out["ui_layout"] = "Classic" if layout == "classic" else "Simple"
 
+    out["show_header_icons"] = bool(
+        payload.get("show_header_icons", defaults.get("show_header_icons", True))
+    )
     out["open_folder_after_download"] = bool(payload.get("open_folder_after_download"))
     return out
 

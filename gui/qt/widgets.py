@@ -32,7 +32,3 @@ class _NativeComboBox(QComboBox):
     def showPopup(self) -> None:
         super().showPopup()
         _style_combo_popup(self)
-
-
-class _PanelSelectorComboBox(_NativeComboBox):
-    pass
