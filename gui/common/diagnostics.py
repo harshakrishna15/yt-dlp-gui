@@ -58,6 +58,7 @@ def build_report_payload(
     lines.append(f"network_timeout_s={options['network_timeout_s']}")
     lines.append(f"network_retries={options['network_retries']}")
     lines.append(f"retry_backoff_s={options['retry_backoff_s']}")
+    lines.append(f"concurrent_fragments={options['concurrent_fragments']}")
     lines.append(f"write_subtitles={int(bool(options['write_subtitles']))}")
     lines.append(f"embed_subtitles={int(bool(options['embed_subtitles']))}")
     lines.append(

@@ -71,6 +71,7 @@ def build_download_options(
     network_timeout_raw: str,
     network_retries_raw: str,
     retry_backoff_raw: str,
+    concurrent_fragments_raw: str,
     subtitle_languages_raw: str,
     write_subtitles_requested: bool,
     embed_subtitles_requested: bool,
@@ -80,6 +81,7 @@ def build_download_options(
     timeout_default: int,
     retries_default: int,
     backoff_default: float,
+    fragments_default: int,
 ) -> DownloadOptions:
     subtitle_languages = parse_subtitle_languages(subtitle_languages_raw)
     write_subtitles = bool(write_subtitles_requested) and bool(is_video_mode)
@@ -102,6 +104,12 @@ def build_download_options(
             default=backoff_default,
             minimum=0.0,
             maximum=30.0,
+        ),
+        "concurrent_fragments": parse_int_setting(
+            concurrent_fragments_raw,
+            default=fragments_default,
+            minimum=1,
+            maximum=4,
         ),
         "subtitle_languages": subtitle_languages,
         "write_subtitles": write_subtitles,
@@ -135,6 +143,7 @@ def build_queue_settings(
         "network_timeout_s": options["network_timeout_s"],
         "network_retries": options["network_retries"],
         "retry_backoff_s": options["retry_backoff_s"],
+        "concurrent_fragments": options["concurrent_fragments"],
         "subtitle_languages": list(options["subtitle_languages"]),
         "write_subtitles": bool(options["write_subtitles"]),
         "embed_subtitles": bool(options["embed_subtitles"]),

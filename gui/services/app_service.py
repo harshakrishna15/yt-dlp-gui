@@ -26,6 +26,7 @@ def build_download_options(
     network_timeout_raw: str,
     network_retries_raw: str,
     retry_backoff_raw: str,
+    concurrent_fragments_raw: str,
     subtitle_languages_raw: str,
     write_subtitles_requested: bool,
     embed_subtitles_requested: bool,
@@ -37,6 +38,7 @@ def build_download_options(
         network_timeout_raw=network_timeout_raw,
         network_retries_raw=network_retries_raw,
         retry_backoff_raw=retry_backoff_raw,
+        concurrent_fragments_raw=concurrent_fragments_raw,
         subtitle_languages_raw=subtitle_languages_raw,
         write_subtitles_requested=write_subtitles_requested,
         embed_subtitles_requested=embed_subtitles_requested,
@@ -46,6 +48,7 @@ def build_download_options(
         timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
         retries_default=download.YDL_ATTEMPT_RETRIES,
         backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
+        fragments_default=download.YDL_MAX_CONCURRENT_FRAGMENTS,
     )
 
 
@@ -137,6 +140,7 @@ def build_queue_download_request(
         timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
         retries_default=download.YDL_ATTEMPT_RETRIES,
         backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
+        fragments_default=download.YDL_MAX_CONCURRENT_FRAGMENTS,
     )
 
 
@@ -167,6 +171,7 @@ def run_download_request(
         network_retries=int(request["network_retries"]),
         network_timeout_s=int(request["network_timeout_s"]),
         retry_backoff_s=float(request["retry_backoff_s"]),
+        concurrent_fragments=int(request["concurrent_fragments"]),
         subtitle_languages=list(request["subtitle_languages"]),
         write_subtitles=bool(request["write_subtitles"]),
         embed_subtitles=bool(request["embed_subtitles"]),
@@ -198,4 +203,3 @@ def record_history_output(
         max_entries=max_entries,
     )
     return True
-

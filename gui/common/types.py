@@ -21,6 +21,7 @@ class ProgressUpdate(TypedDict, total=False):
     percent: float | None
     speed: str
     eta: str
+    playlist_eta: str
     item: str
 
 
@@ -28,6 +29,7 @@ class DownloadOptions(TypedDict):
     network_timeout_s: int
     network_retries: int
     retry_backoff_s: float
+    concurrent_fragments: int
     subtitle_languages: list[str]
     write_subtitles: bool
     embed_subtitles: bool
@@ -47,6 +49,7 @@ class QueueSettings(TypedDict, total=False):
     network_timeout_s: int
     network_retries: int
     retry_backoff_s: float
+    concurrent_fragments: int
     subtitle_languages: list[str]
     write_subtitles: bool
     embed_subtitles: bool
@@ -87,6 +90,7 @@ class DownloadRequest(TypedDict):
     network_timeout_s: int
     network_retries: int
     retry_backoff_s: float
+    concurrent_fragments: int
     subtitle_languages: list[str]
     write_subtitles: bool
     embed_subtitles: bool

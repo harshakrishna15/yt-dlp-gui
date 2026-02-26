@@ -68,12 +68,18 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
         str(download.YDL_RETRY_BACKOFF_SECONDS), network_row
     )
     window.retry_backoff_edit.setMaximumWidth(100)
+    window.concurrent_fragments_edit = QLineEdit(
+        str(download.YDL_MAX_CONCURRENT_FRAGMENTS), network_row
+    )
+    window.concurrent_fragments_edit.setMaximumWidth(100)
     network_layout.addWidget(QLabel("Timeout", network_row))
     network_layout.addWidget(window.network_timeout_edit)
     network_layout.addWidget(QLabel("Retries", network_row))
     network_layout.addWidget(window.network_retries_edit)
     network_layout.addWidget(QLabel("Backoff", network_row))
     network_layout.addWidget(window.retry_backoff_edit)
+    network_layout.addWidget(QLabel("Fragments", network_row))
+    network_layout.addWidget(window.concurrent_fragments_edit)
     network_layout.addStretch(1)
     layout.addRow("Network policy", network_row)
 
@@ -82,6 +88,11 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
     window.ui_layout_combo.addItems(["Simple", "Classic"])
     window.ui_layout_combo.currentTextChanged.connect(window._apply_header_layout)
     layout.addRow("UI layout", window.ui_layout_combo)
+
+    window.open_folder_after_download_check = QCheckBox(
+        "Open output folder after downloads", panel
+    )
+    layout.addRow("Post-download", window.open_folder_after_download_check)
 
     window.export_diagnostics_button = QPushButton("Export diagnostics", panel)
     window.export_diagnostics_button.clicked.connect(window._export_diagnostics)

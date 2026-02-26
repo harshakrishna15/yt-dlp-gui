@@ -13,6 +13,16 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QLabel, QCheckBox, QRadioButton {
             background: transparent;
         }
+        QMessageBox {
+            background: #f1ede5;
+        }
+        QMessageBox QLabel {
+            color: #26384f;
+            font-size: 14px;
+        }
+        QMessageBox QPushButton {
+            min-width: 96px;
+        }
         #titleLabel {
             font-size: 32px;
             font-weight: 700;
@@ -29,9 +39,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border-top: 1px solid #e4ddcf;
             border-bottom: 1px solid #c8bfaf;
             border-radius: 12px;
-            margin-top: 18px;
-            padding-top: 14px;
-            padding-bottom: 8px;
+            margin-top: 16px;
+            padding-top: 10px;
+            padding-bottom: 6px;
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
                 stop: 0 #f9f6ef,
@@ -73,11 +83,44 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QGroupBox#formatSection::title, QGroupBox#saveSection::title {
             background: #f8f4ec;
         }
+        QFrame#mixedUrlAlert {
+            background: #f4efe6;
+            border: 1px solid #d6cdbe;
+            border-radius: 10px;
+        }
+        QLabel#mixedUrlAlertTitle {
+            color: #27425f;
+            font-weight: 700;
+            background: transparent;
+        }
         QFrame#metricsStrip {
             background: #f4efe6;
             border: 1px solid #d6cdbe;
             border-radius: 10px;
             padding: 8px 10px;
+        }
+        QLabel#currentItemLabel {
+            background: #f7f2e9;
+            border: 1px solid #d8cfbf;
+            border-radius: 10px;
+            padding: 8px 10px;
+            color: #2a405f;
+            font-weight: 600;
+        }
+        QProgressBar {
+            background: #e8e2d6;
+            border: 1px solid #c4baa8;
+            border-radius: 7px;
+            min-height: 12px;
+            max-height: 12px;
+        }
+        QProgressBar::chunk {
+            border-radius: 6px;
+            background: qlineargradient(
+                x1: 0, y1: 0, x2: 1, y2: 0,
+                stop: 0 #6f93d4,
+                stop: 1 #426db8
+            );
         }
         QLineEdit, QPlainTextEdit, QListWidget, QComboBox {
             background: #fcfaf6;
@@ -85,12 +128,12 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border-top: 1px solid #d8d0c3;
             border-bottom: 1px solid #bbb2a5;
             border-radius: 10px;
-            padding: 7px 10px;
-            min-height: 38px;
+            padding: 5px 9px;
+            min-height: 31px;
         }
         QComboBox {
-            padding: 7px 12px;
-            padding-right: 38px;
+            padding: 5px 10px;
+            padding-right: 34px;
             selection-background-color: #d7e3f8;
             selection-color: #26384f;
         }
@@ -166,11 +209,11 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             );
             color: #2c4569;
             border-radius: 10px;
-            padding: 5px 14px;
+            padding: 4px 12px;
             border: 1px solid #b9c7de;
             border-top: 1px solid #cbd8eb;
             border-bottom: 1px solid #9db0cf;
-            min-height: 38px;
+            min-height: 31px;
             font-weight: 600;
         }
         QPushButton:hover {

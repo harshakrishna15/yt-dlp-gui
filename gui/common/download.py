@@ -24,6 +24,9 @@ YDL_EXTRACTOR_RETRIES = 5
 YDL_FILE_ACCESS_RETRIES = 3
 YDL_ATTEMPT_RETRIES = 1
 YDL_RETRY_BACKOFF_SECONDS = 1.5
+YDL_PLAYLIST_SLEEP_MIN_SECONDS = 1.0
+YDL_PLAYLIST_SLEEP_MAX_SECONDS = 2.5
+YDL_MAX_CONCURRENT_FRAGMENTS = 4
 
 
 def build_ydl_opts(
@@ -40,6 +43,7 @@ def build_ydl_opts(
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
     network_timeout_s: int = YDL_SOCKET_TIMEOUT_SECONDS,
+    concurrent_fragments: int = YDL_MAX_CONCURRENT_FRAGMENTS,
     subtitle_languages: list[str] | None = None,
     write_subtitles: bool = False,
     embed_subtitles: bool = False,
@@ -122,6 +126,12 @@ def build_ydl_opts(
 
     ffmpeg_path, ffmpeg_source = resolve_binary("ffmpeg")
 
+    try:
+        requested_fragments = int(float(concurrent_fragments))
+    except (TypeError, ValueError, OverflowError):
+        requested_fragments = YDL_MAX_CONCURRENT_FRAGMENTS
+    fragments = max(1, min(YDL_MAX_CONCURRENT_FRAGMENTS, requested_fragments))
+
     opts: dict[str, Any] = {
         "outtmpl": outtmpl,
         "format": fmt,
@@ -146,9 +156,15 @@ def build_ydl_opts(
         "fragment_retries": YDL_FRAGMENT_RETRIES,
         "extractor_retries": YDL_EXTRACTOR_RETRIES,
         "file_access_retries": YDL_FILE_ACCESS_RETRIES,
+        "concurrent_fragment_downloads": fragments,
         "skip_unavailable_fragments": True,
         "continuedl": True,
     }
+
+    # Always pull and embed artwork for both audio and video outputs.
+    opts["writethumbnail"] = True
+    postprocessors.append({"key": "EmbedThumbnail"})
+
     if write_subtitles:
         opts["writesubtitles"] = True
         opts["writeautomaticsub"] = True
@@ -184,6 +200,15 @@ def build_ydl_opts(
                 opts["playlist_end"] = end_i
         if ranges:
             opts["match_filter"] = _playlist_match_filter(ranges)
+    if playlist_enabled:
+        opts["sleep_interval"] = float(YDL_PLAYLIST_SLEEP_MIN_SECONDS)
+        opts["max_sleep_interval"] = float(
+            max(YDL_PLAYLIST_SLEEP_MIN_SECONDS, YDL_PLAYLIST_SLEEP_MAX_SECONDS)
+        )
+        log(
+            "[playlist] random_delay="
+            f"{opts['sleep_interval']:.1f}-{opts['max_sleep_interval']:.1f}s"
+        )
     return opts
 
 
@@ -202,6 +227,7 @@ def run_download(
     network_retries: int = YDL_ATTEMPT_RETRIES,
     network_timeout_s: int = YDL_SOCKET_TIMEOUT_SECONDS,
     retry_backoff_s: float = YDL_RETRY_BACKOFF_SECONDS,
+    concurrent_fragments: int = YDL_MAX_CONCURRENT_FRAGMENTS,
     subtitle_languages: list[str] | None = None,
     write_subtitles: bool = False,
     embed_subtitles: bool = False,
@@ -231,6 +257,7 @@ def run_download(
             log=log,
             update_progress=update_progress,
             network_timeout_s=network_timeout_s,
+            concurrent_fragments=concurrent_fragments,
             subtitle_languages=subtitle_languages,
             write_subtitles=write_subtitles,
             embed_subtitles=embed_subtitles,
@@ -289,6 +316,9 @@ def _progress_hook_factory(
 ) -> Callable[[dict], None]:
     last_log = {"ts": 0.0}
     last_item = {"key": None}
+    active_item = {"key": None, "started_at": None}
+    completed_items: set[int] = set()
+    completed_durations_s: list[float] = []
     update_warning_logged = {"value": False}
     total_items = _playlist_ranges_count(ranges)
 
@@ -327,21 +357,44 @@ def _progress_hook_factory(
             return f"{h:d}:{m:02d}:{s:02d}"
         return f"{m:d}:{s:02d}"
 
+    def _as_positive_int(value: object) -> int | None:
+        try:
+            parsed = int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if parsed <= 0:
+            return None
+        return parsed
+
+    def _as_non_negative_float(value: object) -> float | None:
+        try:
+            parsed = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if parsed < 0:
+            return None
+        return parsed
+
     def hook(status: dict) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadCancelled()
 
         info = status.get("info_dict") or {}
-        playlist_index = info.get("playlist_index")
-        playlist_count = info.get("playlist_count") or status.get("playlist_count")
+        playlist_index = _as_positive_int(info.get("playlist_index"))
+        playlist_count = _as_positive_int(
+            info.get("playlist_count") or status.get("playlist_count")
+        )
         if total_items is not None:
             playlist_count = total_items
+        display_index = playlist_index
+        if display_index and ranges:
+            display_index = _playlist_position_for_index(ranges, display_index)
+
         title = info.get("title") or ""
-        if playlist_index and last_item["key"] != playlist_index:
-            last_item["key"] = playlist_index
-            display_index = playlist_index
-            if ranges:
-                display_index = _playlist_position_for_index(ranges, playlist_index)
+        if display_index and last_item["key"] != display_index:
+            last_item["key"] = display_index
+            active_item["key"] = display_index
+            active_item["started_at"] = time.time()
             if playlist_count and display_index:
                 log(f"[item] {display_index}/{playlist_count} {title}".strip())
             else:
@@ -364,16 +417,43 @@ def _progress_hook_factory(
                 except (TypeError, ValueError, ZeroDivisionError):
                     pct_val = None
                 speed_bps = status.get("speed")
-                eta_s = status.get("eta")
+                eta_s = _as_non_negative_float(status.get("eta"))
+                playlist_eta = ""
+                if playlist_count and display_index and eta_s is not None:
+                    remaining_after_current = max(
+                        0,
+                        int(playlist_count) - len(completed_items) - 1,
+                    )
+                    avg_item_s = (
+                        (sum(completed_durations_s) / len(completed_durations_s))
+                        if completed_durations_s
+                        else eta_s
+                    )
+                    playlist_eta = _format_eta(
+                        eta_s + (remaining_after_current * max(0.0, avg_item_s))
+                    )
                 _safe_update(
                     {
                         "status": "downloading",
                         "percent": pct_val,
                         "speed": _format_speed(speed_bps),
                         "eta": _format_eta(eta_s),
+                        "playlist_eta": playlist_eta,
                     }
                 )
         elif status.get("status") == "finished":
+            if display_index and display_index not in completed_items:
+                completed_items.add(display_index)
+                if (
+                    active_item["key"] == display_index
+                    and active_item["started_at"] is not None
+                ):
+                    duration_s = max(0.0, time.time() - float(active_item["started_at"]))
+                    completed_durations_s.append(duration_s)
+                    if len(completed_durations_s) > 30:
+                        completed_durations_s.pop(0)
+                active_item["key"] = None
+                active_item["started_at"] = None
             log("[progress] Download finished, post-processing...")
             filename = status.get("filename")
             if filename and record_output is not None:
@@ -394,35 +474,54 @@ def _postprocessor_hook_factory(
         if status.get("status") != "finished":
             return
         filename = status.get("filename")
-        info = status.get("info_dict") or {}
-        epoch = info.get("epoch")
-        if not filename or not epoch:
+        if not filename:
             return
         path = Path(filename)
-        suffix = f"_{epoch}"
-        if suffix not in path.stem:
-            return
-        cleaned_stem = path.stem.replace(suffix, "")
-        clean_path = path.with_name(f"{cleaned_stem}{path.suffix}")
-        if clean_path.exists():
+        final_path, used_fallback = _choose_clean_name_or_epoch_fallback(path)
+        if final_path == path and not used_fallback:
             if record_output is not None:
                 try:
-                    record_output(clean_path)
+                    record_output(path)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    pass
+            return
+        if used_fallback:
+            log(f"[rename] Clean name exists; using epoch suffix fallback: {path.name}")
+            if record_output is not None:
+                try:
+                    record_output(path)
                 except (OSError, RuntimeError, TypeError, ValueError):
                     pass
             return
         try:
-            path.rename(clean_path)
-            log(f"[rename] {clean_path.name}")
+            path.rename(final_path)
+            log(f"[rename] {final_path.name}")
             if record_output is not None:
                 try:
-                    record_output(clean_path)
+                    record_output(final_path)
                 except (OSError, RuntimeError, TypeError, ValueError):
                     pass
         except OSError as exc:
             log(f"[rename] Failed to rename: {exc}")
 
     return hook
+
+
+def _choose_clean_name_or_epoch_fallback(path: Path) -> tuple[Path, bool]:
+    clean_path = _path_without_epoch_suffix(path)
+    if clean_path == path:
+        return path, False
+    if clean_path.exists():
+        return path, True
+    return clean_path, False
+
+
+def _path_without_epoch_suffix(path: Path) -> Path:
+    # Collapse yt-dlp epoch suffixes like "Title_1700000000.ext".
+    cleaned_stem = re.sub(r"_(\d{6,})$", "", path.stem)
+    if cleaned_stem == path.stem:
+        return path
+    return path.with_name(f"{cleaned_stem}{path.suffix}")
 
 
 def _parse_playlist_items(items: str) -> list[tuple[int, int | None]]:

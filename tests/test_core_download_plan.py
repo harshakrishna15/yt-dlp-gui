@@ -28,6 +28,7 @@ class TestCoreDownloadPlan(unittest.TestCase):
                 "network_timeout_s": 20,
                 "network_retries": 1,
                 "retry_backoff_s": 1.5,
+                "concurrent_fragments": 3,
                 "subtitle_languages": ["en"],
                 "write_subtitles": True,
                 "embed_subtitles": False,
@@ -37,6 +38,7 @@ class TestCoreDownloadPlan(unittest.TestCase):
         )
         self.assertIsNone(request["playlist_items"])
         self.assertEqual(request["network_retries"], 1)
+        self.assertEqual(request["concurrent_fragments"], 3)
         self.assertEqual(request["custom_filename"], "clip")
 
     def test_build_queue_download_request_parses_and_clamps_network_values(self) -> None:
@@ -49,6 +51,7 @@ class TestCoreDownloadPlan(unittest.TestCase):
                 "network_timeout_s": "999",
                 "network_retries": "bad",
                 "retry_backoff_s": "100",
+                "concurrent_fragments": "99",
                 "subtitle_languages": "en,es",
                 "write_subtitles": True,
                 "embed_subtitles": True,
@@ -65,12 +68,14 @@ class TestCoreDownloadPlan(unittest.TestCase):
             timeout_default=20,
             retries_default=1,
             backoff_default=1.5,
+            fragments_default=4,
         )
         self.assertEqual(request["output_dir"], Path("/tmp/custom"))
         self.assertEqual(request["playlist_items"], "1,2,3")
         self.assertEqual(request["network_timeout_s"], 300)
         self.assertEqual(request["network_retries"], 1)
         self.assertEqual(request["retry_backoff_s"], 30.0)
+        self.assertEqual(request["concurrent_fragments"], 4)
         self.assertEqual(request["subtitle_languages"], ["en", "es"])
 
 

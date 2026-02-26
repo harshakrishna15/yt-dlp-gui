@@ -38,6 +38,7 @@ class TestCoreOptions(unittest.TestCase):
             network_timeout_raw="30",
             network_retries_raw="3",
             retry_backoff_raw="2.5",
+            concurrent_fragments_raw="9",
             subtitle_languages_raw="en,es",
             write_subtitles_requested=True,
             embed_subtitles_requested=True,
@@ -47,10 +48,12 @@ class TestCoreOptions(unittest.TestCase):
             timeout_default=20,
             retries_default=1,
             backoff_default=1.5,
+            fragments_default=4,
         )
         self.assertEqual(result["network_timeout_s"], 30)
         self.assertEqual(result["network_retries"], 3)
         self.assertEqual(result["retry_backoff_s"], 2.5)
+        self.assertEqual(result["concurrent_fragments"], 4)
         self.assertEqual(result["subtitle_languages"], ["en", "es"])
         self.assertTrue(result["write_subtitles"])
         self.assertTrue(result["embed_subtitles"])
@@ -71,6 +74,7 @@ class TestCoreOptions(unittest.TestCase):
                 "network_timeout_s": 20,
                 "network_retries": 1,
                 "retry_backoff_s": 1.5,
+                "concurrent_fragments": 2,
                 "subtitle_languages": ["en"],
                 "write_subtitles": True,
                 "embed_subtitles": False,
@@ -80,9 +84,9 @@ class TestCoreOptions(unittest.TestCase):
         )
         self.assertEqual(result["mode"], "video")
         self.assertEqual(result["network_timeout_s"], 20)
+        self.assertEqual(result["concurrent_fragments"], 2)
         self.assertEqual(result["subtitle_languages"], ["en"])
 
 
 if __name__ == "__main__":
     unittest.main()
-

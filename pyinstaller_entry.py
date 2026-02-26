@@ -1,4 +1,4 @@
-from gui.cli import main
+from gui.qt.app import main
 
 
 if __name__ == "__main__":

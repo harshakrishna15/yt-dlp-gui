@@ -76,6 +76,8 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertEqual(opts["merge_output_format"], None)
         self.assertEqual(opts["postprocessors"][0]["key"], "FFmpegExtractAudio")
         self.assertEqual(opts["postprocessors"][0]["preferredcodec"], "mp3")
+        self.assertTrue(opts["writethumbnail"])
+        self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertEqual(opts["ffmpeg_location"], "/usr/bin/ffmpeg")
         self.assertIn("[format] Audio WEBM", self.logs)
         self.assertEqual(opts["socket_timeout"], download.YDL_SOCKET_TIMEOUT_SECONDS)
@@ -83,8 +85,50 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertEqual(opts["fragment_retries"], download.YDL_FRAGMENT_RETRIES)
         self.assertEqual(opts["extractor_retries"], download.YDL_EXTRACTOR_RETRIES)
         self.assertEqual(opts["file_access_retries"], download.YDL_FILE_ACCESS_RETRIES)
+        self.assertEqual(
+            opts["concurrent_fragment_downloads"],
+            download.YDL_MAX_CONCURRENT_FRAGMENTS,
+        )
         self.assertEqual(opts["skip_unavailable_fragments"], True)
         self.assertEqual(opts["continuedl"], True)
+
+    @patch("gui.common.download.resolve_binary")
+    def test_build_opts_honors_configured_fragment_concurrency_with_cap(self, mock_resolve_binary) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            concurrent_fragments=3,
+        )
+        self.assertEqual(opts["concurrent_fragment_downloads"], 3)
+
+        opts_capped = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            concurrent_fragments=99,
+        )
+        self.assertEqual(
+            opts_capped["concurrent_fragment_downloads"],
+            download.YDL_MAX_CONCURRENT_FRAGMENTS,
+        )
 
     @patch("gui.common.download.resolve_binary")
     def test_build_opts_playlist_items_sets_filters(self, mock_resolve_binary) -> None:
@@ -104,11 +148,19 @@ class TestBuildYdlOptions(unittest.TestCase):
         )
         self.assertEqual(opts["noplaylist"], False)
         self.assertEqual(opts["playlist_items"], "2-4,9")
+        self.assertEqual(
+            opts["sleep_interval"], download.YDL_PLAYLIST_SLEEP_MIN_SECONDS
+        )
+        self.assertEqual(
+            opts["max_sleep_interval"], download.YDL_PLAYLIST_SLEEP_MAX_SECONDS
+        )
         self.assertIn("match_filter", opts)
         self.assertNotIn("playlist_start", opts)
         self.assertNotIn("playlist_end", opts)
         self.assertEqual(opts["merge_output_format"], "mp4")
         self.assertEqual(opts["postprocessors"][0]["key"], "FFmpegVideoConvertor")
+        self.assertTrue(opts["writethumbnail"])
+        self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertTrue(str(opts["outtmpl"]).endswith("%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s"))
         self.assertIn("[ffmpeg] source=missing (some merges/conversions may fail)", self.logs)
 
@@ -130,6 +182,12 @@ class TestBuildYdlOptions(unittest.TestCase):
         )
         self.assertEqual(opts["playlist_start"], 3)
         self.assertEqual(opts["playlist_end"], 6)
+        self.assertEqual(
+            opts["sleep_interval"], download.YDL_PLAYLIST_SLEEP_MIN_SECONDS
+        )
+        self.assertEqual(
+            opts["max_sleep_interval"], download.YDL_PLAYLIST_SLEEP_MAX_SECONDS
+        )
         self.assertEqual(opts["merge_output_format"], "mp4")
 
     @patch("gui.common.download.resolve_binary")
@@ -204,6 +262,8 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertTrue(opts["writesubtitles"])
         self.assertTrue(opts["writeautomaticsub"])
         self.assertEqual(opts["subtitleslangs"], ["en", "es"])
+        self.assertTrue(opts["writethumbnail"])
+        self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertIn({"key": "FFmpegEmbedSubtitle"}, opts["postprocessors"])
         self.assertEqual(opts["format_sort"], ["lang:es"])
 
@@ -226,6 +286,8 @@ class TestBuildYdlOptions(unittest.TestCase):
             embed_subtitles=True,
         )
         self.assertTrue(opts["writesubtitles"])
+        self.assertTrue(opts["writethumbnail"])
+        self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertNotIn({"key": "FFmpegEmbedSubtitle"}, opts["postprocessors"])
 
 
@@ -517,6 +579,29 @@ class TestProgressHookResilience(unittest.TestCase):
         self.assertIsNone(downloading_updates[-1]["percent"])
         self.assertEqual(downloading_updates[-1]["eta"], "—")
 
+    def test_progress_hook_includes_playlist_eta_for_playlist_downloads(self) -> None:
+        updates: list[dict] = []
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=updates.append,
+            cancel_event=None,
+            ranges=[],
+        )
+        hook(
+            {
+                "status": "downloading",
+                "downloaded_bytes": 10,
+                "total_bytes": 100,
+                "speed": 1024,
+                "eta": 12,
+                "info_dict": {"playlist_index": 1, "playlist_count": 4, "title": "One"},
+            }
+        )
+        downloading_updates = [u for u in updates if u.get("status") == "downloading"]
+        self.assertTrue(downloading_updates)
+        self.assertEqual(downloading_updates[-1]["eta"], "0:12")
+        self.assertEqual(downloading_updates[-1]["playlist_eta"], "0:48")
+
     def test_progress_hook_ignores_record_output_runtime_error(self) -> None:
         hook = download._progress_hook_factory(
             log=lambda _line: None,
@@ -535,6 +620,47 @@ class TestProgressHookResilience(unittest.TestCase):
 
 
 class TestPostprocessorHook(unittest.TestCase):
+    def test_postprocessor_hook_removes_timestamp_when_no_name_conflict(self) -> None:
+        logs: list[str] = []
+        outputs: list[Path] = []
+        hook = download._postprocessor_hook_factory(logs.append, record_output=outputs.append)
+        with patch.object(Path, "exists", return_value=False), patch.object(
+            Path, "rename"
+        ) as mock_rename:
+            hook(
+                {
+                    "status": "finished",
+                    "filename": "/tmp/example_1700000000.mp4",
+                    "info_dict": {},
+                }
+            )
+        mock_rename.assert_called_once_with(Path("/tmp/example.mp4"))
+        self.assertEqual(outputs, [Path("/tmp/example.mp4")])
+        self.assertTrue(any("[rename] example.mp4" in line for line in logs))
+
+    def test_postprocessor_hook_keeps_timestamp_when_name_conflicts(self) -> None:
+        logs: list[str] = []
+        outputs: list[Path] = []
+        hook = download._postprocessor_hook_factory(logs.append, record_output=outputs.append)
+        with patch.object(Path, "exists", return_value=True), patch.object(
+            Path, "rename"
+        ) as mock_rename:
+            hook(
+                {
+                    "status": "finished",
+                    "filename": "/tmp/example_1700000000.mp4",
+                    "info_dict": {},
+                }
+            )
+        mock_rename.assert_not_called()
+        self.assertEqual(outputs, [Path("/tmp/example_1700000000.mp4")])
+        self.assertTrue(
+            any(
+                "[rename] Clean name exists; using epoch suffix fallback:" in line
+                for line in logs
+            )
+        )
+
     def test_postprocessor_hook_logs_rename_failure(self) -> None:
         logs: list[str] = []
         hook = download._postprocessor_hook_factory(logs.append)
@@ -544,8 +670,8 @@ class TestPostprocessorHook(unittest.TestCase):
             hook(
                 {
                     "status": "finished",
-                    "filename": "/tmp/example_12345.mp4",
-                    "info_dict": {"epoch": 12345},
+                    "filename": "/tmp/example_123456.mp4",
+                    "info_dict": {},
                 }
             )
         self.assertTrue(any("[rename] Failed to rename: rename failed" in line for line in logs))

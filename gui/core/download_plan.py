@@ -21,6 +21,7 @@ def parse_download_options_from_queue_settings(
     timeout_default: int,
     retries_default: int,
     backoff_default: float,
+    fragments_default: int,
 ) -> DownloadOptions:
     return {
         "network_timeout_s": core_options.parse_int_setting(
@@ -40,6 +41,12 @@ def parse_download_options_from_queue_settings(
             default=backoff_default,
             minimum=0.0,
             maximum=30.0,
+        ),
+        "concurrent_fragments": core_options.parse_int_setting(
+            str(settings.get("concurrent_fragments", "")),
+            default=fragments_default,
+            minimum=1,
+            maximum=4,
         ),
         "subtitle_languages": core_options.coerce_subtitle_languages(
             settings.get("subtitle_languages", "")
@@ -78,6 +85,7 @@ def build_single_download_request(
         "network_timeout_s": int(options["network_timeout_s"]),
         "network_retries": int(options["network_retries"]),
         "retry_backoff_s": float(options["retry_backoff_s"]),
+        "concurrent_fragments": int(options["concurrent_fragments"]),
         "subtitle_languages": list(options["subtitle_languages"]),
         "write_subtitles": bool(options["write_subtitles"]),
         "embed_subtitles": bool(options["embed_subtitles"]),
@@ -95,12 +103,14 @@ def build_queue_download_request(
     timeout_default: int,
     retries_default: int,
     backoff_default: float,
+    fragments_default: int,
 ) -> DownloadRequest:
     parsed_options = parse_download_options_from_queue_settings(
         settings,
         timeout_default=timeout_default,
         retries_default=retries_default,
         backoff_default=backoff_default,
+        fragments_default=fragments_default,
     )
     playlist_items, _was_normalized = normalize_playlist_items(
         str(settings.get("playlist_items", ""))
@@ -119,6 +129,7 @@ def build_queue_download_request(
         "network_timeout_s": int(parsed_options["network_timeout_s"]),
         "network_retries": int(parsed_options["network_retries"]),
         "retry_backoff_s": float(parsed_options["retry_backoff_s"]),
+        "concurrent_fragments": int(parsed_options["concurrent_fragments"]),
         "subtitle_languages": list(parsed_options["subtitle_languages"]),
         "write_subtitles": bool(parsed_options["write_subtitles"]),
         "embed_subtitles": bool(parsed_options["embed_subtitles"]),

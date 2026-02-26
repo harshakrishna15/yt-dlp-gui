@@ -54,11 +54,6 @@ python3 run_gui.py
 python run_gui.py
 ```
 
-Run deprecated Tk frontend (temporary compatibility only):
-
-- macOS: `python3 run_gui.py --ui tk`
-- Windows: `python run_gui.py --ui tk`
-
 ### Run Tests
 
 The tests are pure unit tests (no GUI startup, no network calls).
@@ -79,13 +74,12 @@ python -m unittest discover -s tests -v
 
 ### Code Structure
 
-Core logic is shared across frontends to avoid Tk/Qt rewrites:
+Core logic is shared across the Qt app:
 
 - `gui/common/`: shared helpers, download/runtime integration, types, diagnostics/history stores
 - `gui/core/`: UI-agnostic logic (queue checks, download planning, URL helpers, format selection, option parsing)
-- `gui/services/`: shared orchestration used by both frontends (request building/execution, history recording)
+- `gui/services/`: shared orchestration used by the frontend (request building/execution, history recording)
 - `gui/qt/`: Qt-specific frontend modules
-- `gui/tkinter/`: Tkinter-specific frontend modules (legacy compatibility)
 
 ### Build Packaged App
 
@@ -128,12 +122,7 @@ Windows:
 Activate your virtual environment and reinstall dependencies:
 `pip install -r requirements.txt`
 
-#### 3) Tk deprecation notice
-
-The Tk frontend is deprecated and planned for removal in a future release.
-Use the default Qt frontend unless you are temporarily relying on legacy behavior.
-
-#### 4) Build/run command differences
+#### 3) Build/run command differences
 
 macOS:
 Use `source .venv/bin/activate`. Paths use `/`.
@@ -141,7 +130,7 @@ Use `source .venv/bin/activate`. Paths use `/`.
 Windows:
 Use `.venv\Scripts\Activate.ps1`. Paths use `\`.
 
-#### 5) PowerShell blocks the Windows build script (unsigned script policy)
+#### 4) PowerShell blocks the Windows build script (unsigned script policy)
 
 If the script is blocked because there is no trusted signature, run the build with:
 
