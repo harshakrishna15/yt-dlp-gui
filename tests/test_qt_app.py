@@ -392,6 +392,23 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window.queue_button.icon().isNull())
         self.assertFalse(self.window.history_button.icon().isNull())
 
+    def test_simple_selected_tab_uses_readable_non_white_icon_variant(self) -> None:
+        self.window.ui_layout_combo.setCurrentText("Simple")
+        self.window._apply_header_layout()
+        self.window._open_panel("queue")
+        QApplication.processEvents()
+
+        queue_idx = self.window._simple_tab_name_to_index["queue"]
+        shown_icon = self.window.simple_panel_tabs.tabIcon(queue_idx)
+        normal_icon = self.window._top_action_icons["queue"]["normal"]
+        active_icon = self.window._top_action_icons["queue"]["active"]
+
+        self.assertFalse(shown_icon.isNull())
+        self.assertFalse(normal_icon.isNull())
+        self.assertFalse(active_icon.isNull())
+        self.assertEqual(shown_icon.cacheKey(), normal_icon.cacheKey())
+        self.assertNotEqual(normal_icon.cacheKey(), active_icon.cacheKey())
+
     def test_on_url_changed_invalidates_fetch_and_resets_selection_state(self) -> None:
         self.window.video_radio.setChecked(True)
         mp4_index = self.window.container_combo.findData("mp4")
@@ -439,6 +456,16 @@ class TestQtApp(unittest.TestCase):
             PREVIEW_TITLE_TOOLTIP_DEFAULT,
         )
 
+    def test_fetching_state_keeps_container_dropdown_enabled(self) -> None:
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._is_fetching = True
+        self.window.video_radio.setChecked(True)
+        self.window._update_controls_state()
+
+        self.assertTrue(self.window.video_radio.isEnabled())
+        self.assertTrue(self.window.container_combo.isEnabled())
+        self.assertFalse(self.window.start_button.isEnabled())
+
     def test_close_event_while_downloading_requests_cancel(self) -> None:
         self.window._is_downloading = True
         self.window._cancel_requested = False
@@ -479,6 +506,21 @@ class TestQtApp(unittest.TestCase):
             self.window.download_result_path.toolTip(),
             str(output_path),
         )
+        self.assertTrue(self.window.copy_output_path_button.isEnabled())
+
+    def test_record_output_while_downloading_defers_latest_card_until_done(self) -> None:
+        output_path = Path("/tmp/test-video.mp4")
+        self.window._is_downloading = True
+
+        self.window._record_download_output(output_path, "https://example.com/video")
+
+        self.assertTrue(self.window.download_result_card.isHidden())
+        self.assertFalse(self.window.copy_output_path_button.isEnabled())
+        self.assertEqual(self.window.download_result_path.toolTip(), str(output_path))
+
+        self.window._on_download_done(download.DOWNLOAD_SUCCESS)
+
+        self.assertFalse(self.window.download_result_card.isHidden())
         self.assertTrue(self.window.copy_output_path_button.isEnabled())
 
     def test_clearing_latest_output_hides_download_card(self) -> None:

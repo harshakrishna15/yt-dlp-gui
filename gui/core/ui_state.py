@@ -60,11 +60,11 @@ def compute_control_state(
     )
     codec_chosen = bool(codec_value)
 
-    base_ready = (not is_fetching) and (not is_downloading) and mode_chosen
+    base_ready = (not is_downloading) and mode_chosen
     input_ready = base_ready and (
         url_present or (allow_queue_input_context and queue_ready)
     )
-    single_ready = base_ready and url_present and has_formats_data
+    single_ready = (not is_fetching) and base_ready and url_present and has_formats_data
     can_start_single = (
         single_ready
         and filter_chosen
@@ -75,7 +75,7 @@ def compute_control_state(
     can_add_queue = can_start_single and (not is_playlist_url) and (not queue_active)
     can_start_queue = queue_ready and (not is_downloading) and (not mixed_prompt_active)
     can_cancel = is_downloading and (not cancel_requested)
-    mode_enabled = url_present and (not is_downloading) and has_formats_data
+    mode_enabled = url_present and (not is_downloading)
 
     show_convert = container_value == "webm"
     convert_enabled = input_ready and filter_chosen and show_convert

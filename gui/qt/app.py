@@ -1026,9 +1026,12 @@ class QtYtDlpGui(QMainWindow):
     def _set_last_output_path(self, output_path: Path) -> None:
         resolved = Path(output_path).expanduser()
         self._latest_output_path = resolved
-        self.open_last_output_folder_button.setEnabled(resolved.parent.exists())
-        self.copy_output_path_button.setEnabled(True)
-        self.download_result_card.setVisible(True)
+        show_latest_output = not self._is_downloading
+        self.open_last_output_folder_button.setEnabled(
+            show_latest_output and resolved.parent.exists()
+        )
+        self.copy_output_path_button.setEnabled(show_latest_output)
+        self.download_result_card.setVisible(show_latest_output)
         self._refresh_last_output_text()
         QTimer.singleShot(0, self._refresh_last_output_text)
 
@@ -1291,21 +1294,21 @@ class QtYtDlpGui(QMainWindow):
                 "settings",
                 self._panel_icon(
                     "settings",
-                    checked=self._active_panel_name == "settings",
+                    checked=False,
                 )
             )
             self._set_simple_tab_icon(
-                "queue", self._panel_icon("queue", checked=self._active_panel_name == "queue")
+                "queue", self._panel_icon("queue", checked=False)
             )
             self._set_simple_tab_icon(
                 "history",
-                self._panel_icon("history", checked=self._active_panel_name == "history"),
+                self._panel_icon("history", checked=False),
             )
             self._set_simple_tab_icon(
                 "logs",
                 self._panel_icon(
                     "logs",
-                    checked=self._active_panel_name == "logs",
+                    checked=False,
                     alert=self._logs_alert_active,
                 ),
             )
@@ -2517,7 +2520,12 @@ class QtYtDlpGui(QMainWindow):
         self.retry_backoff_edit.setEnabled(state.input_fields_enabled)
         self.concurrent_fragments_edit.setEnabled(state.input_fields_enabled)
 
-        has_last_output = self._latest_output_path is not None
+        has_last_output = (self._latest_output_path is not None) and (
+            not self._is_downloading
+        )
+        self.download_result_card.setVisible(has_last_output)
+        if has_last_output:
+            self._refresh_last_output_text()
         self.open_last_output_folder_button.setEnabled(
             has_last_output and bool(self._latest_output_path and self._latest_output_path.parent.exists())
         )

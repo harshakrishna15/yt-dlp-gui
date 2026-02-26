@@ -86,6 +86,58 @@ class TestUiState(unittest.TestCase):
         self.assertFalse(state.playlist_items_enabled)
         self.assertFalse(state.subtitle_controls_enabled)
 
+    def test_fetching_state_keeps_mode_enabled(self) -> None:
+        state = ui_state.compute_control_state(
+            url_present=True,
+            has_formats_data=False,
+            mode="",
+            container_value="",
+            codec_value="",
+            format_available=False,
+            format_selected=False,
+            queue_ready=False,
+            queue_active=False,
+            is_fetching=True,
+            is_downloading=False,
+            cancel_requested=False,
+            is_playlist_url=False,
+            mixed_prompt_active=False,
+            playlist_items_requested=False,
+            write_subtitles_requested=False,
+            allow_queue_input_context=False,
+            audio_containers=("m4a", "mp3"),
+            video_containers=("mp4", "webm"),
+        )
+        self.assertTrue(state.mode_enabled)
+        self.assertFalse(state.can_start_single)
+
+    def test_fetching_state_allows_container_and_codec_choice_with_mode_selected(self) -> None:
+        state = ui_state.compute_control_state(
+            url_present=True,
+            has_formats_data=False,
+            mode="video",
+            container_value="mp4",
+            codec_value="avc1",
+            format_available=False,
+            format_selected=False,
+            queue_ready=False,
+            queue_active=False,
+            is_fetching=True,
+            is_downloading=False,
+            cancel_requested=False,
+            is_playlist_url=False,
+            mixed_prompt_active=False,
+            playlist_items_requested=False,
+            write_subtitles_requested=False,
+            allow_queue_input_context=False,
+            audio_containers=("m4a", "mp3"),
+            video_containers=("mp4", "webm"),
+        )
+        self.assertTrue(state.container_enabled)
+        self.assertTrue(state.codec_enabled)
+        self.assertFalse(state.format_enabled)
+        self.assertFalse(state.can_start_single)
+
 
 if __name__ == "__main__":
     unittest.main()
