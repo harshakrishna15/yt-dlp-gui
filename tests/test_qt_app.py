@@ -81,7 +81,6 @@ class TestQtApp(unittest.TestCase):
                 "network_retries": "1",
                 "retry_backoff": "1.5",
                 "concurrent_fragments": "4",
-                "ui_layout": "Simple",
                 "open_folder_after_download": False,
             },
         ):
@@ -323,48 +322,73 @@ class TestQtApp(unittest.TestCase):
             )
             return QRect(top_left, bottom_right).normalized()
 
-        action_sets = (
-            ("Classic", [self.window.settings_button, self.window.queue_button, self.window.history_button, self.window.logs_button]),
-            ("Simple", [self.window.simple_panel_tabs]),
-        )
+        controls = [
+            self.window.downloads_button,
+            self.window.queue_button,
+            self.window.history_button,
+            self.window.logs_button,
+            self.window.settings_button,
+        ]
 
-        for mode, controls in action_sets:
-            self.window.ui_layout_combo.setCurrentText(mode)
-            self.window._apply_header_layout()
-            QApplication.processEvents()
-
-            actions_rect = self.window.top_actions.rect()
-            visible_controls = [widget for widget in controls if widget.isVisible()]
-            self.assertTrue(visible_controls, f"No visible controls in {mode} layout")
-            mapped = []
-            for widget in visible_controls:
-                rect = map_rect_to_actions(widget)
-                mapped.append((widget, rect))
-                self.assertTrue(
-                    actions_rect.contains(rect),
-                    f"{type(widget).__name__} is clipped in {mode} layout at 900x760",
+        actions_rect = self.window.top_actions.rect()
+        visible_controls = [widget for widget in controls if widget.isVisible()]
+        self.assertTrue(visible_controls, "No visible controls in top actions")
+        mapped = []
+        for widget in visible_controls:
+            rect = map_rect_to_actions(widget)
+            mapped.append((widget, rect))
+            self.assertTrue(
+                actions_rect.contains(rect),
+                f"{type(widget).__name__} is clipped at 900x760",
+            )
+            if isinstance(widget, QPushButton) and widget is not self.window.downloads_button:
+                self.assertFalse(
+                    widget.icon().isNull(),
+                    f"{widget.text()} icon is missing",
                 )
-                if isinstance(widget, QPushButton):
-                    self.assertFalse(
-                        widget.icon().isNull(),
-                        f"{widget.text()} icon is missing in {mode} layout",
-                    )
 
-            for idx, (left_widget, left_rect) in enumerate(mapped):
-                for right_widget, right_rect in mapped[idx + 1 :]:
-                    if (
-                        left_widget.parentWidget() is right_widget
-                        or right_widget.parentWidget() is left_widget
-                    ):
-                        continue
-                    overlap = left_rect.intersected(right_rect)
-                    self.assertFalse(
-                        overlap.width() > 2 and overlap.height() > 2,
-                        (
-                            f"Unexpected top action overlap in {mode} layout: "
-                            f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
-                        ),
-                    )
+        for idx, (left_widget, left_rect) in enumerate(mapped):
+            for right_widget, right_rect in mapped[idx + 1 :]:
+                if (
+                    left_widget.parentWidget() is right_widget
+                    or right_widget.parentWidget() is left_widget
+                ):
+                    continue
+                overlap = left_rect.intersected(right_rect)
+                self.assertFalse(
+                    overlap.width() > 2 and overlap.height() > 2,
+                    (
+                        "Unexpected top action overlap: "
+                        f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
+                    ),
+                )
+
+    def test_classic_top_actions_keep_settings_rightmost(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        buttons = (
+            self.window.downloads_button,
+            self.window.queue_button,
+            self.window.history_button,
+            self.window.logs_button,
+            self.window.settings_button,
+        )
+        self.assertTrue(all(button.isVisible() for button in buttons))
+
+        x_positions = {
+            button.text(): button.mapTo(
+                self.window.top_actions, button.rect().topLeft()
+            ).x()
+            for button in buttons
+        }
+        settings_x = x_positions["Settings"]
+        self.assertGreater(settings_x, x_positions["Downloads"])
+        self.assertGreater(settings_x, x_positions["Queue"])
+        self.assertGreater(settings_x, x_positions["History"])
+        self.assertGreater(settings_x, x_positions["Logs"])
 
     def test_header_icons_can_be_disabled_and_restored(self) -> None:
         self.assertFalse(self.window.settings_button.icon().isNull())
@@ -378,13 +402,9 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(self.window.queue_button.icon().isNull())
         self.assertTrue(self.window.history_button.icon().isNull())
         self.assertTrue(self.window.logs_button.icon().isNull())
-        logs_idx = self.window._simple_tab_name_to_index["logs"]
-        self.assertGreaterEqual(logs_idx, 0)
-        self.assertTrue(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
 
         self.window._append_log("[error] network timeout")
         self.assertFalse(self.window.logs_button.icon().isNull())
-        self.assertFalse(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
 
         self.window.show_header_icons_check.setChecked(True)
         QApplication.processEvents()
@@ -392,22 +412,15 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window.queue_button.icon().isNull())
         self.assertFalse(self.window.history_button.icon().isNull())
 
-    def test_simple_selected_tab_uses_readable_non_white_icon_variant(self) -> None:
-        self.window.ui_layout_combo.setCurrentText("Simple")
-        self.window._apply_header_layout()
+    def test_downloads_button_returns_to_main_view(self) -> None:
         self.window._open_panel("queue")
+        self.assertEqual(self.window._active_panel_name, "queue")
+        self.window.downloads_button.click()
         QApplication.processEvents()
 
-        queue_idx = self.window._simple_tab_name_to_index["queue"]
-        shown_icon = self.window.simple_panel_tabs.tabIcon(queue_idx)
-        normal_icon = self.window._top_action_icons["queue"]["normal"]
-        active_icon = self.window._top_action_icons["queue"]["active"]
-
-        self.assertFalse(shown_icon.isNull())
-        self.assertFalse(normal_icon.isNull())
-        self.assertFalse(active_icon.isNull())
-        self.assertEqual(shown_icon.cacheKey(), normal_icon.cacheKey())
-        self.assertNotEqual(normal_icon.cacheKey(), active_icon.cacheKey())
+        self.assertIsNone(self.window._active_panel_name)
+        self.assertEqual(self.window.panel_stack.currentIndex(), self.window._main_page_index)
+        self.assertTrue(self.window.downloads_button.isChecked())
 
     def test_on_url_changed_invalidates_fetch_and_resets_selection_state(self) -> None:
         self.window.video_radio.setChecked(True)
@@ -580,9 +593,6 @@ class TestQtApp(unittest.TestCase):
 
         self.assertTrue(self.window._logs_alert_active)
         self.assertFalse(self.window.logs_button.icon().isNull())
-        logs_idx = self.window._simple_tab_name_to_index["logs"]
-        self.assertGreaterEqual(logs_idx, 0)
-        self.assertFalse(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
 
     def test_opening_logs_clears_logs_alert_icon(self) -> None:
         self.window._append_log("[error] could not fetch formats")
@@ -591,9 +601,6 @@ class TestQtApp(unittest.TestCase):
 
         self.assertFalse(self.window._logs_alert_active)
         self.assertFalse(self.window.logs_button.icon().isNull())
-        logs_idx = self.window._simple_tab_name_to_index["logs"]
-        self.assertGreaterEqual(logs_idx, 0)
-        self.assertFalse(self.window.simple_panel_tabs.tabIcon(logs_idx).isNull())
 
 
 if __name__ == "__main__":

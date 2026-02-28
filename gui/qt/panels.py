@@ -83,12 +83,6 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
     network_layout.addStretch(1)
     layout.addRow("Network policy", network_row)
 
-    window.ui_layout_combo = _NativeComboBox(panel)
-    window._register_native_combo(window.ui_layout_combo)
-    window.ui_layout_combo.addItems(["Simple", "Classic"])
-    window.ui_layout_combo.currentTextChanged.connect(window._apply_header_layout)
-    layout.addRow("UI layout", window.ui_layout_combo)
-
     window.show_header_icons_check = QCheckBox("Show top action icons", panel)
     window.show_header_icons_check.setChecked(True)
     layout.addRow("Header icons", window.show_header_icons_check)

@@ -16,7 +16,6 @@ class TestSettingsStore(unittest.TestCase):
             ):
                 loaded = settings_store.load_settings(default_output_dir="/tmp/out")
         self.assertEqual(loaded["output_dir"], "/tmp/out")
-        self.assertEqual(loaded["ui_layout"], "Simple")
         self.assertEqual(loaded["concurrent_fragments"], "4")
         self.assertTrue(loaded["show_header_icons"])
         self.assertFalse(loaded["open_folder_after_download"])
@@ -36,7 +35,6 @@ class TestSettingsStore(unittest.TestCase):
                         "network_retries": "3",
                         "retry_backoff": "2.5",
                         "concurrent_fragments": "3",
-                        "ui_layout": "Classic",
                         "show_header_icons": False,
                         "open_folder_after_download": True,
                     },
@@ -53,7 +51,6 @@ class TestSettingsStore(unittest.TestCase):
         self.assertEqual(loaded["network_retries"], "3")
         self.assertEqual(loaded["retry_backoff"], "2.5")
         self.assertEqual(loaded["concurrent_fragments"], "3")
-        self.assertEqual(loaded["ui_layout"], "Classic")
         self.assertFalse(loaded["show_header_icons"])
         self.assertTrue(loaded["open_folder_after_download"])
 
@@ -63,7 +60,6 @@ class TestSettingsStore(unittest.TestCase):
             settings_path.write_text(
                 (
                     "{"
-                    '"ui_layout":"broken",'
                     '"network_timeout":"",'
                     '"network_retries":"",'
                     '"retry_backoff":"",'
@@ -79,7 +75,6 @@ class TestSettingsStore(unittest.TestCase):
             ):
                 loaded = settings_store.load_settings(default_output_dir="/tmp/default")
         defaults = settings_store.default_settings(default_output_dir="/tmp/default")
-        self.assertEqual(loaded["ui_layout"], "Simple")
         self.assertEqual(loaded["network_timeout"], defaults["network_timeout"])
         self.assertEqual(loaded["network_retries"], defaults["network_retries"])
         self.assertEqual(loaded["retry_backoff"], defaults["retry_backoff"])

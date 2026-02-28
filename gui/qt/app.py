@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
-    QTabBar,
     QSizePolicy,
     QPlainTextEdit,
     QStackedWidget,
@@ -88,7 +87,6 @@ class QtYtDlpGui(QMainWindow):
         self._header_icons_enabled = True
         self._legacy_log_alert_icon = self._build_alert_dot_icon()
         self._top_action_icons: dict[str, dict[str, QIcon]] = {}
-        self._simple_tab_name_to_index: dict[str, int] = {}
         self._output_layout_mode: str | None = None
         self._mixed_prompt_vertical: bool | None = None
 
@@ -182,39 +180,22 @@ class QtYtDlpGui(QMainWindow):
         classic_layout = QHBoxLayout(self.classic_actions)
         classic_layout.setContentsMargins(0, 0, 0, 0)
         classic_layout.setSpacing(6)
-        self.settings_button = QPushButton("Settings", self.classic_actions)
+        self.downloads_button = QPushButton("Downloads", self.classic_actions)
         self.queue_button = QPushButton("Queue", self.classic_actions)
         self.history_button = QPushButton("History", self.classic_actions)
         self.logs_button = QPushButton("Logs", self.classic_actions)
+        self.settings_button = QPushButton("Settings", self.classic_actions)
         for button in (
-            self.settings_button,
+            self.downloads_button,
             self.queue_button,
             self.history_button,
             self.logs_button,
+            self.settings_button,
         ):
             button.setCheckable(True)
             classic_layout.addWidget(button)
 
-        self.simple_panel_tabs = QTabBar(self.top_actions)
-        self.simple_panel_tabs.setObjectName("topPanelTabs")
-        self.simple_panel_tabs.setDocumentMode(True)
-        self.simple_panel_tabs.setDrawBase(False)
-        self.simple_panel_tabs.setExpanding(False)
-        self.simple_panel_tabs.setMovable(False)
-        self.simple_panel_tabs.setUsesScrollButtons(True)
-        for label, name in (
-            ("Downloads", "downloads"),
-            ("Queue", "queue"),
-            ("History", "history"),
-            ("Logs", "logs"),
-            ("Settings", "settings"),
-        ):
-            idx = self.simple_panel_tabs.addTab(label)
-            self.simple_panel_tabs.setTabData(idx, name)
-            self._simple_tab_name_to_index[name] = idx
-
         top_actions_layout.addWidget(self.classic_actions)
-        top_actions_layout.addWidget(self.simple_panel_tabs)
 
         header_layout.addWidget(brand_col, stretch=1)
         header_layout.addWidget(self.top_actions)
@@ -583,6 +564,7 @@ class QtYtDlpGui(QMainWindow):
             "logs": self.panel_stack.addWidget(logs_panel),
         }
         self._panel_buttons = {
+            "downloads": self.downloads_button,
             "settings": self.settings_button,
             "queue": self.queue_button,
             "history": self.history_button,
@@ -590,6 +572,7 @@ class QtYtDlpGui(QMainWindow):
         }
         self._configure_top_action_icons()
 
+        self.downloads_button.clicked.connect(lambda _checked: self._close_panel())
         self.settings_button.clicked.connect(
             lambda _checked: self._toggle_panel("settings")
         )
@@ -598,7 +581,7 @@ class QtYtDlpGui(QMainWindow):
             lambda _checked: self._toggle_panel("history")
         )
         self.logs_button.clicked.connect(lambda _checked: self._toggle_panel("logs"))
-        self.simple_panel_tabs.currentChanged.connect(self._on_simple_tab_changed)
+        self.downloads_button.setChecked(True)
 
         combo_arrow_path = (
             Path(__file__).resolve().parent / "assets" / "combo-down-arrow.svg"
@@ -718,12 +701,11 @@ class QtYtDlpGui(QMainWindow):
             self.codec_combo,
             self.format_combo,
             self.audio_language_combo,
-            self.ui_layout_combo,
         ):
             combo.setMinimumHeight(control_height)
-        self.simple_panel_tabs.setMinimumHeight(max(40, control_height + 12))
 
         for button in (
+            self.downloads_button,
             self.settings_button,
             self.queue_button,
             self.history_button,
@@ -766,6 +748,7 @@ class QtYtDlpGui(QMainWindow):
 
         self._set_uniform_button_width(
             [
+                self.downloads_button,
                 self.settings_button,
                 self.queue_button,
                 self.history_button,
@@ -818,7 +801,6 @@ class QtYtDlpGui(QMainWindow):
         self.codec_combo.setMinimumWidth(dropdown_width)
         self.format_combo.setMinimumWidth(dropdown_width)
         self.audio_language_combo.setMinimumWidth(dropdown_width)
-        self.ui_layout_combo.setMinimumWidth(dropdown_width)
 
         self.network_timeout_edit.setFixedWidth(small_field_width)
         self.network_retries_edit.setFixedWidth(small_field_width)
@@ -876,17 +858,7 @@ class QtYtDlpGui(QMainWindow):
         self._sync_source_details_height()
 
     def _install_tooltips(self) -> None:
-        tab_tooltips = {
-            "downloads": "Open the main downloads view.",
-            "queue": "Open queue manager view.",
-            "history": "Open download history view.",
-            "logs": "Open logs view.",
-            "settings": "Open settings view.",
-        }
-        for name, tooltip in tab_tooltips.items():
-            idx = self._simple_tab_name_to_index.get(name, -1)
-            if idx >= 0:
-                self.simple_panel_tabs.setTabToolTip(idx, tooltip)
+        self.downloads_button.setToolTip("Open the main downloads view.")
         self.settings_button.setToolTip("Open settings view.")
         self.queue_button.setToolTip("Open queue manager view.")
         self.history_button.setToolTip("Open download history view.")
@@ -934,7 +906,6 @@ class QtYtDlpGui(QMainWindow):
         self.concurrent_fragments_edit.setToolTip(
             "Concurrent fragment downloads (1-4, capped at 4)."
         )
-        self.ui_layout_combo.setToolTip("Simple: top tabs. Classic: top buttons.")
         self.show_header_icons_check.setToolTip(
             "Turn top bar action icons on or off."
         )
@@ -1113,10 +1084,6 @@ class QtYtDlpGui(QMainWindow):
             self.open_folder_after_download_check.setChecked(
                 bool(settings.get("open_folder_after_download"))
             )
-            layout = str(settings.get("ui_layout") or "Simple")
-            idx = self.ui_layout_combo.findText(layout, Qt.MatchFlag.MatchFixedString)
-            if idx >= 0:
-                self.ui_layout_combo.setCurrentIndex(idx)
         finally:
             self._applying_user_settings = False
 
@@ -1128,7 +1095,6 @@ class QtYtDlpGui(QMainWindow):
             "network_retries": self.network_retries_edit.text().strip(),
             "retry_backoff": self.retry_backoff_edit.text().strip(),
             "concurrent_fragments": self.concurrent_fragments_edit.text().strip(),
-            "ui_layout": self.ui_layout_combo.currentText().strip() or "Simple",
             "show_header_icons": bool(self.show_header_icons_check.isChecked()),
             "open_folder_after_download": bool(
                 self.open_folder_after_download_check.isChecked()
@@ -1162,9 +1128,6 @@ class QtYtDlpGui(QMainWindow):
         self.concurrent_fragments_edit.textChanged.connect(
             lambda _text: self._save_user_settings()
         )
-        self.ui_layout_combo.currentTextChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
         self.show_header_icons_check.stateChanged.connect(
             self._on_show_header_icons_changed
         )
@@ -1187,39 +1150,8 @@ class QtYtDlpGui(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_dir)))
 
     def _apply_header_layout(self) -> None:
-        window_size = self.size()
-        mode = self.ui_layout_combo.currentText().strip().lower()
-        use_classic = mode == "classic"
-        self.classic_actions.setVisible(use_classic)
-        self.simple_panel_tabs.setVisible(not use_classic)
-        if not use_classic:
-            self._set_simple_panel_tabs_current(self._active_panel_name or "downloads")
+        self.classic_actions.setVisible(True)
         self._refresh_top_action_icons()
-        if self.isVisible() and self.size() != window_size:
-            self.resize(window_size)
-
-    def _set_simple_panel_tabs_current(self, name: str) -> None:
-        idx = self._simple_tab_name_to_index.get((name or "").strip().lower(), -1)
-        if idx < 0:
-            return
-        self.simple_panel_tabs.blockSignals(True)
-        self.simple_panel_tabs.setCurrentIndex(idx)
-        self.simple_panel_tabs.blockSignals(False)
-
-    def _set_simple_tab_icon(self, name: str, icon: QIcon) -> None:
-        idx = self._simple_tab_name_to_index.get(name, -1)
-        if idx >= 0:
-            self.simple_panel_tabs.setTabIcon(idx, icon)
-
-    def _on_simple_tab_changed(self, index: int) -> None:
-        if self.classic_actions.isVisible():
-            return
-        name = str(self.simple_panel_tabs.tabData(index) or "").strip().lower()
-        if name == "downloads":
-            self._close_panel()
-            return
-        if name in {"settings", "queue", "history", "logs"}:
-            self._open_panel(name)
 
     def _toggle_panel(self, name: str) -> None:
         if self._active_panel_name == name:
@@ -1265,6 +1197,7 @@ class QtYtDlpGui(QMainWindow):
         alert_dot_size = QSize(8, 8)
 
         if self._header_icons_enabled:
+            self.downloads_button.setIcon(QIcon())
             self.settings_button.setIcon(
                 self._panel_icon("settings", checked=self.settings_button.isChecked())
             )
@@ -1282,37 +1215,15 @@ class QtYtDlpGui(QMainWindow):
                 )
             )
             for button in (
+                self.downloads_button,
                 self.settings_button,
                 self.queue_button,
                 self.history_button,
                 self.logs_button,
             ):
                 button.setIconSize(full_icon_size)
-
-            self._set_simple_tab_icon("downloads", QIcon())
-            self._set_simple_tab_icon(
-                "settings",
-                self._panel_icon(
-                    "settings",
-                    checked=False,
-                )
-            )
-            self._set_simple_tab_icon(
-                "queue", self._panel_icon("queue", checked=False)
-            )
-            self._set_simple_tab_icon(
-                "history",
-                self._panel_icon("history", checked=False),
-            )
-            self._set_simple_tab_icon(
-                "logs",
-                self._panel_icon(
-                    "logs",
-                    checked=False,
-                    alert=self._logs_alert_active,
-                ),
-            )
         else:
+            self.downloads_button.setIcon(QIcon())
             self.settings_button.setIcon(QIcon())
             self.queue_button.setIcon(QIcon())
             self.history_button.setIcon(QIcon())
@@ -1321,23 +1232,16 @@ class QtYtDlpGui(QMainWindow):
             )
             self.logs_button.setIconSize(alert_dot_size)
             for button in (
+                self.downloads_button,
                 self.settings_button,
                 self.queue_button,
                 self.history_button,
             ):
                 button.setIconSize(full_icon_size)
 
-            self._set_simple_tab_icon("downloads", QIcon())
-            self._set_simple_tab_icon("settings", QIcon())
-            self._set_simple_tab_icon("queue", QIcon())
-            self._set_simple_tab_icon("history", QIcon())
-            self._set_simple_tab_icon(
-                "logs",
-                self._legacy_log_alert_icon if self._logs_alert_active else QIcon(),
-            )
-
         self._set_uniform_button_width(
             [
+                self.downloads_button,
                 self.settings_button,
                 self.queue_button,
                 self.history_button,
@@ -1426,8 +1330,6 @@ class QtYtDlpGui(QMainWindow):
         for panel_name, button in self._panel_buttons.items():
             button.setChecked(panel_name == name)
         self._refresh_top_action_icons()
-        if not self.classic_actions.isVisible():
-            self._set_simple_panel_tabs_current(name)
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
 
@@ -1436,11 +1338,9 @@ class QtYtDlpGui(QMainWindow):
         self.panel_stack.setCurrentIndex(self._main_page_index)
         self._animate_widget_fade_in(self.panel_stack.currentWidget())
         self._active_panel_name = None
-        for button in self._panel_buttons.values():
-            button.setChecked(False)
+        for panel_name, button in self._panel_buttons.items():
+            button.setChecked(panel_name == "downloads")
         self._refresh_top_action_icons()
-        if not self.classic_actions.isVisible():
-            self._set_simple_panel_tabs_current("downloads")
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
 

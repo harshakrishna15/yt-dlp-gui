@@ -6,8 +6,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_UI_LAYOUT = "Simple"
-_VALID_UI_LAYOUTS = {"simple", "classic"}
 _DEFAULT_NETWORK_TIMEOUT = "20"
 _DEFAULT_NETWORK_RETRIES = "1"
 _DEFAULT_RETRY_BACKOFF = "1.5"
@@ -32,7 +30,6 @@ def default_settings(*, default_output_dir: str | None = None) -> dict[str, Any]
         "network_retries": retries,
         "retry_backoff": backoff,
         "concurrent_fragments": fragments,
-        "ui_layout": _DEFAULT_UI_LAYOUT,
         "show_header_icons": True,
         "open_folder_after_download": False,
     }
@@ -94,10 +91,6 @@ def _normalize_settings(
     out["concurrent_fragments"] = _coerce_fragments(
         fragments or str(defaults["concurrent_fragments"])
     )
-
-    layout = str(payload.get("ui_layout", "")).strip().lower()
-    if layout in _VALID_UI_LAYOUTS:
-        out["ui_layout"] = "Classic" if layout == "classic" else "Simple"
 
     out["show_header_icons"] = bool(
         payload.get("show_header_icons", defaults.get("show_header_icons", True))
