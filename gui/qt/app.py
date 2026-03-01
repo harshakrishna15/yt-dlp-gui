@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QProgressBar,
     QPushButton,
@@ -88,7 +89,6 @@ class QtYtDlpGui(QMainWindow):
         self._legacy_log_alert_icon = self._build_alert_dot_icon()
         self._top_action_icons: dict[str, dict[str, QIcon]] = {}
         self._output_layout_mode: str | None = None
-        self._mixed_prompt_vertical: bool | None = None
 
         self._signals = _QtSignals()
         self._signals.formats_loaded.connect(self._on_formats_loaded)
@@ -204,6 +204,52 @@ class QtYtDlpGui(QMainWindow):
         self.panel_stack = QStackedWidget(self)
         root_layout.addWidget(self.panel_stack, stretch=1)
 
+        self.mixed_url_overlay = QFrame(root)
+        self.mixed_url_overlay.setObjectName("mixedUrlOverlay")
+        self.mixed_url_overlay_layout = QVBoxLayout(self.mixed_url_overlay)
+        self.mixed_url_overlay_layout.setContentsMargins(18, 16, 18, 16)
+        self.mixed_url_overlay_layout.setSpacing(0)
+        self.mixed_url_overlay_layout.addStretch(1)
+
+        self.mixed_url_alert = QFrame(self.mixed_url_overlay)
+        self.mixed_url_alert.setObjectName("mixedUrlAlert")
+        mixed_shadow = QGraphicsDropShadowEffect(self.mixed_url_alert)
+        mixed_shadow.setBlurRadius(24)
+        mixed_shadow.setOffset(0, 6)
+        mixed_shadow.setColor(QColor(19, 30, 46, 80))
+        self.mixed_url_alert.setGraphicsEffect(mixed_shadow)
+        mixed_alert_layout = QVBoxLayout(self.mixed_url_alert)
+        mixed_alert_layout.setContentsMargins(12, 10, 12, 14)
+        mixed_alert_layout.setSpacing(8)
+        self.mixed_url_alert_label = QLabel(
+            "Download this URL as a single video or as a playlist?",
+            self.mixed_url_alert,
+        )
+        self.mixed_url_alert_label.setObjectName("mixedUrlAlertTitle")
+        self.mixed_url_alert_label.setWordWrap(True)
+        mixed_alert_layout.addWidget(self.mixed_url_alert_label)
+        mixed_buttons = QWidget(self.mixed_url_alert)
+        self.mixed_buttons_layout = QHBoxLayout(mixed_buttons)
+        self.mixed_buttons_layout.setContentsMargins(0, 0, 0, 2)
+        self.mixed_buttons_layout.setSpacing(4)
+        self.use_single_video_url_button = QPushButton("Single video", mixed_buttons)
+        self.use_playlist_url_button = QPushButton("Playlist", mixed_buttons)
+        self.use_single_video_url_button.clicked.connect(
+            lambda _checked: self._apply_mixed_url_choice(use_playlist=False)
+        )
+        self.use_playlist_url_button.clicked.connect(
+            lambda _checked: self._apply_mixed_url_choice(use_playlist=True)
+        )
+        self.mixed_buttons_layout.addWidget(self.use_single_video_url_button)
+        self.mixed_buttons_layout.addWidget(self.use_playlist_url_button)
+        self.mixed_buttons_layout.addStretch(1)
+        mixed_alert_layout.addWidget(mixed_buttons)
+        self.mixed_url_overlay_layout.addWidget(
+            self.mixed_url_alert, alignment=Qt.AlignmentFlag.AlignHCenter
+        )
+        self.mixed_url_overlay_layout.addStretch(1)
+        self.mixed_url_overlay.hide()
+
         self.main_page = QWidget(self.panel_stack)
         main_layout = QVBoxLayout(self.main_page)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -269,36 +315,8 @@ class QtYtDlpGui(QMainWindow):
 
         self.source_details_empty = QWidget(self.source_details_stack)
         self.source_details_stack.addWidget(self.source_details_empty)
-
-        self.mixed_url_alert = QFrame(self.source_details_stack)
-        self.mixed_url_alert.setObjectName("mixedUrlAlert")
-        mixed_alert_layout = QVBoxLayout(self.mixed_url_alert)
-        mixed_alert_layout.setContentsMargins(10, 10, 10, 10)
-        mixed_alert_layout.setSpacing(8)
-        self.mixed_url_alert_label = QLabel(
-            "Download this URL as a single video or as a playlist?",
-            self.mixed_url_alert,
-        )
-        self.mixed_url_alert_label.setObjectName("mixedUrlAlertTitle")
-        self.mixed_url_alert_label.setWordWrap(True)
-        mixed_alert_layout.addWidget(self.mixed_url_alert_label)
-        mixed_buttons = QWidget(self.mixed_url_alert)
-        self.mixed_buttons_layout = QHBoxLayout(mixed_buttons)
-        self.mixed_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        self.mixed_buttons_layout.setSpacing(8)
-        self.use_single_video_url_button = QPushButton("Single video", mixed_buttons)
-        self.use_playlist_url_button = QPushButton("Playlist", mixed_buttons)
-        self.use_single_video_url_button.clicked.connect(
-            lambda _checked: self._apply_mixed_url_choice(use_playlist=False)
-        )
-        self.use_playlist_url_button.clicked.connect(
-            lambda _checked: self._apply_mixed_url_choice(use_playlist=True)
-        )
-        self.mixed_buttons_layout.addWidget(self.use_single_video_url_button)
-        self.mixed_buttons_layout.addWidget(self.use_playlist_url_button)
-        self.mixed_buttons_layout.addStretch(1)
-        mixed_alert_layout.addWidget(mixed_buttons)
-        self.source_details_stack.addWidget(self.mixed_url_alert)
+        self.source_details_prompt_placeholder = QWidget(self.source_details_stack)
+        self.source_details_stack.addWidget(self.source_details_prompt_placeholder)
 
         self.playlist_items_panel = QWidget(self.source_details_stack)
         playlist_items_layout = QVBoxLayout(self.playlist_items_panel)
@@ -777,7 +795,7 @@ class QtYtDlpGui(QMainWindow):
                 self.use_single_video_url_button,
                 self.use_playlist_url_button,
             ],
-            extra_px=40,
+            extra_px=10,
         )
         self._set_output_form_label_width(min_width=96)
         self._normalize_input_widths()
@@ -847,14 +865,7 @@ class QtYtDlpGui(QMainWindow):
             self._set_output_layout_mode(desired_mode)
             self._output_layout_mode = desired_mode
 
-        mixed_vertical = width < 1200
-        if mixed_vertical != self._mixed_prompt_vertical:
-            self.mixed_buttons_layout.setDirection(
-                QBoxLayout.Direction.TopToBottom
-                if mixed_vertical
-                else QBoxLayout.Direction.LeftToRight
-            )
-            self._mixed_prompt_vertical = mixed_vertical
+        self.mixed_buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self._sync_source_details_height()
 
     def _install_tooltips(self) -> None:
@@ -1330,6 +1341,7 @@ class QtYtDlpGui(QMainWindow):
         for panel_name, button in self._panel_buttons.items():
             button.setChecked(panel_name == name)
         self._refresh_top_action_icons()
+        self._set_mixed_url_alert_visible(False)
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
 
@@ -1341,6 +1353,7 @@ class QtYtDlpGui(QMainWindow):
         for panel_name, button in self._panel_buttons.items():
             button.setChecked(panel_name == "downloads")
         self._refresh_top_action_icons()
+        self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
 
@@ -1372,11 +1385,13 @@ class QtYtDlpGui(QMainWindow):
         self.preview_value.setToolTip(tooltip)
 
     def _set_mixed_url_alert_visible(self, visible: bool) -> None:
-        if bool(visible):
-            self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_PROMPT_INDEX)
-        elif self.source_details_stack.currentIndex() == SOURCE_DETAILS_PROMPT_INDEX:
-            self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_NONE_INDEX)
-        self._sync_source_details_height()
+        should_show = bool(visible) and (
+            self.panel_stack.currentIndex() == self._main_page_index
+        )
+        self._layout_mixed_url_overlay()
+        self.mixed_url_overlay.setVisible(should_show)
+        if should_show:
+            self.mixed_url_overlay.raise_()
 
     def _set_playlist_items_visible(self, visible: bool) -> None:
         if bool(visible):
@@ -1397,6 +1412,20 @@ class QtYtDlpGui(QMainWindow):
             target = max(0, current.sizeHint().height())
         self.source_details_host.setFixedHeight(target)
         self.source_details_stack.setFixedHeight(target)
+
+    def _layout_mixed_url_overlay(self) -> None:
+        root = self.centralWidget()
+        if root is None:
+            return
+        panel_rect = self.panel_stack.geometry()
+        self.mixed_url_overlay.setGeometry(panel_rect)
+        max_width = max(320, panel_rect.width() - 56)
+        self.mixed_url_alert.setMaximumWidth(min(760, max_width))
+        layout = self.mixed_url_alert.layout()
+        if layout is not None:
+            layout.activate()
+        self.mixed_url_alert.adjustSize()
+        self.mixed_url_alert.setMinimumHeight(self.mixed_url_alert.sizeHint().height())
 
     def _update_source_details_visibility(self) -> None:
         window_size = self.size()
@@ -2435,6 +2464,7 @@ class QtYtDlpGui(QMainWindow):
         super().resizeEvent(event)
         self._normalize_input_widths()
         self._apply_responsive_layout()
+        self._layout_mixed_url_overlay()
         if self._is_downloading:
             self._set_metrics_visible(True)
         if self._latest_output_path is not None:

@@ -93,6 +93,10 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid #ddd4c6;
             border-radius: 12px;
         }
+        QFrame#mixedUrlOverlay {
+            background: transparent;
+            border: none;
+        }
         QLabel#mixedUrlAlertTitle {
             color: #1f3550;
             font-weight: 700;

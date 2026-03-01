@@ -27,7 +27,6 @@ try:
         PREVIEW_TITLE_TOOLTIP_DEFAULT,
         SOURCE_DETAILS_NONE_INDEX,
         SOURCE_DETAILS_PLAYLIST_INDEX,
-        SOURCE_DETAILS_PROMPT_INDEX,
         QtYtDlpGui,
     )
 
@@ -69,6 +68,7 @@ class TestQtApp(unittest.TestCase):
             SOURCE_DETAILS_NONE_INDEX,
         )
         self.assertEqual(self.window.source_details_host.height(), 0)
+        self.assertTrue(self.window.mixed_url_overlay.isHidden())
 
     def test_load_settings_always_defaults_output_folder_to_downloads(self) -> None:
         with patch(
@@ -94,15 +94,18 @@ class TestQtApp(unittest.TestCase):
             window.close()
             window.deleteLater()
 
-    def test_mixed_url_shows_inline_alert(self) -> None:
+    def test_mixed_url_shows_overlay_alert(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
+        self.window.show()
+        QApplication.processEvents()
         self.window.url_edit.setText(mixed)
         self.assertEqual(self.window._pending_mixed_url, mixed)
         self.assertEqual(
             self.window.source_details_stack.currentIndex(),
-            SOURCE_DETAILS_PROMPT_INDEX,
+            SOURCE_DETAILS_NONE_INDEX,
         )
-        self.assertGreater(self.window.source_details_host.height(), 0)
+        self.assertEqual(self.window.source_details_host.height(), 0)
+        self.assertTrue(self.window.mixed_url_overlay.isVisible())
         self.assertFalse(self.window._fetch_timer.isActive())
 
     def test_mixed_url_choice_uses_playlist_url(self) -> None:
@@ -118,6 +121,7 @@ class TestQtApp(unittest.TestCase):
             self.window.source_details_stack.currentIndex(),
             SOURCE_DETAILS_PLAYLIST_INDEX,
         )
+        self.assertTrue(self.window.mixed_url_overlay.isHidden())
 
     def test_mixed_url_choice_uses_single_video_url(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
@@ -132,6 +136,7 @@ class TestQtApp(unittest.TestCase):
             self.window.source_details_stack.currentIndex(),
             SOURCE_DETAILS_NONE_INDEX,
         )
+        self.assertTrue(self.window.mixed_url_overlay.isHidden())
 
     def test_playlist_url_shows_playlist_items_without_prompt(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/playlist?list=PLXYZ")
@@ -154,7 +159,7 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual((mid_row, mid_col), (0, 1))
         self.assertEqual(
             self.window.mixed_buttons_layout.direction(),
-            QBoxLayout.Direction.TopToBottom,
+            QBoxLayout.Direction.LeftToRight,
         )
 
         self.window.resize(1500, 820)
@@ -194,10 +199,10 @@ class TestQtApp(unittest.TestCase):
             self.window.use_playlist_url_button.text()
         )
         self.assertGreaterEqual(
-            self.window.use_single_video_url_button.minimumWidth(), single_needed + 30
+            self.window.use_single_video_url_button.minimumWidth(), single_needed + 8
         )
         self.assertGreaterEqual(
-            self.window.use_playlist_url_button.minimumWidth(), playlist_needed + 30
+            self.window.use_playlist_url_button.minimumWidth(), playlist_needed + 8
         )
 
     def test_output_controls_do_not_overlap_across_sizes(self) -> None:
