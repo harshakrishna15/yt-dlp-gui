@@ -27,6 +27,11 @@ class TestCliDispatch(unittest.TestCase):
             cli.main(["--ui", "invalid"])
         self.assertEqual(cm.exception.code, 2)
 
+    def test_main_returns_interrupted_exit_code_on_ctrl_c(self) -> None:
+        with patch("gui.cli._run_qt", side_effect=KeyboardInterrupt):
+            rc = cli.main([])
+        self.assertEqual(rc, cli.EXIT_INTERRUPTED)
+
 
 if __name__ == "__main__":
     unittest.main()

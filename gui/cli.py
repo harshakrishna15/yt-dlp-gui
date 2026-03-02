@@ -4,6 +4,8 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+EXIT_INTERRUPTED = 130
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m gui")
@@ -33,4 +35,7 @@ def _run_qt() -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     _build_parser().parse_args(list(argv) if argv is not None else None)
-    return _run_qt()
+    try:
+        return _run_qt()
+    except KeyboardInterrupt:
+        return EXIT_INTERRUPTED

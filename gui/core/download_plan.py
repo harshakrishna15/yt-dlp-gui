@@ -55,6 +55,9 @@ def parse_download_options_from_queue_settings(
         "embed_subtitles": bool(settings.get("embed_subtitles")),
         "audio_language": str(settings.get("audio_language", "")),
         "custom_filename": str(settings.get("custom_filename", "")),
+        "edit_friendly_encoder": core_options.normalize_edit_friendly_encoder_preference(
+            str(settings.get("edit_friendly_encoder", "auto"))
+        ),
     }
 
 
@@ -91,6 +94,7 @@ def build_single_download_request(
         "embed_subtitles": bool(options["embed_subtitles"]),
         "audio_language": str(options["audio_language"]),
         "custom_filename": str(options["custom_filename"]),
+        "edit_friendly_encoder": str(options["edit_friendly_encoder"]),
     }
 
 
@@ -135,4 +139,5 @@ def build_queue_download_request(
         "embed_subtitles": bool(parsed_options["embed_subtitles"]),
         "audio_language": str(parsed_options["audio_language"]),
         "custom_filename": str(parsed_options["custom_filename"]),
+        "edit_friendly_encoder": str(parsed_options["edit_friendly_encoder"]),
     }

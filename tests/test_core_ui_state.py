@@ -86,7 +86,7 @@ class TestUiState(unittest.TestCase):
         self.assertFalse(state.playlist_items_enabled)
         self.assertFalse(state.subtitle_controls_enabled)
 
-    def test_fetching_state_keeps_mode_enabled(self) -> None:
+    def test_fetching_state_keeps_mode_disabled_until_formats_ready(self) -> None:
         state = ui_state.compute_control_state(
             url_present=True,
             has_formats_data=False,
@@ -108,10 +108,10 @@ class TestUiState(unittest.TestCase):
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),
         )
-        self.assertTrue(state.mode_enabled)
+        self.assertFalse(state.mode_enabled)
         self.assertFalse(state.can_start_single)
 
-    def test_fetching_state_allows_container_and_codec_choice_with_mode_selected(self) -> None:
+    def test_fetching_state_disables_container_and_codec_choice_with_mode_selected(self) -> None:
         state = ui_state.compute_control_state(
             url_present=True,
             has_formats_data=False,
@@ -133,8 +133,8 @@ class TestUiState(unittest.TestCase):
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),
         )
-        self.assertTrue(state.container_enabled)
-        self.assertTrue(state.codec_enabled)
+        self.assertFalse(state.container_enabled)
+        self.assertFalse(state.codec_enabled)
         self.assertFalse(state.format_enabled)
         self.assertFalse(state.can_start_single)
 

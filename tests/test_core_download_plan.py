@@ -34,6 +34,7 @@ class TestCoreDownloadPlan(unittest.TestCase):
                 "embed_subtitles": False,
                 "audio_language": "en",
                 "custom_filename": "clip",
+                "edit_friendly_encoder": "auto",
             },
         )
         self.assertIsNone(request["playlist_items"])
@@ -57,6 +58,7 @@ class TestCoreDownloadPlan(unittest.TestCase):
                 "embed_subtitles": True,
                 "audio_language": "es",
                 "custom_filename": "Queued Name",
+                "edit_friendly_encoder": "intel",
             },
             resolved={
                 "fmt_info": {"format_id": "22"},
@@ -77,6 +79,7 @@ class TestCoreDownloadPlan(unittest.TestCase):
         self.assertEqual(request["retry_backoff_s"], 30.0)
         self.assertEqual(request["concurrent_fragments"], 4)
         self.assertEqual(request["subtitle_languages"], ["en", "es"])
+        self.assertEqual(request["edit_friendly_encoder"], "intel")
 
 
 if __name__ == "__main__":

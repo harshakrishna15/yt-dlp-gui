@@ -35,6 +35,7 @@ class DownloadOptions(TypedDict):
     embed_subtitles: bool
     audio_language: str
     custom_filename: str
+    edit_friendly_encoder: str
 
 
 class QueueSettings(TypedDict, total=False):
@@ -55,6 +56,7 @@ class QueueSettings(TypedDict, total=False):
     embed_subtitles: bool
     audio_language: str
     custom_filename: str
+    edit_friendly_encoder: str
 
 
 class QueueItem(TypedDict, total=False):
@@ -96,3 +98,4 @@ class DownloadRequest(TypedDict):
     embed_subtitles: bool
     audio_language: str
     custom_filename: str
+    edit_friendly_encoder: str

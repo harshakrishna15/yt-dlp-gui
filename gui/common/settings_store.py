@@ -30,7 +30,7 @@ def default_settings(*, default_output_dir: str | None = None) -> dict[str, Any]
         "network_retries": retries,
         "retry_backoff": backoff,
         "concurrent_fragments": fragments,
-        "show_header_icons": True,
+        "edit_friendly_encoder": "auto",
         "open_folder_after_download": False,
     }
 
@@ -92,8 +92,8 @@ def _normalize_settings(
         fragments or str(defaults["concurrent_fragments"])
     )
 
-    out["show_header_icons"] = bool(
-        payload.get("show_header_icons", defaults.get("show_header_icons", True))
+    out["edit_friendly_encoder"] = _coerce_edit_friendly_encoder(
+        payload.get("edit_friendly_encoder", defaults.get("edit_friendly_encoder", "auto"))
     )
     out["open_folder_after_download"] = bool(payload.get("open_folder_after_download"))
     return out
@@ -125,3 +125,22 @@ def _coerce_fragments(value: str) -> str:
         parsed = int(_DEFAULT_CONCURRENT_FRAGMENTS)
     parsed = max(1, min(4, parsed))
     return str(parsed)
+
+
+def _coerce_edit_friendly_encoder(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    allowed = {"auto", "apple", "nvidia", "amd", "intel", "cpu"}
+    if raw in allowed:
+        return raw
+    aliases = {
+        "videotoolbox": "apple",
+        "nvenc": "nvidia",
+        "amf": "amd",
+        "qsv": "intel",
+        "libx264": "cpu",
+        "x264": "cpu",
+    }
+    mapped = aliases.get(raw, "")
+    if mapped in allowed:
+        return mapped
+    return "auto"

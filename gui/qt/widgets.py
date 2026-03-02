@@ -18,7 +18,6 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#cec6b9") -> No
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
     popup.setAutoFillBackground(True)
     popup.setContentsMargins(0, 0, 0, 0)
-    popup.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
     popup.setStyleSheet(
         f"""
         background: #fcfaf6;

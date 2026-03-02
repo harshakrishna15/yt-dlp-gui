@@ -30,7 +30,7 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
 
     window.subtitle_languages_edit = QLineEdit(panel)
     window.subtitle_languages_edit.setPlaceholderText("en,es")
-    layout.addRow("Subtitle langs", window.subtitle_languages_edit)
+    window.subtitle_languages_edit.hide()
 
     subtitle_opts = QWidget(panel)
     subtitle_opts_layout = QHBoxLayout(subtitle_opts)
@@ -46,12 +46,12 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
     subtitle_opts_layout.addWidget(window.write_subtitles_check)
     subtitle_opts_layout.addWidget(window.embed_subtitles_check)
     subtitle_opts_layout.addStretch(1)
-    layout.addRow("Subtitle options", subtitle_opts)
+    subtitle_opts.hide()
 
     window.audio_language_combo = _NativeComboBox(panel)
     window._register_native_combo(window.audio_language_combo)
     window.audio_language_combo.addItem("Any")
-    layout.addRow("Audio language", window.audio_language_combo)
+    window.audio_language_combo.hide()
 
     network_row = QWidget(panel)
     network_layout = QHBoxLayout(network_row)
@@ -81,11 +81,17 @@ def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
     network_layout.addWidget(QLabel("Fragments", network_row))
     network_layout.addWidget(window.concurrent_fragments_edit)
     network_layout.addStretch(1)
-    layout.addRow("Network policy", network_row)
+    network_row.hide()
 
-    window.show_header_icons_check = QCheckBox("Show top action icons", panel)
-    window.show_header_icons_check.setChecked(True)
-    layout.addRow("Header icons", window.show_header_icons_check)
+    window.edit_friendly_encoder_combo = _NativeComboBox(panel)
+    window._register_native_combo(window.edit_friendly_encoder_combo)
+    window.edit_friendly_encoder_combo.addItem("Auto (recommended)", "auto")
+    window.edit_friendly_encoder_combo.addItem("Apple GPU (VideoToolbox)", "apple")
+    window.edit_friendly_encoder_combo.addItem("NVIDIA GPU (NVENC)", "nvidia")
+    window.edit_friendly_encoder_combo.addItem("AMD GPU (AMF)", "amd")
+    window.edit_friendly_encoder_combo.addItem("Intel GPU (QSV)", "intel")
+    window.edit_friendly_encoder_combo.addItem("CPU (libx264)", "cpu")
+    layout.addRow("Edit-friendly encode", window.edit_friendly_encoder_combo)
 
     window.open_folder_after_download_check = QCheckBox(
         "Open output folder after downloads", panel

@@ -33,6 +33,7 @@ def build_download_options(
     is_video_mode: bool,
     audio_language_raw: str,
     custom_filename_raw: str,
+    edit_friendly_encoder_raw: str,
 ) -> DownloadOptions:
     return core_options.build_download_options(
         network_timeout_raw=network_timeout_raw,
@@ -45,6 +46,7 @@ def build_download_options(
         is_video_mode=is_video_mode,
         audio_language_raw=audio_language_raw,
         custom_filename_raw=custom_filename_raw,
+        edit_friendly_encoder_raw=edit_friendly_encoder_raw,
         timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,
         retries_default=download.YDL_ATTEMPT_RETRIES,
         backoff_default=download.YDL_RETRY_BACKOFF_SECONDS,
@@ -177,6 +179,7 @@ def run_download_request(
         embed_subtitles=bool(request["embed_subtitles"]),
         audio_language=str(request["audio_language"]),
         custom_filename=str(request["custom_filename"]),
+        edit_friendly_encoder=str(request["edit_friendly_encoder"]),
         record_output=record_output,
     )
 

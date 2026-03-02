@@ -45,6 +45,7 @@ class TestCoreOptions(unittest.TestCase):
             is_video_mode=True,
             audio_language_raw=" en ",
             custom_filename_raw=" my:file.mp4 ",
+            edit_friendly_encoder_raw="nvenc",
             timeout_default=20,
             retries_default=1,
             backoff_default=1.5,
@@ -59,6 +60,7 @@ class TestCoreOptions(unittest.TestCase):
         self.assertTrue(result["embed_subtitles"])
         self.assertEqual(result["audio_language"], "en")
         self.assertEqual(result["custom_filename"], "my file")
+        self.assertEqual(result["edit_friendly_encoder"], "nvidia")
 
     def test_build_queue_settings_copies_option_fields(self) -> None:
         result = options.build_queue_settings(
@@ -80,12 +82,14 @@ class TestCoreOptions(unittest.TestCase):
                 "embed_subtitles": False,
                 "audio_language": "en",
                 "custom_filename": "x",
+                "edit_friendly_encoder": "cpu",
             },
         )
         self.assertEqual(result["mode"], "video")
         self.assertEqual(result["network_timeout_s"], 20)
         self.assertEqual(result["concurrent_fragments"], 2)
         self.assertEqual(result["subtitle_languages"], ["en"])
+        self.assertEqual(result["edit_friendly_encoder"], "cpu")
 
 
 if __name__ == "__main__":

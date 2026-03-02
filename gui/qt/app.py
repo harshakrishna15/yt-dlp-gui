@@ -3,6 +3,7 @@ from __future__ import annotations
 import signal
 import threading
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +48,7 @@ from ..common import (
 )
 from . import panels as qt_panels
 from . import style as qt_style
+from ..core import error_feedback as core_error_feedback
 from ..core import format_selection as core_format_selection
 from ..core import queue_logic as core_queue_logic
 from ..core import urls as core_urls
@@ -78,7 +80,7 @@ TOP_ACTION_ICON_PX = 16
 class QtYtDlpGui(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("yt-dlp-gui (Qt)")
+        self.setWindowTitle("yt-dlp-gui")
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._native_combos: list[QComboBox] = []
@@ -113,6 +115,7 @@ class QtYtDlpGui(QMainWindow):
         self._show_progress_item = False
         self._close_after_cancel = False
         self._pending_mixed_url = ""
+        self._last_formats_error_popup_key = ""
 
         self._playlist_mode = False
 
@@ -128,14 +131,18 @@ class QtYtDlpGui(QMainWindow):
         self.queue_active = False
         self.queue_index: int | None = None
         self._queue_failed_items = 0
+        self._queue_started_ts: float | None = None
 
         self.download_history: list[HistoryItem] = []
         self._history_seen_paths: set[str] = set()
 
         self._log_lines: list[str] = []
+        self._last_error_log = ""
         self._active_panel_name: str | None = None
         self._applying_user_settings = False
         self._latest_output_path: Path | None = None
+        self._current_item_progress = "-"
+        self._current_item_title = "-"
 
         self._build_ui()
         self._update_source_details_visibility()
@@ -319,14 +326,21 @@ class QtYtDlpGui(QMainWindow):
         self.source_details_stack.addWidget(self.source_details_prompt_placeholder)
 
         self.playlist_items_panel = QWidget(self.source_details_stack)
-        playlist_items_layout = QVBoxLayout(self.playlist_items_panel)
-        playlist_items_layout.setContentsMargins(0, 0, 0, 0)
-        playlist_items_layout.setSpacing(6)
+        playlist_items_layout = QHBoxLayout(self.playlist_items_panel)
+        playlist_items_layout.setContentsMargins(0, 4, 0, 4)
+        playlist_items_layout.setSpacing(10)
         self.playlist_items_label = QLabel("Playlist items", self.playlist_items_panel)
+        self.playlist_items_label.setMinimumWidth(96)
+        self.playlist_items_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self.playlist_items_edit = QLineEdit(self.playlist_items_panel)
         self.playlist_items_edit.setPlaceholderText("Optional: 1-5,7,10-")
+        self.playlist_items_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         playlist_items_layout.addWidget(self.playlist_items_label)
-        playlist_items_layout.addWidget(self.playlist_items_edit)
+        playlist_items_layout.addWidget(self.playlist_items_edit, stretch=1)
         self.source_details_stack.addWidget(self.playlist_items_panel)
         self._sync_source_details_height()
 
@@ -530,17 +544,28 @@ class QtYtDlpGui(QMainWindow):
         metrics_layout.addWidget(self.eta_label)
         metrics_layout.addWidget(self.item_label, stretch=1)
         metrics_layout.addStretch(1)
-        run_layout.addWidget(self.metrics_strip)
-        self.metrics_strip.setVisible(False)
 
         self.download_result_card = QFrame(run)
         self.download_result_card.setObjectName("downloadResultCard")
+        self.download_result_card.setProperty("state", "info")
         result_layout = QHBoxLayout(self.download_result_card)
         result_layout.setContentsMargins(10, 6, 10, 6)
         result_layout.setSpacing(10)
-        self.download_result_title = QLabel("Latest:", self.download_result_card)
+        self.download_result_title = QLabel("Download info:", self.download_result_card)
         self.download_result_title.setObjectName("downloadResultTitle")
-        self.download_result_path = QLabel("-", self.download_result_card)
+        self.download_result_stack = QStackedWidget(self.download_result_card)
+        self.download_result_stack.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._download_result_info_index = self.download_result_stack.addWidget(
+            self.metrics_strip
+        )
+
+        latest_content = QWidget(self.download_result_stack)
+        latest_layout = QHBoxLayout(latest_content)
+        latest_layout.setContentsMargins(0, 0, 0, 0)
+        latest_layout.setSpacing(0)
+        self.download_result_path = QLabel("-", latest_content)
         self.download_result_path.setObjectName("downloadResultPath")
         self.download_result_path.setWordWrap(False)
         self.download_result_path.setSizePolicy(
@@ -549,6 +574,11 @@ class QtYtDlpGui(QMainWindow):
         self.download_result_path.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        latest_layout.addWidget(self.download_result_path)
+        self._download_result_latest_index = self.download_result_stack.addWidget(
+            latest_content
+        )
+
         result_actions = QWidget(self.download_result_card)
         result_actions_layout = QHBoxLayout(result_actions)
         result_actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -560,9 +590,10 @@ class QtYtDlpGui(QMainWindow):
         result_actions_layout.addWidget(self.open_last_output_folder_button)
         result_actions_layout.addWidget(self.copy_output_path_button)
         result_layout.addWidget(self.download_result_title)
-        result_layout.addWidget(self.download_result_path, stretch=1)
+        result_layout.addWidget(self.download_result_stack, stretch=1)
         result_layout.addWidget(result_actions)
-        self.download_result_card.setVisible(False)
+        self.download_result_stack.setCurrentIndex(self._download_result_info_index)
+        self.download_result_card.setVisible(True)
         run_layout.addWidget(self.download_result_card)
 
         main_layout.addWidget(run)
@@ -613,6 +644,7 @@ class QtYtDlpGui(QMainWindow):
             "Paste a video or playlist URL to load available formats.",
             tone="neutral",
         )
+        self._reserve_source_feedback_height()
 
     def _register_native_combo(self, combo: QComboBox) -> None:
         combo.setMinimumHeight(27)
@@ -630,7 +662,7 @@ class QtYtDlpGui(QMainWindow):
         combo: QComboBox,
         *,
         min_width: int = 240,
-        padding: int = 44,
+        padding: int = 40,
     ) -> None:
         view = combo.view()
         if view is None:
@@ -639,11 +671,13 @@ class QtYtDlpGui(QMainWindow):
         text_width = 0
         for idx in range(combo.count()):
             text_width = max(text_width, metrics.horizontalAdvance(combo.itemText(idx)))
-        view.setMinimumWidth(max(min_width, text_width + padding))
+        scrollbar = view.verticalScrollBar()
+        scrollbar_width = scrollbar.sizeHint().width() if scrollbar is not None else 18
+        view.setMinimumWidth(max(min_width, text_width + padding + scrollbar_width))
         row_height = max(30, metrics.height() + 10)
         rows = max(1, min(combo.count(), combo.maxVisibleItems()))
         popup_height = (row_height * rows) + 10
-        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         view.setMinimumHeight(popup_height)
         view.setMaximumHeight(popup_height)
@@ -795,8 +829,9 @@ class QtYtDlpGui(QMainWindow):
                 self.use_single_video_url_button,
                 self.use_playlist_url_button,
             ],
-            extra_px=10,
+            extra_px=18,
         )
+
         self._set_output_form_label_width(min_width=96)
         self._normalize_input_widths()
 
@@ -917,8 +952,8 @@ class QtYtDlpGui(QMainWindow):
         self.concurrent_fragments_edit.setToolTip(
             "Concurrent fragment downloads (1-4, capped at 4)."
         )
-        self.show_header_icons_check.setToolTip(
-            "Turn top bar action icons on or off."
+        self.edit_friendly_encoder_combo.setToolTip(
+            "Choose how edit-friendly MP4 re-encoding selects hardware."
         )
         self.open_folder_after_download_check.setToolTip(
             "Open the selected output folder after downloads finish."
@@ -966,28 +1001,66 @@ class QtYtDlpGui(QMainWindow):
         widget.update()
 
     def _set_source_feedback(self, text: str, *, tone: str = "neutral") -> None:
-        tone_value = tone if tone in {"neutral", "loading", "success", "warning", "error"} else "neutral"
+        tone_value = (
+            tone
+            if tone in {"neutral", "loading", "success", "warning", "error", "hidden"}
+            else "neutral"
+        )
         self.source_feedback_label.setText(str(text or "").strip())
         if self.source_feedback_label.property("tone") != tone_value:
             self.source_feedback_label.setProperty("tone", tone_value)
             self._refresh_widget_style(self.source_feedback_label)
+
+    def _reserve_source_feedback_height(self) -> None:
+        reserved = self.source_feedback_label.sizeHint().height()
+        if reserved > 0:
+            self.source_feedback_label.setMinimumHeight(reserved)
 
     def _populate_sample_url(self) -> None:
         self.url_edit.setText(SAMPLE_VIDEO_URL)
         self.url_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
     def _set_metrics_visible(self, visible: bool) -> None:
-        enabled = bool(visible)
-        self.metrics_strip.setVisible(enabled)
-        self.item_label.setVisible(enabled)
+        # Keep the info row mounted in the result card to avoid layout shifts.
+        self.metrics_strip.setVisible(True)
+        self.item_label.setVisible(True)
+        if bool(visible):
+            self.download_result_stack.setCurrentIndex(self._download_result_info_index)
+            self.download_result_title.setText("Download info:")
+
+    def _refresh_download_result_view(self) -> None:
+        show_latest_output = (self._latest_output_path is not None) and (
+            not self._is_downloading
+        )
+        card_state = "latest" if show_latest_output else "info"
+        if self.download_result_card.property("state") != card_state:
+            self.download_result_card.setProperty("state", card_state)
+            self._refresh_widget_style(self.download_result_card)
+            self._refresh_widget_style(self.download_result_title)
+            self._refresh_widget_style(self.download_result_path)
+        if show_latest_output:
+            self.download_result_title.setText("Latest:")
+            self.download_result_stack.setCurrentIndex(
+                self._download_result_latest_index
+            )
+            self._refresh_last_output_text()
+        else:
+            self.download_result_title.setText("Download info:")
+            self.download_result_stack.setCurrentIndex(
+                self._download_result_info_index
+            )
+
+        self.open_last_output_folder_button.setEnabled(
+            show_latest_output
+            and bool(self._latest_output_path and self._latest_output_path.parent.exists())
+        )
+        self.copy_output_path_button.setEnabled(show_latest_output)
 
     def _clear_last_output_path(self) -> None:
         self._latest_output_path = None
         self.download_result_path.setText("-")
         self.download_result_path.setToolTip("")
-        self.download_result_card.setVisible(False)
-        self.open_last_output_folder_button.setEnabled(False)
-        self.copy_output_path_button.setEnabled(False)
+        self._refresh_download_result_view()
 
     def _refresh_last_output_text(self) -> None:
         if self._latest_output_path is None:
@@ -1008,13 +1081,7 @@ class QtYtDlpGui(QMainWindow):
     def _set_last_output_path(self, output_path: Path) -> None:
         resolved = Path(output_path).expanduser()
         self._latest_output_path = resolved
-        show_latest_output = not self._is_downloading
-        self.open_last_output_folder_button.setEnabled(
-            show_latest_output and resolved.parent.exists()
-        )
-        self.copy_output_path_button.setEnabled(show_latest_output)
-        self.download_result_card.setVisible(show_latest_output)
-        self._refresh_last_output_text()
+        self._refresh_download_result_view()
         QTimer.singleShot(0, self._refresh_last_output_text)
 
     def _open_last_output_folder(self) -> None:
@@ -1031,15 +1098,70 @@ class QtYtDlpGui(QMainWindow):
         QApplication.clipboard().setText(str(self._latest_output_path))
         self._set_status("Output path copied", log=False)
 
+    def _elide_text_right_with_dots(
+        self,
+        text: str,
+        *,
+        width: int,
+        metrics: QFontMetrics,
+    ) -> str:
+        clean = str(text or "")
+        if width <= 0:
+            return "..."
+        if metrics.horizontalAdvance(clean) <= width:
+            return clean
+        dots = "..."
+        dots_width = metrics.horizontalAdvance(dots)
+        if dots_width >= width:
+            return dots
+        low = 0
+        high = len(clean)
+        while low < high:
+            mid = (low + high + 1) // 2
+            candidate = clean[:mid]
+            if metrics.horizontalAdvance(candidate) + dots_width <= width:
+                low = mid
+            else:
+                high = mid - 1
+        trimmed = clean[:low].rstrip()
+        if not trimmed:
+            return dots
+        return f"{trimmed}{dots}"
+
+    def _refresh_current_item_text(self) -> None:
+        progress_clean = str(self._current_item_progress or "-").strip() or "-"
+        title_clean = re.sub(r"\s+", " ", str(self._current_item_title or "-").strip()) or "-"
+        prefix = "Item: " if progress_clean == "-" else f"Item: {progress_clean} - "
+        full_text = f"{prefix}{title_clean}"
+        width = max(80, self.item_label.width() - 4)
+        metrics = QFontMetrics(self.item_label.font())
+        if metrics.horizontalAdvance(full_text) <= width:
+            shown_text = full_text
+        else:
+            prefix_width = metrics.horizontalAdvance(prefix)
+            if prefix_width >= width:
+                shown_text = self._elide_text_right_with_dots(
+                    full_text,
+                    width=width,
+                    metrics=metrics,
+                )
+            else:
+                shown_title = self._elide_text_right_with_dots(
+                    title_clean,
+                    width=max(0, width - prefix_width),
+                    metrics=metrics,
+                )
+                shown_text = f"{prefix}{shown_title}"
+        self.item_label.setText(shown_text)
+        self.item_label.setToolTip(title_clean)
+
     def _set_current_item_display(self, *, progress: str, title: str) -> None:
         progress_clean = str(progress or "-").strip() or "-"
         title_clean = re.sub(r"\s+", " ", str(title or "-").strip()) or "-"
-        if progress_clean == "-":
-            self.item_label.setText(f"Item: {title_clean}")
-        else:
-            self.item_label.setText(f"Item: {progress_clean} - {title_clean}")
-        self.item_label.setToolTip(title_clean)
-        self.item_label.setVisible(self.metrics_strip.isVisible())
+        self._current_item_progress = progress_clean
+        self._current_item_title = title_clean
+        self._refresh_current_item_text()
+        self.item_label.setVisible(True)
 
     def _set_current_item_from_text(self, item: str) -> None:
         clean = re.sub(r"\s+", " ", str(item or "").strip())
@@ -1089,9 +1211,15 @@ class QtYtDlpGui(QMainWindow):
             self.concurrent_fragments_edit.setText(
                 str(settings.get("concurrent_fragments") or "")
             )
-            show_header_icons = bool(settings.get("show_header_icons", True))
-            self.show_header_icons_check.setChecked(show_header_icons)
-            self._set_header_icons_enabled(show_header_icons)
+            edit_friendly_encoder = str(
+                settings.get("edit_friendly_encoder") or "auto"
+            ).strip()
+            idx = self.edit_friendly_encoder_combo.findData(edit_friendly_encoder)
+            if idx < 0:
+                idx = self.edit_friendly_encoder_combo.findData("auto")
+            if idx < 0:
+                idx = 0
+            self.edit_friendly_encoder_combo.setCurrentIndex(idx)
             self.open_folder_after_download_check.setChecked(
                 bool(settings.get("open_folder_after_download"))
             )
@@ -1106,7 +1234,9 @@ class QtYtDlpGui(QMainWindow):
             "network_retries": self.network_retries_edit.text().strip(),
             "retry_backoff": self.retry_backoff_edit.text().strip(),
             "concurrent_fragments": self.concurrent_fragments_edit.text().strip(),
-            "show_header_icons": bool(self.show_header_icons_check.isChecked()),
+            "edit_friendly_encoder": str(
+                self.edit_friendly_encoder_combo.currentData() or "auto"
+            ).strip(),
             "open_folder_after_download": bool(
                 self.open_folder_after_download_check.isChecked()
             ),
@@ -1139,16 +1269,12 @@ class QtYtDlpGui(QMainWindow):
         self.concurrent_fragments_edit.textChanged.connect(
             lambda _text: self._save_user_settings()
         )
-        self.show_header_icons_check.stateChanged.connect(
-            self._on_show_header_icons_changed
+        self.edit_friendly_encoder_combo.currentIndexChanged.connect(
+            lambda _idx: self._save_user_settings()
         )
         self.open_folder_after_download_check.stateChanged.connect(
             lambda _state: self._save_user_settings()
         )
-
-    def _on_show_header_icons_changed(self, _state: int) -> None:
-        self._set_header_icons_enabled(self.show_header_icons_check.isChecked())
-        self._save_user_settings()
 
     def _maybe_open_output_folder(self) -> None:
         if not self.open_folder_after_download_check.isChecked():
@@ -1361,6 +1487,9 @@ class QtYtDlpGui(QMainWindow):
         clean = str(text or "").strip()
         if not clean:
             return
+        error_text = core_error_feedback.error_text_from_log(clean)
+        if error_text:
+            self._last_error_log = error_text
         self._log_lines.append(clean)
         if len(self._log_lines) > LOG_MAX_LINES:
             self._log_lines = self._log_lines[-LOG_MAX_LINES:]
@@ -1370,6 +1499,7 @@ class QtYtDlpGui(QMainWindow):
 
     def _clear_logs(self) -> None:
         self._log_lines.clear()
+        self._last_error_log = ""
         self.logs_view.clear()
         self._set_logs_alert(False)
 
@@ -1393,6 +1523,19 @@ class QtYtDlpGui(QMainWindow):
         if should_show:
             self.mixed_url_overlay.raise_()
 
+    def _show_feedback_popup(self, *, title: str, message: str, critical: bool = False) -> None:
+        clean_message = str(message or "").strip() or "Something went wrong."
+        detail = str(self._last_error_log or "").strip()
+        body = clean_message
+        if detail:
+            lower_body = clean_message.lower()
+            if detail.lower() not in lower_body:
+                body = f"{clean_message}\n\nDetails:\n{detail}"
+        if critical:
+            QMessageBox.critical(self, title, body)
+            return
+        QMessageBox.warning(self, title, body)
+
     def _set_playlist_items_visible(self, visible: bool) -> None:
         if bool(visible):
             self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_PLAYLIST_INDEX)
@@ -1409,7 +1552,9 @@ class QtYtDlpGui(QMainWindow):
         if self.source_details_stack.currentIndex() == SOURCE_DETAILS_NONE_INDEX:
             target = 0
         else:
-            target = max(0, current.sizeHint().height())
+            target = max(0, current.sizeHint().height(), current.minimumSizeHint().height())
+            if target > 0:
+                target += 2
         self.source_details_host.setFixedHeight(target)
         self.source_details_stack.setFixedHeight(target)
 
@@ -1471,6 +1616,8 @@ class QtYtDlpGui(QMainWindow):
     def _on_url_changed(self) -> None:
         current = self.url_edit.text()
         normalized = core_urls.strip_url_whitespace(current)
+        if normalized != self._pending_mixed_url:
+            self._last_formats_error_popup_key = ""
         if normalized != current:
             self.url_edit.blockSignals(True)
             self.url_edit.setText(normalized)
@@ -1603,14 +1750,26 @@ class QtYtDlpGui(QMainWindow):
             self._set_preview_title("")
             self.format_combo.clear()
             self._set_audio_language_values([])
-            status_text = "Could not fetch formats" if error else "No formats found"
+            fetch_feedback = core_error_feedback.formats_fetch_failed_feedback(
+                self._last_error_log
+            )
+            status_text = fetch_feedback.status if error else "No formats found"
             self._set_status(status_text)
             self._set_source_feedback(
-                "Could not load formats. Check the URL or network and try again."
+                fetch_feedback.message
                 if error
                 else "No formats found for this URL. Try a different link.",
                 tone="error" if error else "warning",
             )
+            if error:
+                popup_key = f"{url}|{fetch_feedback.reason}"
+                if popup_key != self._last_formats_error_popup_key:
+                    self._show_feedback_popup(
+                        title="Could not fetch formats",
+                        message=fetch_feedback.message,
+                        critical=False,
+                    )
+                    self._last_formats_error_popup_key = popup_key
             self._update_controls_state()
             return
 
@@ -1778,6 +1937,9 @@ class QtYtDlpGui(QMainWindow):
             is_video_mode=self._current_mode() == "video",
             audio_language_raw=self.audio_language_combo.currentText(),
             custom_filename_raw=self.filename_edit.text(),
+            edit_friendly_encoder_raw=str(
+                self.edit_friendly_encoder_combo.currentData() or "auto"
+            ),
         )
 
     def _capture_queue_settings(self) -> QueueSettings:
@@ -1830,7 +1992,7 @@ class QtYtDlpGui(QMainWindow):
         self._clear_last_output_path()
         self._set_metrics_visible(True)
         self._set_status("Downloading...")
-        self._set_source_feedback("Download in progress...", tone="loading")
+        self._set_source_feedback("", tone="hidden")
         self._update_controls_state()
 
         request, was_normalized = app_service.build_single_download_request(
@@ -1892,10 +2054,16 @@ class QtYtDlpGui(QMainWindow):
             )
             self._clear_last_output_path()
         else:
-            self._set_status("Download failed")
+            failure = core_error_feedback.download_failed_feedback(self._last_error_log)
+            self._set_status(failure.status)
             self._set_source_feedback(
-                "Download failed. Check Logs and try again.",
+                failure.message,
                 tone="error",
+            )
+            self._show_feedback_popup(
+                title="Download failed",
+                message=failure.message,
+                critical=True,
             )
             self._clear_last_output_path()
         self._update_controls_state()
@@ -1964,6 +2132,7 @@ class QtYtDlpGui(QMainWindow):
         self.queue_active = True
         self.queue_index = 0
         self._queue_failed_items = 0
+        self._queue_started_ts = time.time()
         self._is_downloading = True
         self._show_progress_item = True
         self._cancel_requested = False
@@ -1973,7 +2142,7 @@ class QtYtDlpGui(QMainWindow):
         self._clear_last_output_path()
         self._set_metrics_visible(True)
         self._set_status("Downloading queue...")
-        self._set_source_feedback("Queue download in progress...", tone="loading")
+        self._set_source_feedback("", tone="hidden")
         self._update_controls_state()
         self._refresh_queue_panel()
         self._start_next_queue_item()
@@ -2090,9 +2259,11 @@ class QtYtDlpGui(QMainWindow):
 
     def _finish_queue(self, *, cancelled: bool = False) -> None:
         failed_items = self._queue_failed_items
+        queue_started_ts = self._queue_started_ts
         self.queue_active = False
         self.queue_index = None
         self._queue_failed_items = 0
+        self._queue_started_ts = None
         self._is_downloading = False
         self._show_progress_item = False
         self._cancel_requested = False
@@ -2112,10 +2283,23 @@ class QtYtDlpGui(QMainWindow):
             self._clear_last_output_path()
         elif outcome == "failed":
             self._append_log(f"[queue] finished with {failed_items} failed item(s)")
+            failure = core_error_feedback.download_failed_feedback(self._last_error_log)
+            item_label = "item" if failed_items == 1 else "items"
             self._set_status("Queue finished with errors")
             self._set_source_feedback(
-                "Queue finished with errors. Check Logs for failed items.",
+                (
+                    f"Queue finished with {failed_items} failed {item_label}. "
+                    f"Last issue: {failure.reason}. Check Logs and retry."
+                ),
                 tone="warning",
+            )
+            self._show_feedback_popup(
+                title="Queue finished with errors",
+                message=(
+                    f"Queue finished with {failed_items} failed {item_label}. "
+                    f"Last issue: {failure.reason}."
+                ),
+                critical=False,
             )
         else:
             self._append_log("[queue] finished successfully")
@@ -2123,6 +2307,12 @@ class QtYtDlpGui(QMainWindow):
             self._set_source_feedback(
                 "Queue complete. Paste another URL or review your history.",
                 tone="success",
+            )
+
+        if queue_started_ts is not None:
+            elapsed_s = max(0.0, time.time() - queue_started_ts)
+            self._append_log(
+                f"[time] Queue total time: {download.format_duration(elapsed_s)}"
             )
 
         if outcome != "cancelled":
@@ -2449,22 +2639,14 @@ class QtYtDlpGui(QMainWindow):
         self.retry_backoff_edit.setEnabled(state.input_fields_enabled)
         self.concurrent_fragments_edit.setEnabled(state.input_fields_enabled)
 
-        has_last_output = (self._latest_output_path is not None) and (
-            not self._is_downloading
-        )
-        self.download_result_card.setVisible(has_last_output)
-        if has_last_output:
-            self._refresh_last_output_text()
-        self.open_last_output_folder_button.setEnabled(
-            has_last_output and bool(self._latest_output_path and self._latest_output_path.parent.exists())
-        )
-        self.copy_output_path_button.setEnabled(has_last_output)
+        self._refresh_download_result_view()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self._normalize_input_widths()
         self._apply_responsive_layout()
         self._layout_mixed_url_overlay()
+        self._refresh_current_item_text()
         if self._is_downloading:
             self._set_metrics_visible(True)
         if self._latest_output_path is not None:

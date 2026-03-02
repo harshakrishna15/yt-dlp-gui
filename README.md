@@ -9,6 +9,25 @@ Paste a URL, pick a format, and download.
 - macOS
 - Windows
 
+### Quick Start
+
+- macOS
+
+```bash
+chmod +x scripts/build-macos.sh
+./scripts/build-macos.sh
+```
+
+Output: `dist/yt-dlp-gui.app`
+
+- Windows (PowerShell)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
+```
+
+Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
+
 ### Prerequisites
 
 - Python 3.10+
@@ -107,6 +126,8 @@ chmod +x scripts/build-macos.sh
 ```
 
 Output: `dist/yt-dlp-gui.app`
+
+The macOS build script auto-generates and embeds an app icon during packaging.
 
 - Windows
 

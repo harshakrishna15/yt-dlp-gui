@@ -6,6 +6,15 @@ from typing import Any
 
 from ..common.types import DownloadOptions, QueueSettings
 
+EDIT_FRIENDLY_ENCODER_OPTIONS = {
+    "auto",
+    "apple",
+    "nvidia",
+    "amd",
+    "intel",
+    "cpu",
+}
+
 
 def parse_int_setting(
     value: str,
@@ -55,6 +64,34 @@ def sanitize_custom_filename(value: str) -> str:
     return stem[:160]
 
 
+def normalize_edit_friendly_encoder_preference(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    aliases = {
+        "auto": "auto",
+        "automatic": "auto",
+        "default": "auto",
+        "apple": "apple",
+        "videotoolbox": "apple",
+        "h264_videotoolbox": "apple",
+        "nvidia": "nvidia",
+        "nvenc": "nvidia",
+        "h264_nvenc": "nvidia",
+        "amd": "amd",
+        "amf": "amd",
+        "h264_amf": "amd",
+        "intel": "intel",
+        "qsv": "intel",
+        "h264_qsv": "intel",
+        "cpu": "cpu",
+        "x264": "cpu",
+        "libx264": "cpu",
+    }
+    normalized = aliases.get(raw, raw)
+    if normalized in EDIT_FRIENDLY_ENCODER_OPTIONS:
+        return normalized
+    return "auto"
+
+
 def coerce_subtitle_languages(value: object) -> list[str]:
     if isinstance(value, list):
         out: list[str] = []
@@ -78,6 +115,7 @@ def build_download_options(
     is_video_mode: bool,
     audio_language_raw: str,
     custom_filename_raw: str,
+    edit_friendly_encoder_raw: str,
     timeout_default: int,
     retries_default: int,
     backoff_default: float,
@@ -116,6 +154,9 @@ def build_download_options(
         "embed_subtitles": embed_subtitles,
         "audio_language": (audio_language_raw or "").strip(),
         "custom_filename": sanitize_custom_filename(custom_filename_raw),
+        "edit_friendly_encoder": normalize_edit_friendly_encoder_preference(
+            edit_friendly_encoder_raw
+        ),
     }
 
 
@@ -149,4 +190,5 @@ def build_queue_settings(
         "embed_subtitles": bool(options["embed_subtitles"]),
         "audio_language": options["audio_language"],
         "custom_filename": options["custom_filename"],
+        "edit_friendly_encoder": options["edit_friendly_encoder"],
     }

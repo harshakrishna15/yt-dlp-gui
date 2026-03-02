@@ -138,6 +138,11 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: #7a2d2d;
             background: #faeaea;
         }
+        QLabel#sourceFeedback[tone="hidden"] {
+            border: 1px solid transparent;
+            color: transparent;
+            background: transparent;
+        }
         QFrame#metricsStrip {
             background: #f1f5fa;
             border: 1px solid #d2ddea;
@@ -152,15 +157,26 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: #355170;
             font-weight: 600;
         }
-        QFrame#downloadResultCard {
+        QFrame#downloadResultCard[state="info"] {
+            background: #f1f5fa;
+            border: 1px solid #d2ddea;
+            border-radius: 12px;
+            padding: 2px 0px;
+        }
+        QFrame#downloadResultCard[state="latest"] {
             background: #e8f5ec;
             border: 1px solid #bfd9c9;
             border-radius: 12px;
             padding: 2px 0px;
         }
         QLabel#downloadResultTitle {
-            color: #21523a;
             font-weight: 700;
+        }
+        QFrame#downloadResultCard[state="info"] QLabel#downloadResultTitle {
+            color: #2a4360;
+        }
+        QFrame#downloadResultCard[state="latest"] QLabel#downloadResultTitle {
+            color: #21523a;
         }
         QLabel#downloadResultPath {
             color: #2f4f6e;
@@ -169,12 +185,14 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QProgressBar {
             background: #e6edf5;
             border: 1px solid #c5d2e1;
-            border-radius: 7px;
+            border-radius: 6px;
+            padding: 1px;
             min-height: 12px;
             max-height: 12px;
         }
         QProgressBar::chunk {
-            border-radius: 6px;
+            border-radius: 5px;
+            margin: 0px;
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 1, y2: 0,
                 stop: 0 #5f8fca,
@@ -259,6 +277,53 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QListView#nativeComboView::item:selected {
             background: #dce9f9;
             color: #1f3556;
+        }
+        QListView#nativeComboView QScrollBar:vertical {
+            background: #f3efe6;
+            width: 19px;
+            margin: 0px;
+            border: none;
+            border-left: 1px solid #d5cec1;
+            border-top-right-radius: 10px;
+            border-bottom-right-radius: 10px;
+        }
+        QListView#nativeComboView QScrollBar::handle:vertical {
+            background: #c7d6ea;
+            min-height: 20px;
+            margin: 2px;
+            border-radius: 6px;
+        }
+        QListView#nativeComboView QScrollBar::handle:vertical:hover {
+            background: #b8cadf;
+        }
+        QListView#nativeComboView QScrollBar::sub-line:vertical,
+        QListView#nativeComboView QScrollBar::add-line:vertical {
+            height: 18px;
+            background: #ece7de;
+            border: none;
+        }
+        QListView#nativeComboView QScrollBar::sub-line:vertical {
+            border-top-right-radius: 10px;
+        }
+        QListView#nativeComboView QScrollBar::add-line:vertical {
+            border-bottom-right-radius: 10px;
+        }
+        QListView#nativeComboView QScrollBar::sub-line:vertical:hover,
+        QListView#nativeComboView QScrollBar::add-line:vertical:hover {
+            background: #e3ddd2;
+        }
+        QListView#nativeComboView QScrollBar::sub-line:vertical:disabled,
+        QListView#nativeComboView QScrollBar::add-line:vertical:disabled {
+            background: #f1ede5;
+        }
+        QListView#nativeComboView QScrollBar::up-arrow:vertical,
+        QListView#nativeComboView QScrollBar::down-arrow:vertical {
+            width: 9px;
+            height: 6px;
+        }
+        QListView#nativeComboView QScrollBar::add-page:vertical,
+        QListView#nativeComboView QScrollBar::sub-page:vertical {
+            background: transparent;
         }
         QPushButton {
             background: qlineargradient(

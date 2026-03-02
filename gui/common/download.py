@@ -1,8 +1,12 @@
-import time
+import os
+import re
+import subprocess
+import sys
+import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
-import re
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadCancelled
@@ -27,6 +31,21 @@ YDL_RETRY_BACKOFF_SECONDS = 1.5
 YDL_PLAYLIST_SLEEP_MIN_SECONDS = 1.0
 YDL_PLAYLIST_SLEEP_MAX_SECONDS = 2.5
 YDL_MAX_CONCURRENT_FRAGMENTS = 4
+
+# Default MP4 editing preset aimed at smoother Final Cut Pro playback.
+EDIT_FRIENDLY_VIDEO_CODEC = "libx264"
+EDIT_FRIENDLY_VIDEO_PRESET = "medium"
+EDIT_FRIENDLY_VIDEO_PROFILE = "high"
+EDIT_FRIENDLY_VIDEO_LEVEL = "4.1"
+EDIT_FRIENDLY_AUDIO_CODEC = "aac"
+EDIT_FRIENDLY_AUDIO_BITRATE = "192k"
+EDIT_FRIENDLY_AUDIO_SAMPLE_RATE = "48000"
+EDIT_FRIENDLY_HARDWARE_VIDEO_CODECS = (
+    "h264_videotoolbox",
+    "h264_nvenc",
+    "h264_amf",
+    "h264_qsv",
+)
 
 
 def build_ydl_opts(
@@ -233,17 +252,53 @@ def run_download(
     embed_subtitles: bool = False,
     audio_language: str = "",
     custom_filename: str = "",
+    edit_friendly_encoder: str = "auto",
     record_output: Callable[[Path], None] | None = None,
 ) -> str:
     """Run a yt-dlp download with progress callbacks."""
     start_ts = time.time()
     result = DOWNLOAD_SUCCESS
     attempts = max(1, int(network_retries) + 1)
+    update_warning_logged = {"value": False}
+
+    def _safe_update(payload: ProgressUpdate) -> None:
+        try:
+            update_progress(payload)
+        except Exception as exc:
+            if update_warning_logged["value"]:
+                return
+            update_warning_logged["value"] = True
+            log(f"[progress] UI update failed: {exc}")
+
+    def _mark_cancelled() -> None:
+        nonlocal result
+        result = DOWNLOAD_CANCELLED
+        log("[cancelled] Download cancelled.")
+        _safe_update({"status": "cancelled"})
+
     for attempt in range(1, attempts + 1):
         if cancel_event is not None and cancel_event.is_set():
-            result = DOWNLOAD_CANCELLED
-            log("[cancelled] Download cancelled.")
+            _mark_cancelled()
             break
+        attempt_outputs: list[Path] = []
+        seen_outputs: set[str] = set()
+
+        def _record_output(path: Path) -> None:
+            try:
+                candidate = Path(path)
+            except (TypeError, ValueError):
+                return
+            key = str(candidate)
+            if key and key not in seen_outputs:
+                seen_outputs.add(key)
+                attempt_outputs.append(candidate)
+            if record_output is None:
+                return
+            try:
+                record_output(candidate)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                pass
+
         opts = build_ydl_opts(
             url=url,
             output_dir=output_dir,
@@ -263,18 +318,16 @@ def run_download(
             embed_subtitles=embed_subtitles,
             audio_language=audio_language,
             custom_filename=custom_filename,
-            record_output=record_output,
+            record_output=_record_output,
         )
         try:
             with YoutubeDL(opts) as ydl:
                 ydl.download([url])
         except DownloadCancelled:
-            result = DOWNLOAD_CANCELLED
-            log("[cancelled] Download cancelled.")
-            try:
-                update_progress({"status": "cancelled"})
-            except Exception:
-                pass
+            _mark_cancelled()
+            break
+        except KeyboardInterrupt:
+            _mark_cancelled()
             break
         except Exception as exc:  # broad to surface in UI
             result = DOWNLOAD_ERROR
@@ -290,20 +343,585 @@ def run_download(
                 deadline = time.time() + wait_s
                 while time.time() < deadline:
                     if cancel_event is not None and cancel_event.is_set():
-                        result = DOWNLOAD_CANCELLED
-                        log("[cancelled] Download cancelled.")
+                        _mark_cancelled()
                         break
-                    time.sleep(0.1)
+                    try:
+                        time.sleep(0.1)
+                    except KeyboardInterrupt:
+                        _mark_cancelled()
+                        break
                 if result == DOWNLOAD_CANCELLED:
                     break
             continue
         else:
+            try:
+                _postprocess_edit_friendly_mp4(
+                    output_paths=attempt_outputs,
+                    format_filter=format_filter,
+                    fmt_info=fmt_info,
+                    edit_friendly_encoder=edit_friendly_encoder,
+                    cancel_event=cancel_event,
+                    update_progress=_safe_update,
+                    log=log,
+                )
+            except DownloadCancelled:
+                _mark_cancelled()
+                break
+            except Exception as exc:
+                log(f"[fcp] edit-friendly step failed: {exc}")
             result = DOWNLOAD_SUCCESS
             log("[done] Download complete.")
             break
     elapsed = time.time() - start_ts
-    log(f"[time] Elapsed: {format_duration(elapsed)}")
+    log(f"[time] Total item time: {format_duration(elapsed)}")
     return result
+
+
+def _postprocess_edit_friendly_mp4(
+    *,
+    output_paths: list[Path],
+    format_filter: str,
+    fmt_info: FormatInfo | None,
+    edit_friendly_encoder: str,
+    cancel_event: threading.Event | None,
+    update_progress: Callable[[ProgressUpdate], None],
+    log: Callable[[str], None],
+) -> None:
+    if not _edit_friendly_mp4_required(format_filter=format_filter, fmt_info=fmt_info):
+        return
+    mp4_outputs = _unique_existing_mp4_paths(output_paths)
+    if not mp4_outputs:
+        return
+
+    ffmpeg_path, _ffmpeg_source = resolve_binary("ffmpeg")
+    if ffmpeg_path is None:
+        log("[fcp] ffmpeg missing; skipped edit-friendly MP4 re-encode.")
+        return
+    selected_video_codec = _select_edit_friendly_video_codec(
+        ffmpeg_path=ffmpeg_path,
+        preferred=edit_friendly_encoder,
+        log=log,
+    )
+
+    ffprobe_path, _ffprobe_source = resolve_binary("ffprobe")
+    duration_by_path: dict[str, float | None] = {}
+    if ffprobe_path is not None:
+        for output_path in mp4_outputs:
+            duration_by_path[str(output_path)] = _probe_media_duration_seconds(
+                output_path, ffprobe_path
+            )
+    known_durations = [
+        duration
+        for duration in duration_by_path.values()
+        if isinstance(duration, (int, float)) and duration > 0
+    ]
+    total_duration_s: float | None = None
+    if len(known_durations) == len(mp4_outputs) and known_durations:
+        total_duration_s = float(sum(known_durations))
+
+    completed_duration_s = 0.0
+    for output_path in mp4_outputs:
+        if cancel_event is not None and cancel_event.is_set():
+            raise DownloadCancelled()
+        duration_s = duration_by_path.get(str(output_path))
+        success = _reencode_edit_friendly_mp4_file(
+            input_path=output_path,
+            ffmpeg_path=ffmpeg_path,
+            video_codec=selected_video_codec,
+            duration_s=duration_s,
+            progress_offset_s=completed_duration_s,
+            total_duration_s=total_duration_s,
+            cancel_event=cancel_event,
+            update_progress=update_progress,
+            log=log,
+        )
+        if (not success) and selected_video_codec != EDIT_FRIENDLY_VIDEO_CODEC:
+            log(
+                "[fcp] Hardware encoder unavailable at runtime; "
+                "falling back to libx264."
+            )
+            selected_video_codec = EDIT_FRIENDLY_VIDEO_CODEC
+            success = _reencode_edit_friendly_mp4_file(
+                input_path=output_path,
+                ffmpeg_path=ffmpeg_path,
+                video_codec=selected_video_codec,
+                duration_s=duration_s,
+                progress_offset_s=completed_duration_s,
+                total_duration_s=total_duration_s,
+                cancel_event=cancel_event,
+                update_progress=update_progress,
+                log=log,
+            )
+        if not success:
+            log(f"[fcp] Skipped edit-friendly output for {output_path.name}.")
+        if isinstance(duration_s, (int, float)) and duration_s > 0:
+            completed_duration_s += float(duration_s)
+
+
+def _edit_friendly_mp4_required(
+    *,
+    format_filter: str,
+    fmt_info: FormatInfo | None,
+) -> bool:
+    if (format_filter or "").strip().lower() != "mp4":
+        return False
+    if fmt_info is None:
+        return True
+    return not bool(
+        fmt_info.get("vcodec") in (None, "none") or fmt_info.get("is_audio_only")
+    )
+
+
+def _unique_existing_mp4_paths(paths: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for raw in paths:
+        try:
+            path = Path(raw)
+        except (TypeError, ValueError):
+            continue
+        key = str(path)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if path.suffix.lower() != ".mp4":
+            continue
+        if not path.exists():
+            continue
+        unique.append(path)
+    return unique
+
+
+def _reencode_edit_friendly_mp4_file(
+    *,
+    input_path: Path,
+    ffmpeg_path: Path,
+    video_codec: str,
+    duration_s: float | None,
+    progress_offset_s: float,
+    total_duration_s: float | None,
+    cancel_event: threading.Event | None,
+    update_progress: Callable[[ProgressUpdate], None],
+    log: Callable[[str], None],
+) -> bool:
+    temp_output = input_path.with_name(f"{input_path.stem}.editfriendly.tmp.mp4")
+    progress_fd: int | None = None
+    progress_path = Path("")
+    process: subprocess.Popen[str] | None = None
+    try:
+        if temp_output.exists():
+            temp_output.unlink()
+    except OSError:
+        pass
+
+    try:
+        progress_fd, progress_path_raw = tempfile.mkstemp(
+            prefix="yt_dlp_gui_ffmpeg_progress_",
+            suffix=".log",
+        )
+        progress_path = Path(progress_path_raw)
+    finally:
+        if progress_fd is not None:
+            try:
+                os.close(progress_fd)
+            except OSError:
+                pass
+
+    cmd = [
+        str(ffmpeg_path),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-progress",
+        str(progress_path),
+        "-i",
+        str(input_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        *_edit_friendly_video_codec_args(video_codec),
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-vsync",
+        "cfr",
+        "-c:a",
+        EDIT_FRIENDLY_AUDIO_CODEC,
+        "-b:a",
+        EDIT_FRIENDLY_AUDIO_BITRATE,
+        "-ar",
+        EDIT_FRIENDLY_AUDIO_SAMPLE_RATE,
+        "-movflags",
+        "+faststart",
+        str(temp_output),
+    ]
+    log(f"[fcp] Re-encoding for Final Cut ({video_codec}): {input_path.name}")
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    started_at = time.time()
+    last_emit_at = 0.0
+    try:
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                if process.poll() is None:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=2)
+                    except (OSError, subprocess.TimeoutExpired):
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
+                try:
+                    if temp_output.exists():
+                        temp_output.unlink()
+                except OSError:
+                    pass
+                raise DownloadCancelled()
+            now = time.time()
+            if now - last_emit_at >= 0.4:
+                snapshot = _read_ffmpeg_progress_snapshot(progress_path)
+                out_seconds = _ffmpeg_out_seconds(snapshot)
+                speed_ratio = _ffmpeg_speed_ratio(
+                    snapshot=snapshot,
+                    out_seconds=out_seconds,
+                    elapsed_seconds=max(0.001, now - started_at),
+                )
+                percent = _postprocess_progress_percent(
+                    duration_s=duration_s,
+                    progress_offset_s=progress_offset_s,
+                    total_duration_s=total_duration_s,
+                    out_seconds=out_seconds,
+                )
+                eta_seconds = _postprocess_eta_seconds(
+                    duration_s=duration_s,
+                    progress_offset_s=progress_offset_s,
+                    total_duration_s=total_duration_s,
+                    out_seconds=out_seconds,
+                    speed_ratio=speed_ratio,
+                )
+                update_progress(
+                    {
+                        "status": "downloading",
+                        "percent": percent,
+                        "speed": f"{speed_ratio:.2f}x" if speed_ratio else "—",
+                        "eta": format_duration(eta_seconds)
+                        if eta_seconds is not None
+                        else "Finalizing",
+                        "playlist_eta": "",
+                    }
+                )
+                last_emit_at = now
+            return_code = process.poll()
+            if return_code is not None:
+                break
+            time.sleep(0.15)
+
+        stderr_text = ""
+        if process.stderr is not None:
+            try:
+                stderr_text = process.stderr.read().strip()
+            except OSError:
+                stderr_text = ""
+        if process.returncode != 0:
+            detail = stderr_text
+            message = detail.splitlines()[-1] if detail else "ffmpeg exited with an error"
+            log(f"[fcp] Re-encode failed for {input_path.name}: {message}")
+            try:
+                if temp_output.exists():
+                    temp_output.unlink()
+            except OSError:
+                pass
+            return False
+
+        update_progress(
+            {
+                "status": "downloading",
+                "percent": _postprocess_progress_percent(
+                    duration_s=duration_s,
+                    progress_offset_s=progress_offset_s,
+                    total_duration_s=total_duration_s,
+                    out_seconds=duration_s if duration_s is not None else 0.0,
+                ),
+                "speed": "—",
+                "eta": "Finalizing",
+                "playlist_eta": "",
+            }
+        )
+
+        try:
+            os.replace(temp_output, input_path)
+        except OSError as exc:
+            log(f"[fcp] Failed to finalize re-encode for {input_path.name}: {exc}")
+            try:
+                if temp_output.exists():
+                    temp_output.unlink()
+            except OSError:
+                pass
+            return False
+
+        log(f"[fcp] Re-encoded for Final Cut: {input_path.name}")
+        return True
+    finally:
+        if process is not None and process.stderr is not None:
+            try:
+                process.stderr.close()
+            except OSError:
+                pass
+        try:
+            if progress_path and progress_path.exists():
+                progress_path.unlink()
+        except OSError:
+            pass
+
+
+def _edit_friendly_video_codec_args(video_codec: str) -> list[str]:
+    codec = (video_codec or "").strip().lower() or EDIT_FRIENDLY_VIDEO_CODEC
+    if codec == EDIT_FRIENDLY_VIDEO_CODEC:
+        return [
+            "-c:v",
+            EDIT_FRIENDLY_VIDEO_CODEC,
+            "-preset",
+            EDIT_FRIENDLY_VIDEO_PRESET,
+            "-profile:v",
+            EDIT_FRIENDLY_VIDEO_PROFILE,
+            "-level:v",
+            EDIT_FRIENDLY_VIDEO_LEVEL,
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    return [
+        "-c:v",
+        codec,
+        "-pix_fmt",
+        "yuv420p",
+    ]
+
+
+def _select_edit_friendly_video_codec(
+    *,
+    ffmpeg_path: Path,
+    preferred: str,
+    log: Callable[[str], None],
+) -> str:
+    preference = core_options.normalize_edit_friendly_encoder_preference(preferred)
+    encoders = _available_h264_video_encoders(ffmpeg_path)
+    manual_map = {
+        "apple": "h264_videotoolbox",
+        "nvidia": "h264_nvenc",
+        "amd": "h264_amf",
+        "intel": "h264_qsv",
+        "cpu": EDIT_FRIENDLY_VIDEO_CODEC,
+    }
+    if preference in manual_map:
+        codec = manual_map[preference]
+        if codec in encoders:
+            log(f"[fcp] Using manual encoder preference: {codec}")
+            return codec
+        log(
+            f"[fcp] Preferred encoder '{preference}' unavailable; "
+            "falling back to libx264."
+        )
+        return EDIT_FRIENDLY_VIDEO_CODEC
+
+    preferred_hardware = _hardware_encoder_priority()
+    for codec in preferred_hardware:
+        if codec in encoders:
+            log(f"[fcp] Using hardware encoder: {codec}")
+            return codec
+    if EDIT_FRIENDLY_VIDEO_CODEC in encoders:
+        log("[fcp] Using software encoder: libx264")
+        return EDIT_FRIENDLY_VIDEO_CODEC
+    log("[fcp] Could not confirm encoder list; using libx264.")
+    return EDIT_FRIENDLY_VIDEO_CODEC
+
+
+def _hardware_encoder_priority() -> tuple[str, ...]:
+    if sys.platform == "darwin":
+        return (
+            "h264_videotoolbox",
+            "h264_nvenc",
+            "h264_amf",
+            "h264_qsv",
+        )
+    return (
+        "h264_nvenc",
+        "h264_amf",
+        "h264_qsv",
+        "h264_videotoolbox",
+    )
+
+
+def _available_h264_video_encoders(ffmpeg_path: Path) -> set[str]:
+    cmd = [str(ffmpeg_path), "-hide_banner", "-encoders"]
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return {EDIT_FRIENDLY_VIDEO_CODEC}
+    if result.returncode != 0:
+        return {EDIT_FRIENDLY_VIDEO_CODEC}
+    text = f"{result.stdout}\n{result.stderr}"
+    candidates = set(EDIT_FRIENDLY_HARDWARE_VIDEO_CODECS) | {EDIT_FRIENDLY_VIDEO_CODEC}
+    found: set[str] = set()
+    for codec in candidates:
+        if re.search(rf"\b{re.escape(codec)}\b", text):
+            found.add(codec)
+    if not found:
+        return {EDIT_FRIENDLY_VIDEO_CODEC}
+    return found
+
+
+def _probe_media_duration_seconds(path: Path, ffprobe_path: Path) -> float | None:
+    cmd = [
+        str(ffprobe_path),
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    raw = (result.stdout or "").strip().splitlines()
+    if not raw:
+        return None
+    try:
+        duration = float(raw[0].strip())
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if duration <= 0:
+        return None
+    return duration
+
+
+def _read_ffmpeg_progress_snapshot(progress_path: Path) -> dict[str, str]:
+    try:
+        text = progress_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return {}
+    snapshot: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        snapshot[key.strip()] = value.strip()
+    return snapshot
+
+
+def _ffmpeg_out_seconds(snapshot: dict[str, str]) -> float | None:
+    for key in ("out_time_us", "out_time_ms"):
+        raw = (snapshot.get(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if value < 0:
+            continue
+        return value / 1_000_000.0 if value >= 1_000.0 else value
+    time_text = (snapshot.get("out_time") or "").strip()
+    if not time_text:
+        return None
+    return _parse_hms_seconds(time_text)
+
+
+def _parse_hms_seconds(value: str) -> float | None:
+    match = re.fullmatch(r"(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)", str(value or "").strip())
+    if match is None:
+        return None
+    try:
+        hours = int(match.group(1) or "0")
+        minutes = int(match.group(2) or "0")
+        seconds = float(match.group(3) or "0")
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if minutes < 0 or seconds < 0 or hours < 0:
+        return None
+    return (hours * 3600) + (minutes * 60) + seconds
+
+
+def _ffmpeg_speed_ratio(
+    *,
+    snapshot: dict[str, str],
+    out_seconds: float | None,
+    elapsed_seconds: float,
+) -> float | None:
+    raw_speed = (snapshot.get("speed") or "").strip().lower()
+    if raw_speed.endswith("x"):
+        raw_speed = raw_speed[:-1]
+    if raw_speed and raw_speed not in {"n/a", "na", "nan", "inf"}:
+        try:
+            speed = float(raw_speed)
+            if speed > 0:
+                return speed
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if out_seconds is None or elapsed_seconds <= 0:
+        return None
+    estimate = out_seconds / elapsed_seconds
+    if estimate <= 0:
+        return None
+    return estimate
+
+
+def _postprocess_progress_percent(
+    *,
+    duration_s: float | None,
+    progress_offset_s: float,
+    total_duration_s: float | None,
+    out_seconds: float | None,
+) -> float | None:
+    if duration_s is None or duration_s <= 0:
+        return None
+    current = max(0.0, min(float(out_seconds or 0.0), duration_s))
+    if total_duration_s is not None and total_duration_s > 0:
+        ratio = (progress_offset_s + current) / total_duration_s
+    else:
+        ratio = current / duration_s
+    ratio = max(0.0, min(1.0, ratio))
+    return min(99.5, 90.0 + (ratio * 9.5))
+
+
+def _postprocess_eta_seconds(
+    *,
+    duration_s: float | None,
+    progress_offset_s: float,
+    total_duration_s: float | None,
+    out_seconds: float | None,
+    speed_ratio: float | None,
+) -> float | None:
+    if speed_ratio is None or speed_ratio <= 0:
+        return None
+    if duration_s is None or duration_s <= 0:
+        return None
+    current = max(0.0, min(float(out_seconds or 0.0), duration_s))
+    if total_duration_s is not None and total_duration_s > 0:
+        remaining = max(0.0, total_duration_s - (progress_offset_s + current))
+    else:
+        remaining = max(0.0, duration_s - current)
+    return remaining / speed_ratio
 
 
 def _progress_hook_factory(
@@ -375,6 +993,14 @@ def _progress_hook_factory(
             return None
         return parsed
 
+    def _percent_from_status_string(value: object) -> float | None:
+        if not isinstance(value, str):
+            return None
+        match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", value)
+        if not match:
+            return None
+        return _as_non_negative_float(match.group(1))
+
     def hook(status: dict) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadCancelled()
@@ -416,8 +1042,18 @@ def _progress_hook_factory(
                     pct_val = (float(downloaded) / float(total) * 100.0) if downloaded and total else None
                 except (TypeError, ValueError, ZeroDivisionError):
                     pct_val = None
-                speed_bps = status.get("speed")
+                if pct_val is None:
+                    pct_val = _percent_from_status_string(status.get("_percent_str"))
                 eta_s = _as_non_negative_float(status.get("eta"))
+                if pct_val is None and eta_s is not None:
+                    elapsed_s = _as_non_negative_float(status.get("elapsed"))
+                    if elapsed_s is not None:
+                        total_time_s = elapsed_s + eta_s
+                        if total_time_s > 0:
+                            pct_val = (elapsed_s / total_time_s) * 100.0
+                if pct_val is not None:
+                    pct_val = max(0.0, min(100.0, float(pct_val)))
+                speed_bps = status.get("speed")
                 playlist_eta = ""
                 if playlist_count and display_index and eta_s is not None:
                     remaining_after_current = max(
@@ -432,6 +1068,18 @@ def _progress_hook_factory(
                     playlist_eta = _format_eta(
                         eta_s + (remaining_after_current * max(0.0, avg_item_s))
                     )
+                if playlist_count and display_index and int(playlist_count) > 0:
+                    completed_before_current = max(0, int(display_index) - 1)
+                    item_ratio = ((pct_val or 0.0) / 100.0) if pct_val is not None else 0.0
+                    playlist_ratio = (
+                        completed_before_current + max(0.0, min(1.0, item_ratio))
+                    ) / float(playlist_count)
+                    pct_val = max(0.0, min(100.0, playlist_ratio * 100.0))
+                elif playlist_count and int(playlist_count) > 0 and pct_val is None:
+                    pct_val = (
+                        max(0, min(len(completed_items), int(playlist_count)))
+                        / float(playlist_count)
+                    ) * 100.0
                 _safe_update(
                     {
                         "status": "downloading",

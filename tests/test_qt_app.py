@@ -70,6 +70,15 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.source_details_host.height(), 0)
         self.assertTrue(self.window.mixed_url_overlay.isHidden())
 
+    def test_source_feedback_reserves_height_for_hidden_tone(self) -> None:
+        reserved_height = self.window.source_feedback_label.minimumHeight()
+        self.assertGreater(reserved_height, 0)
+
+        self.window._set_source_feedback("", tone="hidden")
+        self.assertEqual(self.window.source_feedback_label.text(), "")
+        self.assertEqual(self.window.source_feedback_label.property("tone"), "hidden")
+        self.assertEqual(self.window.source_feedback_label.minimumHeight(), reserved_height)
+
     def test_load_settings_always_defaults_output_folder_to_downloads(self) -> None:
         with patch(
             "gui.qt.app.settings_store.load_settings",
@@ -90,6 +99,28 @@ class TestQtApp(unittest.TestCase):
                 window.output_dir_edit.text().strip(),
                 str(Path.home() / "Downloads"),
             )
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_load_settings_applies_edit_friendly_encoder_preference(self) -> None:
+        with patch(
+            "gui.qt.app.settings_store.load_settings",
+            return_value={
+                "output_dir": "/tmp/custom",
+                "subtitle_languages": "",
+                "write_subtitles": False,
+                "network_timeout": "20",
+                "network_retries": "1",
+                "retry_backoff": "1.5",
+                "concurrent_fragments": "4",
+                "edit_friendly_encoder": "nvidia",
+                "open_folder_after_download": False,
+            },
+        ):
+            window = QtYtDlpGui()
+        try:
+            self.assertEqual(window.edit_friendly_encoder_combo.currentData(), "nvidia")
         finally:
             window.close()
             window.deleteLater()
@@ -395,28 +426,6 @@ class TestQtApp(unittest.TestCase):
         self.assertGreater(settings_x, x_positions["History"])
         self.assertGreater(settings_x, x_positions["Logs"])
 
-    def test_header_icons_can_be_disabled_and_restored(self) -> None:
-        self.assertFalse(self.window.settings_button.icon().isNull())
-        self.assertFalse(self.window.queue_button.icon().isNull())
-        self.assertFalse(self.window.history_button.icon().isNull())
-
-        self.window.show_header_icons_check.setChecked(False)
-        QApplication.processEvents()
-
-        self.assertTrue(self.window.settings_button.icon().isNull())
-        self.assertTrue(self.window.queue_button.icon().isNull())
-        self.assertTrue(self.window.history_button.icon().isNull())
-        self.assertTrue(self.window.logs_button.icon().isNull())
-
-        self.window._append_log("[error] network timeout")
-        self.assertFalse(self.window.logs_button.icon().isNull())
-
-        self.window.show_header_icons_check.setChecked(True)
-        QApplication.processEvents()
-        self.assertFalse(self.window.settings_button.icon().isNull())
-        self.assertFalse(self.window.queue_button.icon().isNull())
-        self.assertFalse(self.window.history_button.icon().isNull())
-
     def test_downloads_button_returns_to_main_view(self) -> None:
         self.window._open_panel("queue")
         self.assertEqual(self.window._active_panel_name, "queue")
@@ -458,31 +467,88 @@ class TestQtApp(unittest.TestCase):
         self.window._is_fetching = True
         self.window._set_preview_title("Existing title")
 
-        self.window._on_formats_loaded(
-            request_id=42,
-            url=url,
-            payload={},
-            error=True,
-            is_playlist=False,
+        with patch.object(self.window, "_show_feedback_popup"):
+            self.window._on_formats_loaded(
+                request_id=42,
+                url=url,
+                payload={},
+                error=True,
+                is_playlist=False,
         )
 
         self.assertFalse(self.window._is_fetching)
-        self.assertEqual(self.window.status_value.text(), "Could not fetch formats")
+        self.assertTrue(
+            self.window.status_value.text().startswith("Could not fetch formats")
+        )
         self.assertEqual(self.window.preview_value.text(), "-")
         self.assertEqual(
             self.window.preview_value.toolTip(),
             PREVIEW_TITLE_TOOLTIP_DEFAULT,
         )
 
-    def test_fetching_state_keeps_container_dropdown_enabled(self) -> None:
+    def test_fetching_state_keeps_format_controls_disabled_until_ready(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
         self.window._is_fetching = True
         self.window.video_radio.setChecked(True)
         self.window._update_controls_state()
 
-        self.assertTrue(self.window.video_radio.isEnabled())
-        self.assertTrue(self.window.container_combo.isEnabled())
+        self.assertFalse(self.window.video_radio.isEnabled())
+        self.assertFalse(self.window.container_combo.isEnabled())
         self.assertFalse(self.window.start_button.isEnabled())
+
+    def test_combo_popups_open_on_first_show_after_formats_loaded(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        url = "https://www.youtube.com/watch?v=abc123"
+        self.window.url_edit.setText(url)
+        self.window.video_radio.setChecked(True)
+        self.window._active_fetch_request_id = 15
+        self.window._is_fetching = True
+
+        payload = {
+            "collections": {
+                "video_labels": ["1080p mp4 (avc1)"],
+                "video_lookup": {
+                    "1080p mp4 (avc1)": {
+                        "format_id": "137",
+                        "ext": "mp4",
+                        "vcodec": "avc1.640028",
+                        "acodec": "none",
+                    }
+                },
+                "audio_labels": [],
+                "audio_lookup": {},
+                "audio_languages": [],
+            },
+            "preview_title": "Sample",
+        }
+        self.window._on_formats_loaded(
+            request_id=15,
+            url=url,
+            payload=payload,
+            error=False,
+            is_playlist=False,
+        )
+        mp4_index = self.window.container_combo.findData("mp4")
+        self.assertGreaterEqual(mp4_index, 0)
+        self.window.container_combo.setCurrentIndex(mp4_index)
+        avc1_index = self.window.codec_combo.findData("avc1")
+        self.assertGreaterEqual(avc1_index, 0)
+        self.window.codec_combo.setCurrentIndex(avc1_index)
+        QApplication.processEvents()
+        self.assertGreater(self.window.format_combo.count(), 0)
+
+        for combo in (
+            self.window.container_combo,
+            self.window.codec_combo,
+            self.window.format_combo,
+        ):
+            self.assertTrue(combo.isEnabled())
+            combo.showPopup()
+            QApplication.processEvents()
+            self.assertTrue(combo.view().window().isVisible())
+            combo.hidePopup()
+            QApplication.processEvents()
 
     def test_close_event_while_downloading_requests_cancel(self) -> None:
         self.window._is_downloading = True
@@ -513,12 +579,21 @@ class TestQtApp(unittest.TestCase):
         close_mock.assert_called_once()
         self.assertFalse(self.window._close_after_cancel)
 
+    def test_download_result_defaults_to_download_info_mode(self) -> None:
+        self.assertFalse(self.window.download_result_card.isHidden())
+        self.assertEqual(self.window.download_result_title.text(), "Download info:")
+        self.assertEqual(self.window.download_result_card.property("state"), "info")
+        self.assertFalse(self.window.copy_output_path_button.isEnabled())
+        self.assertEqual(self.window.download_result_path.text(), "-")
+
     def test_record_output_updates_latest_download_card(self) -> None:
         output_path = Path("/tmp/test-video.mp4")
 
         self.window._record_download_output(output_path, "https://example.com/video")
 
         self.assertFalse(self.window.download_result_card.isHidden())
+        self.assertEqual(self.window.download_result_title.text(), "Latest:")
+        self.assertEqual(self.window.download_result_card.property("state"), "latest")
         self.assertTrue(self.window.download_result_path.text().endswith(".mp4"))
         self.assertEqual(
             self.window.download_result_path.toolTip(),
@@ -526,29 +601,36 @@ class TestQtApp(unittest.TestCase):
         )
         self.assertTrue(self.window.copy_output_path_button.isEnabled())
 
-    def test_record_output_while_downloading_defers_latest_card_until_done(self) -> None:
+    def test_record_output_while_downloading_defers_latest_actions_until_done(self) -> None:
         output_path = Path("/tmp/test-video.mp4")
         self.window._is_downloading = True
+        self.window._update_controls_state()
 
         self.window._record_download_output(output_path, "https://example.com/video")
 
-        self.assertTrue(self.window.download_result_card.isHidden())
+        self.assertFalse(self.window.download_result_card.isHidden())
+        self.assertEqual(self.window.download_result_title.text(), "Download info:")
+        self.assertEqual(self.window.download_result_card.property("state"), "info")
         self.assertFalse(self.window.copy_output_path_button.isEnabled())
         self.assertEqual(self.window.download_result_path.toolTip(), str(output_path))
 
         self.window._on_download_done(download.DOWNLOAD_SUCCESS)
 
         self.assertFalse(self.window.download_result_card.isHidden())
+        self.assertEqual(self.window.download_result_title.text(), "Latest:")
+        self.assertEqual(self.window.download_result_card.property("state"), "latest")
         self.assertTrue(self.window.copy_output_path_button.isEnabled())
 
-    def test_clearing_latest_output_hides_download_card(self) -> None:
+    def test_clearing_latest_output_resets_download_card(self) -> None:
         output_path = Path("/tmp/test-video.mp4")
         self.window._record_download_output(output_path, "https://example.com/video")
         self.assertFalse(self.window.download_result_card.isHidden())
 
         self.window._clear_last_output_path()
 
-        self.assertTrue(self.window.download_result_card.isHidden())
+        self.assertFalse(self.window.download_result_card.isHidden())
+        self.assertEqual(self.window.download_result_title.text(), "Download info:")
+        self.assertEqual(self.window.download_result_card.property("state"), "info")
         self.assertEqual(self.window.download_result_path.text(), "-")
         self.assertFalse(self.window.copy_output_path_button.isEnabled())
 
@@ -580,6 +662,9 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.eta_label.text(), "ETA: Finalizing")
 
     def test_item_progress_update_splits_index_and_title(self) -> None:
+        self.window.show()
+        self.window.resize(1700, 760)
+        QApplication.processEvents()
         self.window._show_progress_item = True
         self.window._on_progress_update(
             {
@@ -591,6 +676,21 @@ class TestQtApp(unittest.TestCase):
             self.window.item_label.text(),
             "Item: 41/169 - #41 Festival Plaza Mission Complete! - Pokemon",
         )
+
+    def test_item_label_elides_long_title_with_three_dots(self) -> None:
+        self.window.show()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+        self.window._show_progress_item = True
+        long_title = "Very long title for progress display " * 40
+        self.window._set_current_item_display(progress="1/999", title=long_title)
+        QApplication.processEvents()
+
+        shown = self.window.item_label.text()
+        self.assertTrue(shown.startswith("Item: 1/999 - "))
+        self.assertTrue(shown.endswith("..."))
+        self.assertNotIn("…", shown)
+        self.assertEqual(self.window.item_label.toolTip(), long_title)
 
     def test_attention_log_shows_logs_alert_icon(self) -> None:
         self.assertFalse(self.window._logs_alert_active)
