@@ -90,6 +90,53 @@ class TestCoreQueueLogic(unittest.TestCase):
         )
         self.assertIsNone(issue)
 
+    def test_normalize_selected_indices(self) -> None:
+        indices = queue_logic.normalize_selected_indices(
+            [4, 2, 2, -1, 8, 1],
+            queue_length=5,
+        )
+        self.assertEqual(indices, [1, 2, 4])
+
+    def test_remove_selected_queue_items(self) -> None:
+        items = [
+            {"url": "a"},
+            {"url": "b"},
+            {"url": "c"},
+            {"url": "d"},
+        ]
+        updated = queue_logic.remove_selected_queue_items(items, [1, 3])
+        self.assertEqual([item.get("url") for item in updated], ["a", "c"])
+
+    def test_move_selected_queue_items_up(self) -> None:
+        items = [
+            {"url": "a"},
+            {"url": "b"},
+            {"url": "c"},
+            {"url": "d"},
+        ]
+        updated, moved = queue_logic.move_selected_queue_items_up(items, [1, 2])
+        self.assertTrue(moved)
+        self.assertEqual([item.get("url") for item in updated], ["b", "c", "a", "d"])
+
+    def test_move_selected_queue_items_down(self) -> None:
+        items = [
+            {"url": "a"},
+            {"url": "b"},
+            {"url": "c"},
+            {"url": "d"},
+        ]
+        updated, moved = queue_logic.move_selected_queue_items_down(items, [1, 2])
+        self.assertTrue(moved)
+        self.assertEqual([item.get("url") for item in updated], ["a", "d", "b", "c"])
+
+    def test_clear_queue_items(self) -> None:
+        updated, cleared = queue_logic.clear_queue_items([{"url": "a"}])
+        self.assertTrue(cleared)
+        self.assertEqual(updated, [])
+        updated_empty, cleared_empty = queue_logic.clear_queue_items([])
+        self.assertFalse(cleared_empty)
+        self.assertEqual(updated_empty, [])
+
 
 if __name__ == "__main__":
     unittest.main()

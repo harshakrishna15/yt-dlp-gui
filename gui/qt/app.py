@@ -1,63 +1,49 @@
 from __future__ import annotations
 
 import signal
-import threading
 import re
-import time
-from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QFontMetrics, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QColor, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
-    QCheckBox,
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListView,
-    QListWidget,
     QMainWindow,
-    QMessageBox,
-    QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
-    QProgressBar,
     QPushButton,
-    QRadioButton,
-    QScrollArea,
-    QSizePolicy,
-    QPlainTextEdit,
-    QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from ..common import (
     diagnostics,
-    download,
-    format_pipeline,
-    formats as formats_mod,
     settings_store,
-    yt_dlp_helpers as helpers,
 )
 from . import panels as qt_panels
 from . import style as qt_style
+from .controllers import RunQueueController, RunQueueState, SourceController, SourceState
+from .ports import SideEffectPorts
+from .qt_ports import build_qt_side_effect_ports
+from .presenter import StatusPresenter
+from .ui_state_mapper import apply_control_state
+from .view_builders import (
+    DownloadsViewCallbacks,
+    MainUiBuilder,
+    RunSectionCallbacks,
+    UiRefs,
+)
 from ..core import error_feedback as core_error_feedback
 from ..core import format_selection as core_format_selection
-from ..core import queue_logic as core_queue_logic
 from ..core import urls as core_urls
 from ..core import ui_state as core_ui_state
-from ..core import workflow as core_workflow
 from ..services import app_service
 from .state import PREVIEW_TITLE_TOOLTIP_DEFAULT, preview_title_fields
-from .widgets import _NativeComboBox, _QtSignals
+from .widgets import _QtSignals
 from ..common.types import DownloadOptions, DownloadRequest, HistoryItem, QueueItem, QueueSettings
 
 VIDEO_CONTAINERS = ("mp4", "webm")
@@ -78,7 +64,7 @@ TOP_ACTION_ICON_PX = 16
 
 
 class QtYtDlpGui(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, *, effects: SideEffectPorts | None = None) -> None:
         super().__init__()
         self.setWindowTitle("yt-dlp-gui")
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
@@ -91,6 +77,9 @@ class QtYtDlpGui(QMainWindow):
         self._legacy_log_alert_icon = self._build_alert_dot_icon()
         self._top_action_icons: dict[str, dict[str, QIcon]] = {}
         self._output_layout_mode: str | None = None
+        self._effects = effects or build_qt_side_effect_ports()
+        self._source_state = SourceState()
+        self._run_queue_state = RunQueueState()
 
         self._signals = _QtSignals()
         self._signals.formats_loaded.connect(self._on_formats_loaded)
@@ -105,46 +94,29 @@ class QtYtDlpGui(QMainWindow):
         self._fetch_timer.setSingleShot(True)
         self._fetch_timer.timeout.connect(self._start_fetch_formats)
 
-        self._fetch_request_seq = 0
-        self._active_fetch_request_id = 0
-        self._is_fetching = False
-
-        self._is_downloading = False
-        self._cancel_requested = False
-        self._cancel_event: threading.Event | None = None
-        self._show_progress_item = False
-        self._close_after_cancel = False
-        self._pending_mixed_url = ""
-        self._last_formats_error_popup_key = ""
-
-        self._playlist_mode = False
-
-        self._video_labels: list[str] = []
-        self._video_lookup: dict[str, dict] = {}
-        self._audio_labels: list[str] = []
-        self._audio_lookup: dict[str, dict] = {}
-        self._audio_languages: list[str] = []
-        self._filtered_labels: list[str] = []
-        self._filtered_lookup: dict[str, dict] = {}
-
-        self.queue_items: list[QueueItem] = []
-        self.queue_active = False
-        self.queue_index: int | None = None
-        self._queue_failed_items = 0
-        self._queue_started_ts: float | None = None
-
         self.download_history: list[HistoryItem] = []
         self._history_seen_paths: set[str] = set()
 
         self._log_lines: list[str] = []
         self._last_error_log = ""
         self._last_source_feedback_log: tuple[str, str] | None = None
+        self._status_presenter = StatusPresenter()
         self._active_panel_name: str | None = None
         self._applying_user_settings = False
         self._latest_output_path: Path | None = None
         self._current_item_progress = "-"
         self._current_item_title = "-"
         self._current_item_title_tooltip = "-"
+        self._source_controller = SourceController(
+            self,
+            state=self._source_state,
+            ports=self._effects,
+        )
+        self._run_queue_controller = RunQueueController(
+            self,
+            state=self._run_queue_state,
+            ports=self._effects,
+        )
 
         self._build_ui()
         self._update_source_details_visibility()
@@ -156,466 +128,224 @@ class QtYtDlpGui(QMainWindow):
         self._apply_header_layout()
         self._update_controls_state()
 
+    @property
+    def _fetch_request_seq(self) -> int:
+        return self._source_state.fetch_request_seq
+
+    @_fetch_request_seq.setter
+    def _fetch_request_seq(self, value: int) -> None:
+        self._source_state.fetch_request_seq = int(value)
+
+    @property
+    def _active_fetch_request_id(self) -> int:
+        return self._source_state.active_fetch_request_id
+
+    @_active_fetch_request_id.setter
+    def _active_fetch_request_id(self, value: int) -> None:
+        self._source_state.active_fetch_request_id = int(value)
+
+    @property
+    def _is_fetching(self) -> bool:
+        return self._source_state.is_fetching
+
+    @_is_fetching.setter
+    def _is_fetching(self, value: bool) -> None:
+        self._source_state.is_fetching = bool(value)
+
+    @property
+    def _pending_mixed_url(self) -> str:
+        return self._source_state.pending_mixed_url
+
+    @_pending_mixed_url.setter
+    def _pending_mixed_url(self, value: str) -> None:
+        self._source_state.pending_mixed_url = str(value or "")
+
+    @property
+    def _last_formats_error_popup_key(self) -> str:
+        return self._source_state.last_formats_error_popup_key
+
+    @_last_formats_error_popup_key.setter
+    def _last_formats_error_popup_key(self, value: str) -> None:
+        self._source_state.last_formats_error_popup_key = str(value or "")
+
+    @property
+    def _playlist_mode(self) -> bool:
+        return self._source_state.playlist_mode
+
+    @_playlist_mode.setter
+    def _playlist_mode(self, value: bool) -> None:
+        self._source_state.playlist_mode = bool(value)
+
+    @property
+    def _video_labels(self) -> list[str]:
+        return self._source_state.video_labels
+
+    @_video_labels.setter
+    def _video_labels(self, value: list[str]) -> None:
+        self._source_state.video_labels = list(value)
+
+    @property
+    def _video_lookup(self) -> dict[str, dict]:
+        return self._source_state.video_lookup
+
+    @_video_lookup.setter
+    def _video_lookup(self, value: dict[str, dict]) -> None:
+        self._source_state.video_lookup = dict(value)
+
+    @property
+    def _audio_labels(self) -> list[str]:
+        return self._source_state.audio_labels
+
+    @_audio_labels.setter
+    def _audio_labels(self, value: list[str]) -> None:
+        self._source_state.audio_labels = list(value)
+
+    @property
+    def _audio_lookup(self) -> dict[str, dict]:
+        return self._source_state.audio_lookup
+
+    @_audio_lookup.setter
+    def _audio_lookup(self, value: dict[str, dict]) -> None:
+        self._source_state.audio_lookup = dict(value)
+
+    @property
+    def _audio_languages(self) -> list[str]:
+        return self._source_state.audio_languages
+
+    @_audio_languages.setter
+    def _audio_languages(self, value: list[str]) -> None:
+        self._source_state.audio_languages = list(value)
+
+    @property
+    def _filtered_labels(self) -> list[str]:
+        return self._source_state.filtered_labels
+
+    @_filtered_labels.setter
+    def _filtered_labels(self, value: list[str]) -> None:
+        self._source_state.filtered_labels = list(value)
+
+    @property
+    def _filtered_lookup(self) -> dict[str, dict]:
+        return self._source_state.filtered_lookup
+
+    @_filtered_lookup.setter
+    def _filtered_lookup(self, value: dict[str, dict]) -> None:
+        self._source_state.filtered_lookup = dict(value)
+
+    @property
+    def _is_downloading(self) -> bool:
+        return self._run_queue_state.is_downloading
+
+    @_is_downloading.setter
+    def _is_downloading(self, value: bool) -> None:
+        self._run_queue_state.is_downloading = bool(value)
+
+    @property
+    def _cancel_requested(self) -> bool:
+        return self._run_queue_state.cancel_requested
+
+    @_cancel_requested.setter
+    def _cancel_requested(self, value: bool) -> None:
+        self._run_queue_state.cancel_requested = bool(value)
+
+    @property
+    def _cancel_event(self) -> object | None:
+        return self._run_queue_state.cancel_event
+
+    @_cancel_event.setter
+    def _cancel_event(self, value: object | None) -> None:
+        self._run_queue_state.cancel_event = value
+
+    @property
+    def _show_progress_item(self) -> bool:
+        return self._run_queue_state.show_progress_item
+
+    @_show_progress_item.setter
+    def _show_progress_item(self, value: bool) -> None:
+        self._run_queue_state.show_progress_item = bool(value)
+
+    @property
+    def _close_after_cancel(self) -> bool:
+        return self._run_queue_state.close_after_cancel
+
+    @_close_after_cancel.setter
+    def _close_after_cancel(self, value: bool) -> None:
+        self._run_queue_state.close_after_cancel = bool(value)
+
+    @property
+    def queue_items(self) -> list[QueueItem]:
+        return self._run_queue_state.queue_items
+
+    @queue_items.setter
+    def queue_items(self, value: list[QueueItem]) -> None:
+        self._run_queue_state.queue_items = list(value)
+
+    @property
+    def queue_active(self) -> bool:
+        return self._run_queue_state.queue_active
+
+    @queue_active.setter
+    def queue_active(self, value: bool) -> None:
+        self._run_queue_state.queue_active = bool(value)
+
+    @property
+    def queue_index(self) -> int | None:
+        return self._run_queue_state.queue_index
+
+    @queue_index.setter
+    def queue_index(self, value: int | None) -> None:
+        self._run_queue_state.queue_index = value
+
+    @property
+    def _queue_failed_items(self) -> int:
+        return self._run_queue_state.queue_failed_items
+
+    @_queue_failed_items.setter
+    def _queue_failed_items(self, value: int) -> None:
+        self._run_queue_state.queue_failed_items = int(value)
+
+    @property
+    def _queue_started_ts(self) -> float | None:
+        return self._run_queue_state.queue_started_ts
+
+    @_queue_started_ts.setter
+    def _queue_started_ts(self, value: float | None) -> None:
+        self._run_queue_state.queue_started_ts = value
+
     def _build_ui(self) -> None:
-        root = QWidget(self)
-        root.setObjectName("appRoot")
-        self.setCentralWidget(root)
-        root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(20, 16, 20, 16)
-        root_layout.setSpacing(12)
-
-        header = QWidget(self)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(16)
-
-        brand_col = QWidget(header)
-        brand_layout = QVBoxLayout(brand_col)
-        brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(2)
-        title = QLabel("yt-dlp-gui", brand_col)
-        title.setObjectName("titleLabel")
-        subtitle = QLabel("Paste a video URL to get started.", brand_col)
-        subtitle.setObjectName("subtleLabel")
-        brand_layout.addWidget(title)
-        brand_layout.addWidget(subtitle)
-
-        self.top_actions = QWidget(header)
-        top_actions_layout = QHBoxLayout(self.top_actions)
-        top_actions_layout.setContentsMargins(0, 0, 0, 0)
-        top_actions_layout.setSpacing(8)
-
-        self.classic_actions = QWidget(self.top_actions)
-        classic_layout = QHBoxLayout(self.classic_actions)
-        classic_layout.setContentsMargins(0, 0, 0, 0)
-        classic_layout.setSpacing(8)
-        self.downloads_button = QPushButton("Downloads", self.classic_actions)
-        self.queue_button = QPushButton("Queue", self.classic_actions)
-        self.history_button = QPushButton("History", self.classic_actions)
-        self.logs_button = QPushButton("Logs", self.classic_actions)
-        self.settings_button = QPushButton("Settings", self.classic_actions)
-        for button in (
-            self.downloads_button,
-            self.queue_button,
-            self.history_button,
-            self.logs_button,
-            self.settings_button,
-        ):
-            button.setCheckable(True)
-            button.setObjectName("topNavButton")
-            classic_layout.addWidget(button)
-
-        top_actions_layout.addWidget(self.classic_actions)
-
-        header_layout.addWidget(brand_col, stretch=1)
-        header_layout.addWidget(self.top_actions)
-        root_layout.addWidget(header)
-
-        self.panel_stack = QStackedWidget(self)
-        root_layout.addWidget(self.panel_stack, stretch=1)
-
-        self.mixed_url_overlay = QFrame(root)
-        self.mixed_url_overlay.setObjectName("mixedUrlOverlay")
-        self.mixed_url_overlay_layout = QVBoxLayout(self.mixed_url_overlay)
-        self.mixed_url_overlay_layout.setContentsMargins(18, 16, 18, 16)
-        self.mixed_url_overlay_layout.setSpacing(0)
-        self.mixed_url_overlay_layout.addStretch(1)
-
-        self.mixed_url_alert = QFrame(self.mixed_url_overlay)
-        self.mixed_url_alert.setObjectName("mixedUrlAlert")
-        mixed_shadow = QGraphicsDropShadowEffect(self.mixed_url_alert)
-        mixed_shadow.setBlurRadius(24)
-        mixed_shadow.setOffset(0, 6)
-        mixed_shadow.setColor(QColor(19, 30, 46, 80))
-        self.mixed_url_alert.setGraphicsEffect(mixed_shadow)
-        mixed_alert_layout = QVBoxLayout(self.mixed_url_alert)
-        mixed_alert_layout.setContentsMargins(12, 10, 12, 14)
-        mixed_alert_layout.setSpacing(8)
-        self.mixed_url_alert_label = QLabel(
-            "Download this URL as a single video or as a playlist?",
-            self.mixed_url_alert,
+        callbacks = DownloadsViewCallbacks(
+            on_url_changed=self._on_url_changed,
+            on_fetch_formats=self._start_fetch_formats,
+            on_paste_url=self._paste_url,
+            on_mode_change=self._on_mode_change,
+            on_container_change=self._on_container_change,
+            on_codec_change=self._on_codec_change,
+            on_update_controls_state=self._update_controls_state,
+            on_pick_folder=self._pick_folder,
+            on_use_single_video_url=lambda: self._apply_mixed_url_choice(
+                use_playlist=False
+            ),
+            on_use_playlist_url=lambda: self._apply_mixed_url_choice(
+                use_playlist=True
+            ),
+            run=RunSectionCallbacks(
+                on_start=self._on_start,
+                on_add_to_queue=self._on_add_to_queue,
+                on_start_queue=self._on_start_queue,
+                on_cancel=self._on_cancel,
+                on_open_last_output_folder=self._open_last_output_folder,
+                on_copy_output_path=self._copy_last_output_path,
+            ),
         )
-        self.mixed_url_alert_label.setObjectName("mixedUrlAlertTitle")
-        self.mixed_url_alert_label.setWordWrap(True)
-        mixed_alert_layout.addWidget(self.mixed_url_alert_label)
-        mixed_buttons = QWidget(self.mixed_url_alert)
-        self.mixed_buttons_layout = QHBoxLayout(mixed_buttons)
-        self.mixed_buttons_layout.setContentsMargins(0, 0, 0, 2)
-        self.mixed_buttons_layout.setSpacing(4)
-        self.use_single_video_url_button = QPushButton("Single video", mixed_buttons)
-        self.use_playlist_url_button = QPushButton("Playlist", mixed_buttons)
-        self.use_single_video_url_button.clicked.connect(
-            lambda _checked: self._apply_mixed_url_choice(use_playlist=False)
+        ui = MainUiBuilder.build(
+            window=self,
+            register_native_combo=self._register_native_combo,
+            callbacks=callbacks,
         )
-        self.use_playlist_url_button.clicked.connect(
-            lambda _checked: self._apply_mixed_url_choice(use_playlist=True)
-        )
-        self.mixed_buttons_layout.addWidget(self.use_single_video_url_button)
-        self.mixed_buttons_layout.addWidget(self.use_playlist_url_button)
-        self.mixed_buttons_layout.addStretch(1)
-        mixed_alert_layout.addWidget(mixed_buttons)
-        self.mixed_url_overlay_layout.addWidget(
-            self.mixed_url_alert, alignment=Qt.AlignmentFlag.AlignHCenter
-        )
-        self.mixed_url_overlay_layout.addStretch(1)
-        self.mixed_url_overlay.hide()
-
-        self.main_scroll = QScrollArea(self.panel_stack)
-        self.main_scroll.setObjectName("downloadsScrollArea")
-        self.main_scroll.setWidgetResizable(True)
-        self.main_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.main_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self.main_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-
-        self.main_page = QWidget(self.main_scroll)
-        main_layout = QVBoxLayout(self.main_page)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(14)
-
-        source = QGroupBox("Video Source", self.main_page)
-        source.setObjectName("sourceSection")
-        source_layout = QFormLayout(source)
-        source_layout.setContentsMargins(0, 0, 0, 0)
-        source_layout.setFormAlignment(Qt.AlignmentFlag.AlignTop)
-        source_layout.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
-        )
-        source_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        source_layout.setHorizontalSpacing(16)
-        source_layout.setVerticalSpacing(6)
-
-        url_row = QWidget(source)
-        url_row_layout = QHBoxLayout(url_row)
-        url_row_layout.setContentsMargins(0, 0, 0, 0)
-        url_row_layout.setSpacing(12)
-        self.url_edit = QLineEdit(source)
-        self.url_edit.setPlaceholderText("Paste video or playlist URL (YouTube, Vimeo, etc.)")
-        self.url_edit.textChanged.connect(self._on_url_changed)
-        self.url_edit.returnPressed.connect(self._start_fetch_formats)
-        self.paste_button = QPushButton("Paste", source)
-        self.paste_button.clicked.connect(self._paste_url)
-        url_row_layout.addWidget(self.url_edit, stretch=1)
-        url_row_layout.addWidget(self.paste_button)
-        source_layout.addRow("Video URL", url_row)
-        source_url_label = source_layout.labelForField(url_row)
-        if isinstance(source_url_label, QLabel):
-            source_url_label.setObjectName("sectionFormLabel")
-
-        self.source_details_host = QWidget(source)
-        self.source_details_host.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        source_details_layout = QVBoxLayout(self.source_details_host)
-        source_details_layout.setContentsMargins(0, 0, 0, 0)
-        source_details_layout.setSpacing(0)
-        self.source_details_stack = QStackedWidget(self.source_details_host)
-        self.source_details_stack.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        source_details_layout.addWidget(self.source_details_stack)
-
-        self.source_details_empty = QWidget(self.source_details_stack)
-        self.source_details_stack.addWidget(self.source_details_empty)
-        self.source_details_prompt_placeholder = QWidget(self.source_details_stack)
-        self.source_details_stack.addWidget(self.source_details_prompt_placeholder)
-
-        self.playlist_items_panel = QWidget(self.source_details_stack)
-        playlist_items_layout = QHBoxLayout(self.playlist_items_panel)
-        playlist_items_layout.setContentsMargins(0, 1, 0, 1)
-        playlist_items_layout.setSpacing(0)
-        self.playlist_items_edit = QLineEdit(self.playlist_items_panel)
-        self.playlist_items_edit.setPlaceholderText("Optional: 1-5,7,10-")
-        self.playlist_items_edit.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        playlist_items_layout.addWidget(self.playlist_items_edit, stretch=1)
-        self.source_details_stack.addWidget(self.playlist_items_panel)
+        self.setCentralWidget(ui.root)
+        self._bind_ui_refs(ui)
         self._sync_source_details_height()
-
-        self.preview_value = QLabel("-", source)
-        self.preview_value.setWordWrap(False)
-        self.preview_value.setMinimumHeight(24)
-        self.preview_value.setMargin(3)
-        self.preview_title_label = QLabel("Preview title", source)
-        self.preview_title_label.setObjectName("sectionFormLabel")
-        preview_value_row = QWidget(source)
-        preview_value_layout = QHBoxLayout(preview_value_row)
-        preview_value_layout.setContentsMargins(6, 2, 0, 2)
-        preview_value_layout.setSpacing(0)
-        preview_value_layout.addWidget(self.preview_value)
-        source_layout.addRow(self.preview_title_label, preview_value_row)
-        self.source_details_label = QLabel("", source)
-        self.source_details_label.setObjectName("sectionFormLabel")
-        source_layout.addRow(self.source_details_label, self.source_details_host)
-        main_layout.addWidget(source)
-
-        self.output_section = QGroupBox("Export Settings", self.main_page)
-        self.output_section.setObjectName("outputSection")
-        self.output_layout = QGridLayout(self.output_section)
-        self.output_layout.setContentsMargins(0, 0, 0, 0)
-        self.output_layout.setHorizontalSpacing(22)
-        self.output_layout.setVerticalSpacing(12)
-        self.output_layout.setColumnStretch(0, 5)
-        self.output_layout.setColumnStretch(1, 4)
-
-        self.format_card = QGroupBox("Format setup", self.output_section)
-        self.format_card.setObjectName("formatSection")
-        self.format_layout = QVBoxLayout(self.format_card)
-        self.format_layout.setContentsMargins(0, 2, 0, 0)
-        self.format_layout.setSpacing(8)
-
-        mode_row = QWidget(self.format_card)
-        self.mode_row_layout = QHBoxLayout(mode_row)
-        self.mode_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.mode_row_layout.setSpacing(10)
-        self.video_radio = QRadioButton("Video and Audio", mode_row)
-        self.audio_radio = QRadioButton("Audio only", mode_row)
-        self.video_radio.toggled.connect(self._on_mode_change)
-        self.audio_radio.toggled.connect(self._on_mode_change)
-        self.mode_row_layout.addWidget(self.video_radio)
-        self.mode_row_layout.addWidget(self.audio_radio)
-        self.mode_row_layout.addStretch(1)
-        self.content_type_label = QLabel("Content type", self.format_card)
-
-        container_row = QWidget(self.format_card)
-        container_row_layout = QHBoxLayout(container_row)
-        container_row_layout.setContentsMargins(0, 0, 0, 0)
-        container_row_layout.setSpacing(0)
-        self.container_combo = _NativeComboBox(container_row)
-        self._register_native_combo(self.container_combo)
-        self.container_combo.setMinimumWidth(190)
-        self.container_combo.currentIndexChanged.connect(self._on_container_change)
-        self.convert_check = QCheckBox("Convert WebM to MP4", self.format_card)
-        self.convert_check.stateChanged.connect(
-            lambda _state: self._update_controls_state()
-        )
-        container_row_layout.addWidget(self.container_combo)
-        self.container_label = QLabel("Container", self.format_card)
-        self.post_process_label = QLabel("Post-process", self.format_card)
-
-        self.codec_combo = _NativeComboBox(self.format_card)
-        self._register_native_combo(self.codec_combo)
-        self.codec_combo.setMinimumWidth(190)
-        self.codec_combo.addItem("Select codec", "")
-        self.codec_combo.addItem("avc1 (H.264)", "avc1")
-        self.codec_combo.addItem("av01 (AV1)", "av01")
-        self.codec_combo.currentIndexChanged.connect(self._on_codec_change)
-        self.codec_label = QLabel("Codec", self.format_card)
-
-        self.format_combo = _NativeComboBox(self.format_card)
-        self._register_native_combo(self.format_combo)
-        self.format_combo.setMinimumWidth(260)
-        self.format_combo.currentIndexChanged.connect(
-            lambda _idx: self._update_controls_state()
-        )
-        self.format_label = QLabel("Format", self.format_card)
-
-        self._output_form_labels = [
-            self.content_type_label,
-            self.container_label,
-            self.post_process_label,
-            self.codec_label,
-            self.format_label,
-        ]
-        for label in self._output_form_labels:
-            label.setObjectName("outputFormLabel")
-        self._output_form_rows: list[QWidget] = []
-
-        def _add_output_row(
-            card: QWidget,
-            layout: QVBoxLayout,
-            label: QLabel,
-            field: QWidget,
-        ) -> None:
-            row = QWidget(card)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(10)
-            row_layout.addWidget(label)
-            row_layout.addWidget(field, stretch=1)
-            layout.addWidget(row)
-            self._output_form_rows.append(row)
-
-        _add_output_row(self.format_card, self.format_layout, self.content_type_label, mode_row)
-        _add_output_row(self.format_card, self.format_layout, self.container_label, container_row)
-        _add_output_row(self.format_card, self.format_layout, self.post_process_label, self.convert_check)
-        _add_output_row(self.format_card, self.format_layout, self.codec_label, self.codec_combo)
-        self.format_layout.addSpacing(6)
-        _add_output_row(self.format_card, self.format_layout, self.format_label, self.format_combo)
-
-        self.save_card = QGroupBox("Save options", self.output_section)
-        self.save_card.setObjectName("saveSection")
-        self.save_layout = QVBoxLayout(self.save_card)
-        self.save_layout.setContentsMargins(0, 2, 0, 0)
-        self.save_layout.setSpacing(12)
-        self.filename_edit = QLineEdit(self.save_card)
-        self.filename_edit.setPlaceholderText("Optional single-video filename")
-        self.file_name_label = QLabel("File name", self.save_card)
-        self.file_name_label.setObjectName("saveBlockLabel")
-
-        folder_row = QWidget(self.save_card)
-        self.folder_row_layout = QHBoxLayout(folder_row)
-        self.folder_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.folder_row_layout.setSpacing(10)
-        self.output_dir_edit = QLineEdit(str(Path.home() / "Downloads"), self.save_card)
-        self.output_dir_edit.setReadOnly(True)
-        self.browse_button = QPushButton("Browse...", self.save_card)
-        self.browse_button.clicked.connect(self._pick_folder)
-        self.folder_row_layout.addWidget(self.output_dir_edit, stretch=1)
-        self.folder_row_layout.addWidget(self.browse_button)
-        self.output_folder_label = QLabel("Output folder", self.save_card)
-        self.output_folder_label.setObjectName("saveBlockLabel")
-
-        def _add_save_block(label: QLabel, field: QWidget) -> None:
-            block = QWidget(self.save_card)
-            block_layout = QVBoxLayout(block)
-            block_layout.setContentsMargins(0, 0, 0, 0)
-            block_layout.setSpacing(9)
-            block_layout.addWidget(label)
-            block_layout.addWidget(field)
-            self.save_layout.addWidget(block)
-
-        _add_save_block(self.file_name_label, self.filename_edit)
-        _add_save_block(self.output_folder_label, folder_row)
-        self.save_layout.addStretch(1)
         self._set_output_form_label_width(min_width=112)
-
-        self.output_layout.addWidget(self.format_card, 0, 0)
-        self.output_layout.addWidget(self.save_card, 0, 1)
-        main_layout.addWidget(self.output_section)
-
-        run_divider = QFrame(self.main_page)
-        run_divider.setObjectName("sectionDivider")
-        run_divider.setFixedHeight(1)
-        main_layout.addWidget(run_divider)
-
-        run = QGroupBox("Start Download", self.main_page)
-        run.setObjectName("runSection")
-        run_layout = QVBoxLayout(run)
-        run_layout.setContentsMargins(0, 2, 0, 2)
-        run_layout.setSpacing(8)
-        self.status_value = QLabel("Idle", run)
-        self.status_value.setObjectName("statusLine")
-        self.status_value.setVisible(False)
-        run_layout.addWidget(self.status_value)
-
-        self.progress_bar = QProgressBar(run)
-        self.progress_bar.setRange(0, 1000)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(False)
-        run_layout.addWidget(self.progress_bar)
-
-        buttons_row = QWidget(run)
-        buttons_layout = QHBoxLayout(buttons_row)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(10)
-
-        self.start_button = QPushButton("Download", buttons_row)
-        self.start_button.setObjectName("primaryActionButton")
-        self.start_button.clicked.connect(self._on_start)
-        self.add_queue_button = QPushButton("Add to queue", buttons_row)
-        self.add_queue_button.clicked.connect(self._on_add_to_queue)
-        self.start_queue_button = QPushButton("Download queue", buttons_row)
-        self.start_queue_button.clicked.connect(self._on_start_queue)
-        self.cancel_button = QPushButton("Cancel", buttons_row)
-        self.cancel_button.clicked.connect(self._on_cancel)
-
-        buttons_layout.addWidget(self.start_button)
-        buttons_layout.addWidget(self.add_queue_button)
-        buttons_layout.addWidget(self.start_queue_button)
-        buttons_layout.addWidget(self.cancel_button)
-        buttons_layout.addStretch(1)
-        run_layout.addWidget(buttons_row)
-
-        self.ready_summary_label = QLabel("", run)
-        self.ready_summary_label.setObjectName("readySummaryLine")
-        self.ready_summary_label.setToolTip(
-            "Current output summary based on selected format and save folder."
-        )
-        run_layout.addWidget(self.ready_summary_label)
-
-        self.metrics_strip = QFrame(run)
-        self.metrics_strip.setObjectName("metricsStrip")
-        metrics_layout = QHBoxLayout(self.metrics_strip)
-        metrics_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_layout.setSpacing(10)
-        self.progress_label = QLabel("Progress: -", self.metrics_strip)
-        self.progress_label.setObjectName("metricInline")
-        self.speed_label = QLabel("Speed: -", self.metrics_strip)
-        self.speed_label.setObjectName("metricInline")
-        self.eta_label = QLabel("ETA: -", self.metrics_strip)
-        self.eta_label.setObjectName("metricInline")
-        self.item_label = QLabel("Item: -", self.metrics_strip)
-        self.item_label.setObjectName("metricInlineItem")
-        self.item_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        metrics_layout.addWidget(self.progress_label)
-        metrics_layout.addWidget(self.speed_label)
-        metrics_layout.addWidget(self.eta_label)
-        metrics_layout.addWidget(self.item_label, stretch=1)
-        metrics_layout.addStretch(1)
-
-        self.download_result_card = QFrame(run)
-        self.download_result_card.setObjectName("downloadResultCard")
-        self.download_result_card.setProperty("state", "info")
-        result_layout = QHBoxLayout(self.download_result_card)
-        result_layout.setContentsMargins(12, 8, 12, 8)
-        result_layout.setSpacing(10)
-        self.download_result_title = QLabel("Download info:", self.download_result_card)
-        self.download_result_title.setObjectName("downloadResultTitle")
-        self.download_result_stack = QStackedWidget(self.download_result_card)
-        self.download_result_stack.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        self._download_result_info_index = self.download_result_stack.addWidget(
-            self.metrics_strip
-        )
-
-        latest_content = QWidget(self.download_result_stack)
-        latest_layout = QHBoxLayout(latest_content)
-        latest_layout.setContentsMargins(0, 0, 0, 0)
-        latest_layout.setSpacing(0)
-        self.download_result_path = QLabel("-", latest_content)
-        self.download_result_path.setObjectName("downloadResultPath")
-        self.download_result_path.setWordWrap(False)
-        self.download_result_path.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        self.download_result_path.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        latest_layout.addWidget(self.download_result_path)
-        self._download_result_latest_index = self.download_result_stack.addWidget(
-            latest_content
-        )
-
-        result_actions = QWidget(self.download_result_card)
-        result_actions_layout = QHBoxLayout(result_actions)
-        result_actions_layout.setContentsMargins(0, 0, 0, 0)
-        result_actions_layout.setSpacing(10)
-        self.open_last_output_folder_button = QPushButton("Open folder", result_actions)
-        self.open_last_output_folder_button.clicked.connect(self._open_last_output_folder)
-        self.copy_output_path_button = QPushButton("Copy path", result_actions)
-        self.copy_output_path_button.clicked.connect(self._copy_last_output_path)
-        result_actions_layout.addWidget(self.open_last_output_folder_button)
-        result_actions_layout.addWidget(self.copy_output_path_button)
-        result_layout.addWidget(self.download_result_title)
-        result_layout.addWidget(self.download_result_stack, stretch=1)
-        result_layout.addWidget(result_actions)
-        self.download_result_stack.setCurrentIndex(self._download_result_info_index)
-        self.download_result_card.setVisible(True)
-        run_layout.addWidget(self.download_result_card)
-
-        main_layout.addWidget(run)
-        main_layout.addStretch(1)
-
-        self.main_scroll.setWidget(self.main_page)
-        self._main_page_index = self.panel_stack.addWidget(self.main_scroll)
 
         settings_panel = self._build_settings_panel()
         queue_panel = self._build_queue_panel()
@@ -660,6 +390,92 @@ class QtYtDlpGui(QMainWindow):
             "Paste a video or playlist URL to load available formats.",
             tone="neutral",
         )
+
+    def _bind_ui_refs(self, ui: UiRefs) -> None:
+        self._ui = ui
+        self.panel_stack = ui.panel_stack
+
+        top = ui.top_bar
+        self.top_actions = top.top_actions
+        self.classic_actions = top.classic_actions
+        self.downloads_button = top.downloads_button
+        self.queue_button = top.queue_button
+        self.history_button = top.history_button
+        self.logs_button = top.logs_button
+        self.settings_button = top.settings_button
+
+        mixed = ui.mixed_url
+        self.mixed_url_overlay = mixed.overlay
+        self.mixed_url_overlay_layout = mixed.overlay_layout
+        self.mixed_url_alert = mixed.alert
+        self.mixed_url_alert_label = mixed.alert_label
+        self.mixed_buttons_layout = mixed.buttons_layout
+        self.use_single_video_url_button = mixed.use_single_video_url_button
+        self.use_playlist_url_button = mixed.use_playlist_url_button
+
+        downloads = ui.downloads
+        self.main_scroll = downloads.main_scroll
+        self.main_page = downloads.main_page
+        self._main_page_index = downloads.main_page_index
+        self.url_edit = downloads.url_edit
+        self.paste_button = downloads.paste_button
+        self.source_details_host = downloads.source_details_host
+        self.source_details_stack = downloads.source_details_stack
+        self.source_details_empty = downloads.source_details_empty
+        self.source_details_prompt_placeholder = downloads.source_details_prompt_placeholder
+        self.playlist_items_panel = downloads.playlist_items_panel
+        self.playlist_items_edit = downloads.playlist_items_edit
+        self.preview_value = downloads.preview_value
+        self.preview_title_label = downloads.preview_title_label
+        self.source_details_label = downloads.source_details_label
+        self.output_section = downloads.output_section
+        self.output_layout = downloads.output_layout
+        self.format_card = downloads.format_card
+        self.format_layout = downloads.format_layout
+        self.mode_row_layout = downloads.mode_row_layout
+        self.video_radio = downloads.video_radio
+        self.audio_radio = downloads.audio_radio
+        self.content_type_label = downloads.content_type_label
+        self.container_combo = downloads.container_combo
+        self.convert_check = downloads.convert_check
+        self.container_label = downloads.container_label
+        self.post_process_label = downloads.post_process_label
+        self.codec_combo = downloads.codec_combo
+        self.codec_label = downloads.codec_label
+        self.format_combo = downloads.format_combo
+        self.format_label = downloads.format_label
+        self._output_form_labels = list(downloads.output_form_labels)
+        self._output_form_rows = list(downloads.output_form_rows)
+        self.save_card = downloads.save_card
+        self.save_layout = downloads.save_layout
+        self.filename_edit = downloads.filename_edit
+        self.file_name_label = downloads.file_name_label
+        self.folder_row_layout = downloads.folder_row_layout
+        self.output_dir_edit = downloads.output_dir_edit
+        self.browse_button = downloads.browse_button
+        self.output_folder_label = downloads.output_folder_label
+
+        run = downloads.run
+        self.status_value = run.status_value
+        self.progress_bar = run.progress_bar
+        self.start_button = run.start_button
+        self.add_queue_button = run.add_queue_button
+        self.start_queue_button = run.start_queue_button
+        self.cancel_button = run.cancel_button
+        self.ready_summary_label = run.ready_summary_label
+        self.metrics_strip = run.metrics_strip
+        self.progress_label = run.progress_label
+        self.speed_label = run.speed_label
+        self.eta_label = run.eta_label
+        self.item_label = run.item_label
+        self.download_result_card = run.download_result_card
+        self.download_result_title = run.download_result_title
+        self.download_result_stack = run.download_result_stack
+        self._download_result_info_index = run.download_result_info_index
+        self._download_result_latest_index = run.download_result_latest_index
+        self.download_result_path = run.download_result_path
+        self.open_last_output_folder_button = run.open_last_output_folder_button
+        self.copy_output_path_button = run.copy_output_path_button
 
     def _register_native_combo(self, combo: QComboBox) -> None:
         combo.setMinimumHeight(27)
@@ -875,31 +691,17 @@ class QtYtDlpGui(QMainWindow):
         self.retry_backoff_edit.setFixedWidth(small_field_width)
         self.concurrent_fragments_edit.setFixedWidth(small_field_width)
 
-        if self._output_layout_mode == "compact":
-            self.save_card.setMinimumWidth(0)
-            self.save_card.setMaximumWidth(16777215)
-        else:
-            save_card_width = max(350, min(540, int(width * 0.40)))
-            self.save_card.setMinimumWidth(save_card_width)
-            self.save_card.setMaximumWidth(save_card_width)
+        save_card_width = max(350, min(540, int(width * 0.40)))
+        self.save_card.setMinimumWidth(save_card_width)
+        self.save_card.setMaximumWidth(save_card_width)
 
-    def _set_output_layout_mode(self, mode: str) -> None:
-        compact = mode == "compact"
-        if compact:
-            self.output_layout.addWidget(self.format_card, 0, 0)
-            self.output_layout.addWidget(self.save_card, 1, 0)
-            self.output_layout.setColumnStretch(0, 1)
-            self.output_layout.setColumnStretch(1, 0)
-            self.output_layout.setHorizontalSpacing(0)
-            self.output_layout.setVerticalSpacing(14)
-        else:
-            self.output_layout.addWidget(self.format_card, 0, 0)
-            self.output_layout.addWidget(self.save_card, 0, 1)
-            self.output_layout.setColumnStretch(0, 5)
-            self.output_layout.setColumnStretch(1, 4)
-            self.output_layout.setHorizontalSpacing(22)
-            self.output_layout.setVerticalSpacing(12)
-
+    def _set_output_layout_mode(self) -> None:
+        self.output_layout.addWidget(self.format_card, 0, 0)
+        self.output_layout.addWidget(self.save_card, 0, 1)
+        self.output_layout.setColumnStretch(0, 5)
+        self.output_layout.setColumnStretch(1, 4)
+        self.output_layout.setHorizontalSpacing(22)
+        self.output_layout.setVerticalSpacing(12)
         self.format_layout.setSpacing(8)
         self.save_layout.setSpacing(12)
         self._set_output_form_label_width(min_width=112)
@@ -909,10 +711,9 @@ class QtYtDlpGui(QMainWindow):
         self.folder_row_layout.setStretch(0, 1)
 
     def _apply_responsive_layout(self) -> None:
-        width = self.width()
         desired_mode = "wide"
         if desired_mode != self._output_layout_mode:
-            self._set_output_layout_mode(desired_mode)
+            self._set_output_layout_mode()
             self._output_layout_mode = desired_mode
 
         self.mixed_buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight)
@@ -1012,29 +813,13 @@ class QtYtDlpGui(QMainWindow):
         widget.update()
 
     def _set_source_feedback(self, text: str, *, tone: str = "neutral") -> None:
-        tone_value = (
-            tone
-            if tone in {"neutral", "loading", "success", "warning", "error", "hidden"}
-            else "neutral"
+        self._status_presenter.last_source_feedback_log = self._last_source_feedback_log
+        self._status_presenter.set_source_feedback(
+            text,
+            tone=tone,
+            append_log=self._append_log,
         )
-        message = str(text or "").strip()
-        if not message:
-            if tone_value == "hidden":
-                self._last_source_feedback_log = None
-            return
-        key = (tone_value, message)
-        if self._last_source_feedback_log == key:
-            return
-        self._last_source_feedback_log = key
-        prefix_map = {
-            "neutral": "[source]",
-            "loading": "[source][loading]",
-            "success": "[source][success]",
-            "warning": "[source][warning]",
-            "error": "[source][error]",
-        }
-        prefix = prefix_map.get(tone_value, "[source]")
-        self._append_log(f"{prefix} {message}")
+        self._last_source_feedback_log = self._status_presenter.last_source_feedback_log
 
     def _set_metrics_visible(self, visible: bool) -> None:
         # Keep the info row mounted in the result card to avoid layout shifts.
@@ -1179,12 +964,12 @@ class QtYtDlpGui(QMainWindow):
         folder = self._latest_output_path.parent
         if not folder.exists():
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        self._effects.desktop.open_path(folder)
 
     def _copy_last_output_path(self) -> None:
         if self._latest_output_path is None:
             return
-        QApplication.clipboard().setText(str(self._latest_output_path))
+        self._effects.clipboard.set_text(str(self._latest_output_path))
         self._set_status("Output path copied", log=False)
 
     def _elide_text_right_with_dots(
@@ -1222,25 +1007,28 @@ class QtYtDlpGui(QMainWindow):
         title_clean = re.sub(r"\s+", " ", str(self._current_item_title or "-").strip()) or "-"
         prefix = "Item: " if progress_clean == "-" else f"Item: {progress_clean} - "
         full_text = f"{prefix}{title_clean}"
-        width = max(80, self.item_label.width() - 4)
         metrics = QFontMetrics(self.item_label.font())
-        if metrics.horizontalAdvance(full_text) <= width:
+        if (not self.isVisible()) or self.item_label.width() <= 0:
             shown_text = full_text
         else:
-            prefix_width = metrics.horizontalAdvance(prefix)
-            if prefix_width >= width:
-                shown_text = self._elide_text_right_with_dots(
-                    full_text,
-                    width=width,
-                    metrics=metrics,
-                )
+            width = max(80, self.item_label.width() - 4)
+            if metrics.horizontalAdvance(full_text) <= width:
+                shown_text = full_text
             else:
-                shown_title = self._elide_text_right_with_dots(
-                    title_clean,
-                    width=max(0, width - prefix_width),
-                    metrics=metrics,
-                )
-                shown_text = f"{prefix}{shown_title}"
+                prefix_width = metrics.horizontalAdvance(prefix)
+                if prefix_width >= width:
+                    shown_text = self._elide_text_right_with_dots(
+                        full_text,
+                        width=width,
+                        metrics=metrics,
+                    )
+                else:
+                    shown_title = self._elide_text_right_with_dots(
+                        title_clean,
+                        width=max(0, width - prefix_width),
+                        metrics=metrics,
+                    )
+                    shown_text = f"{prefix}{shown_title}"
         self.item_label.setText(shown_text)
         self.item_label.setToolTip(str(self._current_item_title_tooltip or "-"))
 
@@ -1271,16 +1059,79 @@ class QtYtDlpGui(QMainWindow):
         self._set_current_item_display(progress="-", title=clean)
 
     def _build_settings_panel(self) -> QWidget:
-        return qt_panels.build_settings_panel(self)
+        refs = qt_panels.build_settings_panel(
+            parent=self,
+            register_native_combo=self._register_native_combo,
+            on_update_controls_state=self._update_controls_state,
+            on_export_diagnostics=self._export_diagnostics,
+        )
+        self.subtitle_languages_edit = refs.subtitle_languages_edit
+        self.write_subtitles_check = refs.write_subtitles_check
+        self.embed_subtitles_check = refs.embed_subtitles_check
+        self.audio_language_combo = refs.audio_language_combo
+        self.network_timeout_edit = refs.network_timeout_edit
+        self.network_retries_edit = refs.network_retries_edit
+        self.retry_backoff_edit = refs.retry_backoff_edit
+        self.concurrent_fragments_edit = refs.concurrent_fragments_edit
+        self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
+        self.open_folder_after_download_check = refs.open_folder_after_download_check
+        self.export_diagnostics_button = refs.export_diagnostics_button
+        return refs.panel
 
     def _build_queue_panel(self) -> QWidget:
-        return qt_panels.build_queue_panel(self)
+        refs = qt_panels.build_queue_panel(
+            parent=self,
+            on_remove_selected=self._queue_remove_selected,
+            on_move_up=self._queue_move_up,
+            on_move_down=self._queue_move_down,
+            on_clear=self._queue_clear,
+        )
+        self.queue_list = refs.queue_list
+        self.queue_remove_button = refs.queue_remove_button
+        self.queue_move_up_button = refs.queue_move_up_button
+        self.queue_move_down_button = refs.queue_move_down_button
+        self.queue_clear_button = refs.queue_clear_button
+        self._set_uniform_button_width(
+            [
+                self.queue_remove_button,
+                self.queue_move_up_button,
+                self.queue_move_down_button,
+                self.queue_clear_button,
+            ],
+            extra_px=24,
+        )
+        return refs.panel
 
     def _build_history_panel(self) -> QWidget:
-        return qt_panels.build_history_panel(self)
+        refs = qt_panels.build_history_panel(
+            parent=self,
+            on_open_file=self._open_selected_history_file,
+            on_open_folder=self._open_selected_history_folder,
+            on_clear=self._clear_download_history,
+        )
+        self.history_list = refs.history_list
+        self.history_open_file_button = refs.history_open_file_button
+        self.history_open_folder_button = refs.history_open_folder_button
+        self.history_clear_button = refs.history_clear_button
+        self._set_uniform_button_width(
+            [
+                self.history_open_file_button,
+                self.history_open_folder_button,
+                self.history_clear_button,
+            ],
+            extra_px=24,
+        )
+        return refs.panel
 
     def _build_logs_panel(self) -> QWidget:
-        return qt_panels.build_logs_panel(self, max_lines=LOG_MAX_LINES)
+        refs = qt_panels.build_logs_panel(
+            parent=self,
+            max_lines=LOG_MAX_LINES,
+            on_clear_logs=self._clear_logs,
+        )
+        self.logs_view = refs.logs_view
+        self.logs_clear_button = refs.logs_clear_button
+        return refs.panel
 
     def _default_output_dir(self) -> str:
         return str(Path.home() / "Downloads")
@@ -1377,7 +1228,7 @@ class QtYtDlpGui(QMainWindow):
         ).expanduser()
         if not output_dir.exists():
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_dir)))
+        self._effects.desktop.open_path(output_dir)
 
     def _apply_header_layout(self) -> None:
         self.classic_actions.setVisible(True)
@@ -1406,8 +1257,11 @@ class QtYtDlpGui(QMainWindow):
     def _load_asset_icon(self, filename: str) -> QIcon:
         path = Path(__file__).resolve().parent / "assets" / filename
         if not path.exists():
-            return QIcon()
-        return QIcon(path.as_posix())
+            return self._legacy_log_alert_icon
+        icon = QIcon(path.as_posix())
+        if icon.isNull():
+            return self._legacy_log_alert_icon
+        return icon
 
     def _set_header_icons_enabled(self, enabled: bool) -> None:
         enabled_flag = bool(enabled)
@@ -1426,14 +1280,27 @@ class QtYtDlpGui(QMainWindow):
 
     def _refresh_top_action_icons(self) -> None:
         full_icon_size = QSize(TOP_ACTION_ICON_PX, TOP_ACTION_ICON_PX)
-        for button in (
-            self.downloads_button,
-            self.settings_button,
-            self.queue_button,
-            self.history_button,
-            self.logs_button,
+        for name, button in (
+            ("downloads", self.downloads_button),
+            ("settings", self.settings_button),
+            ("queue", self.queue_button),
+            ("history", self.history_button),
+            ("logs", self.logs_button),
         ):
-            button.setIcon(QIcon())
+            icon = QIcon()
+            if self._header_icons_enabled and name != "downloads":
+                icon = self._panel_icon(
+                    name,
+                    checked=self._active_panel_name == name,
+                    alert=(
+                        name == "logs"
+                        and self._logs_alert_active
+                        and self._active_panel_name != "logs"
+                    ),
+                )
+                if icon.isNull():
+                    icon = self._legacy_log_alert_icon
+            button.setIcon(icon)
             button.setIconSize(full_icon_size)
 
         self._set_uniform_button_width(
@@ -1444,7 +1311,7 @@ class QtYtDlpGui(QMainWindow):
                 self.history_button,
                 self.logs_button,
             ],
-            extra_px=18,
+            extra_px=12,
         )
 
     def _configure_top_action_icons(self) -> None:
@@ -1560,15 +1427,18 @@ class QtYtDlpGui(QMainWindow):
     def _clear_logs(self) -> None:
         self._log_lines.clear()
         self._last_error_log = ""
+        self._status_presenter.last_source_feedback_log = None
         self._last_source_feedback_log = None
         self.logs_view.clear()
         self._set_logs_alert(False)
 
     def _set_status(self, text: str, *, log: bool = True) -> None:
-        value = (text or "").strip() or "Idle"
-        self.status_value.setText(value)
-        if log:
-            self._append_log(f"[status] {value}")
+        self._status_presenter.set_status(
+            text,
+            set_status_text=self.status_value.setText,
+            append_log=self._append_log,
+            log=log,
+        )
 
     def _set_preview_title(self, title: str) -> None:
         shown, tooltip = preview_title_fields(title)
@@ -1593,9 +1463,9 @@ class QtYtDlpGui(QMainWindow):
             if detail.lower() not in lower_body:
                 body = f"{clean_message}\n\nDetails:\n{detail}"
         if critical:
-            QMessageBox.critical(self, title, body)
+            self._effects.dialogs.critical(self, title, body)
             return
-        QMessageBox.warning(self, title, body)
+        self._effects.dialogs.warning(self, title, body)
 
     def _set_playlist_items_visible(self, visible: bool) -> None:
         if bool(visible):
@@ -1663,7 +1533,7 @@ class QtYtDlpGui(QMainWindow):
         )
 
     def _paste_url(self) -> None:
-        clip = QApplication.clipboard().text().strip()
+        clip = self._effects.clipboard.get_text().strip()
         if not clip:
             self._set_status("Clipboard is empty")
             return
@@ -1671,115 +1541,22 @@ class QtYtDlpGui(QMainWindow):
         self._set_status("URL pasted")
 
     def _pick_folder(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "Select output folder")
+        selected = self._effects.file_dialogs.pick_directory(
+            self,
+            "Select output folder",
+        )
         if selected:
             self.output_dir_edit.setText(selected)
             self._refresh_ready_summary()
 
     def _on_url_changed(self) -> None:
-        current = self.url_edit.text()
-        normalized = core_urls.strip_url_whitespace(current)
-        if normalized != self._pending_mixed_url:
-            self._last_formats_error_popup_key = ""
-        if normalized != current:
-            self.url_edit.blockSignals(True)
-            self.url_edit.setText(normalized)
-            self.url_edit.blockSignals(False)
-        has_mixed_url = bool(normalized and core_urls.is_mixed_url(normalized))
-        if has_mixed_url:
-            self._pending_mixed_url = normalized
-            if (
-                self.status_value.text()
-                != "Choose video or playlist URL before fetching formats."
-            ):
-                self._set_status("Choose video or playlist URL before fetching formats.")
-            self._set_source_feedback(
-                "Choose Single video or Playlist before loading formats.",
-                tone="warning",
-            )
-        else:
-            self._pending_mixed_url = ""
-
-        self._fetch_timer.stop()
-        self._fetch_request_seq += 1
-        self._active_fetch_request_id = self._fetch_request_seq
-        self._is_fetching = False
-        self._playlist_mode = core_urls.is_playlist_url(normalized)
-
-        self._set_mode_unselected()
-        self._set_combo_items(
-            self.container_combo, [("Select container", "")], keep_current=False
-        )
-        self.codec_combo.blockSignals(True)
-        self.codec_combo.setCurrentIndex(0)
-        self.codec_combo.blockSignals(False)
-        self.convert_check.setChecked(False)
-        self.playlist_items_edit.clear()
-        self._video_labels = []
-        self._video_lookup = {}
-        self._audio_labels = []
-        self._audio_lookup = {}
-        self._filtered_labels = []
-        self._filtered_lookup = {}
-        self._audio_languages = []
-        self._set_preview_title("")
-        self.format_combo.clear()
-        self._set_audio_language_values([])
-        self._update_source_details_visibility()
-
-        if not normalized:
-            self._set_source_feedback(
-                "Paste a video or playlist URL to load available formats.",
-                tone="neutral",
-            )
-        elif (not has_mixed_url) and (not self._is_downloading):
-            self._set_source_feedback(
-                "URL captured. Loading available formats...",
-                tone="loading",
-            )
-
-        if normalized and (not has_mixed_url) and not self._is_downloading:
-            self._fetch_timer.start()
-        self._update_controls_state()
+        self._source_controller.on_url_changed()
 
     def _start_fetch_formats(self) -> None:
-        if self._is_downloading:
-            return
-        url = self.url_edit.text().strip()
-        if not url or self._pending_mixed_url:
-            return
-        self._fetch_request_seq += 1
-        request_id = self._fetch_request_seq
-        self._active_fetch_request_id = request_id
-        self._is_fetching = True
-        self._set_status("Fetching formats...")
-        self._set_source_feedback("Loading available formats...", tone="loading")
-        self._update_controls_state()
-        thread = threading.Thread(
-            target=self._fetch_formats_worker,
-            args=(request_id, url),
-            daemon=True,
-        )
-        thread.start()
+        self._source_controller.start_fetch_formats()
 
     def _fetch_formats_worker(self, request_id: int, url: str) -> None:
-        try:
-            info = helpers.fetch_info(url)
-            formats = formats_mod.formats_from_info(info)
-            collections = format_pipeline.build_format_collections(formats)
-            payload = {
-                "collections": collections,
-                "preview_title": format_pipeline.preview_title_from_info(info),
-            }
-            is_playlist = bool(
-                info.get("_type") == "playlist" or info.get("entries") is not None
-            )
-            self._signals.formats_loaded.emit(
-                request_id, url, payload, False, is_playlist
-            )
-        except Exception as exc:
-            self._signals.log.emit(f"[error] Could not fetch formats: {exc}")
-            self._signals.formats_loaded.emit(request_id, url, {}, True, False)
+        self._source_controller.fetch_formats_worker(request_id, url)
 
     def _on_formats_loaded(
         self,
@@ -1789,76 +1566,13 @@ class QtYtDlpGui(QMainWindow):
         error: bool,
         is_playlist: bool,
     ) -> None:
-        if request_id != self._active_fetch_request_id:
-            return
-        current_url = self.url_edit.text().strip()
-        if url != current_url:
-            self._is_fetching = False
-            if current_url and not self._is_downloading:
-                self._fetch_timer.start()
-            self._update_controls_state()
-            return
-        self._is_fetching = False
-        self._playlist_mode = bool(is_playlist)
-        self._update_source_details_visibility()
-
-        if error or not isinstance(payload, dict):
-            self._video_labels = []
-            self._video_lookup = {}
-            self._audio_labels = []
-            self._audio_lookup = {}
-            self._audio_languages = []
-            self._filtered_labels = []
-            self._filtered_lookup = {}
-            self._set_preview_title("")
-            self.format_combo.clear()
-            self._set_audio_language_values([])
-            fetch_feedback = core_error_feedback.formats_fetch_failed_feedback(
-                self._last_error_log
-            )
-            status_text = fetch_feedback.status if error else "No formats found"
-            self._set_status(status_text)
-            self._set_source_feedback(
-                fetch_feedback.message
-                if error
-                else "No formats found for this URL. Try a different link.",
-                tone="error" if error else "warning",
-            )
-            if error:
-                popup_key = f"{url}|{fetch_feedback.reason}"
-                if popup_key != self._last_formats_error_popup_key:
-                    self._show_feedback_popup(
-                        title="Could not fetch formats",
-                        message=fetch_feedback.message,
-                        critical=False,
-                    )
-                    self._last_formats_error_popup_key = popup_key
-            self._update_controls_state()
-            return
-
-        collections = payload.get("collections") or {}
-        self._video_labels = list(collections.get("video_labels", []))
-        self._video_lookup = dict(collections.get("video_lookup", {}))
-        self._audio_labels = list(collections.get("audio_labels", []))
-        self._audio_lookup = dict(collections.get("audio_lookup", {}))
-        self._audio_languages = list(collections.get("audio_languages", []))
-        preview_title = str(payload.get("preview_title") or "").strip()
-        self._set_preview_title(preview_title)
-        self._set_audio_language_values(self._audio_languages)
-        if self._video_labels or self._audio_labels:
-            self._set_status("Formats loaded")
-            self._set_source_feedback(
-                "Formats are ready. Choose options and start the download.",
-                tone="success",
-            )
-        else:
-            self._set_status("No formats found")
-            self._set_source_feedback(
-                "No formats found for this URL. Try a different link.",
-                tone="warning",
-            )
-        self._apply_mode_formats()
-        self._update_controls_state()
+        self._source_controller.on_formats_loaded(
+            request_id=request_id,
+            url=url,
+            payload=payload,
+            error=error,
+            is_playlist=is_playlist,
+        )
 
     def _set_audio_language_values(self, languages: list[str]) -> None:
         unique: list[str] = []
@@ -2022,115 +1736,13 @@ class QtYtDlpGui(QMainWindow):
         )
 
     def _on_start(self) -> None:
-        if self._is_downloading:
-            return
-        url = self.url_edit.text().strip()
-        issue = core_workflow.single_start_issue(
-            url=url,
-            formats_loaded=bool(self._filtered_lookup),
-        )
-        if issue is not None:
-            title, message = core_workflow.single_start_error_text(issue)
-            QMessageBox.critical(self, title, message)
-            return
-
-        output_dir = Path(self.output_dir_edit.text().strip()).expanduser()
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            QMessageBox.critical(
-                self,
-                "Output folder unavailable",
-                f"Could not create/access output folder:\n{output_dir}\n\n{exc}",
-            )
-            return
-
-        options = self._snapshot_download_options()
-        self._is_downloading = True
-        self._cancel_requested = False
-        self._cancel_event = threading.Event()
-        self._show_progress_item = True
-        self._clear_logs()
-        self._reset_progress_summary()
-        self._clear_last_output_path()
-        self._set_metrics_visible(True)
-        self._set_status("Downloading...")
-        self._set_source_feedback("", tone="hidden")
-        self._update_controls_state()
-
-        request, was_normalized = app_service.build_single_download_request(
-            url=url,
-            output_dir=output_dir,
-            fmt_info=self._selected_format_info(),
-            fmt_label=self._selected_format_label(),
-            format_filter=self._current_container(),
-            convert_to_mp4=bool(self.convert_check.isChecked()),
-            playlist_enabled=bool(self._playlist_mode),
-            playlist_items_raw=self.playlist_items_edit.text(),
-            options=options,
-        )
-        if was_normalized:
-            self._append_log("[info] Playlist items normalized (spaces removed).")
-        if request["playlist_enabled"]:
-            self._append_log(
-                f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
-            )
-        thread = threading.Thread(
-            target=self._run_single_download_worker,
-            kwargs={"request": request},
-            daemon=True,
-        )
-        thread.start()
+        self._run_queue_controller.on_start()
 
     def _run_single_download_worker(self, *, request: DownloadRequest) -> None:
-        result = app_service.run_download_request(
-            request=request,
-            cancel_event=self._cancel_event,
-            log=lambda msg: self._signals.log.emit(str(msg)),
-            update_progress=lambda payload: self._signals.progress.emit(dict(payload)),
-            record_output=lambda p: self._signals.record_output.emit(
-                str(p), str(request["url"])
-            ),
-        )
-        self._signals.download_done.emit(str(result))
+        self._run_queue_controller.run_single_download_worker(request=request)
 
     def _on_download_done(self, result: str) -> None:
-        if self.queue_active:
-            return
-        self._is_downloading = False
-        self._cancel_requested = False
-        self._cancel_event = None
-        self._show_progress_item = False
-        self._reset_progress_summary()
-        if result == download.DOWNLOAD_SUCCESS:
-            self._set_status("Download complete")
-            self._set_source_feedback(
-                "Download complete. You can paste another URL anytime.",
-                tone="success",
-            )
-            self._maybe_open_output_folder()
-        elif result == download.DOWNLOAD_CANCELLED:
-            self._set_status("Cancelled")
-            self._set_source_feedback(
-                "Download cancelled. Update settings or URL and try again.",
-                tone="warning",
-            )
-            self._clear_last_output_path()
-        else:
-            failure = core_error_feedback.download_failed_feedback(self._last_error_log)
-            self._set_status(failure.status)
-            self._set_source_feedback(
-                failure.message,
-                tone="error",
-            )
-            self._show_feedback_popup(
-                title="Download failed",
-                message=failure.message,
-                critical=True,
-            )
-            self._clear_last_output_path()
-        self._update_controls_state()
-        self._maybe_close_after_cancel()
+        self._run_queue_controller.on_download_done(result)
 
     def _maybe_close_after_cancel(self) -> None:
         if self._is_downloading or not self._close_after_cancel:
@@ -2139,115 +1751,24 @@ class QtYtDlpGui(QMainWindow):
         QTimer.singleShot(0, self.close)
 
     def _on_cancel(self) -> None:
-        if not self._is_downloading or self._cancel_requested:
-            return
-        self._cancel_requested = True
-        if self._cancel_event is not None:
-            self._cancel_event.set()
-        self._set_status("Cancelling...")
-        self._update_controls_state()
+        self._run_queue_controller.on_cancel()
 
     def _on_add_to_queue(self) -> None:
-        if self._is_downloading:
-            return
-        url = core_urls.strip_url_whitespace(self.url_edit.text().strip())
-
-        settings = self._capture_queue_settings()
-        issue = core_queue_logic.queue_add_issue(
-            url=url,
-            playlist_mode=bool(self._playlist_mode or core_urls.is_playlist_url(url)),
-            formats_loaded=bool(self._filtered_lookup),
-            settings=settings,
-        )
-        if issue:
-            status_text, log_text = core_queue_logic.queue_add_feedback(issue)
-            self._set_status(status_text)
-            self._append_log(log_text)
-            return
-
-        self.queue_items.append(core_queue_logic.queue_item(url, settings))
-        self._refresh_queue_panel()
-        self._set_status("Added item to queue")
-        self._update_controls_state()
+        self._run_queue_controller.on_add_to_queue()
 
     def _on_start_queue(self) -> None:
-        self._start_queue_download()
+        self._run_queue_controller.on_start_queue()
 
     def _start_queue_download(self) -> None:
-        queue_check = core_workflow.validate_queue_start(
-            is_downloading=self._is_downloading,
-            queue_items=self.queue_items,
-        )
-        if not queue_check.can_start:
-            if queue_check.invalid_index is None or queue_check.invalid_issue is None:
-                return
-            QMessageBox.critical(
-                self,
-                "Missing settings",
-                (
-                    "Queue item "
-                    f"{queue_check.invalid_index} is missing "
-                    f"{core_queue_logic.queue_start_missing_detail(queue_check.invalid_issue)}."
-                ),
-            )
-            return
-
-        self.queue_active = True
-        self.queue_index = 0
-        self._queue_failed_items = 0
-        self._queue_started_ts = time.time()
-        self._is_downloading = True
-        self._show_progress_item = True
-        self._cancel_requested = False
-        self._cancel_event = threading.Event()
-        self._clear_logs()
-        self._reset_progress_summary()
-        self._clear_last_output_path()
-        self._set_metrics_visible(True)
-        self._set_status("Downloading queue...")
-        self._set_source_feedback("", tone="hidden")
-        self._update_controls_state()
-        self._refresh_queue_panel()
-        self._start_next_queue_item()
+        self._run_queue_controller.start_queue_download()
 
     def _start_next_queue_item(self) -> None:
-        if not self.queue_active or self.queue_index is None:
-            return
-        next_item = core_workflow.next_queue_run_item(self.queue_items, self.queue_index)
-        if next_item is None:
-            self._finish_queue()
-            return
-        self.queue_index = next_item.index
-        self._append_log(
-            f"[queue] item {next_item.display_index}/{next_item.total} {next_item.url}"
-        )
-        self._set_current_item_display(
-            progress=f"{next_item.display_index}/{next_item.total}",
-            title="Resolving title...",
-        )
-        self._refresh_queue_panel()
-
-        thread = threading.Thread(
-            target=self._run_queue_download_worker,
-            kwargs={
-                "url": next_item.url,
-                "settings": next_item.settings,
-                "index": next_item.display_index,
-                "total": next_item.total,
-                "default_output_dir": self.output_dir_edit.text().strip(),
-            },
-            daemon=True,
-        )
-        thread.start()
+        self._run_queue_controller.start_next_queue_item()
 
     def _resolve_format_for_url(
         self, url: str, settings: QueueSettings
     ) -> dict[str, object]:
-        return app_service.resolve_format_for_url(
-            url=url,
-            settings=settings,
-            log=lambda msg: self._signals.log.emit(msg),
-        )
+        return self._run_queue_controller.resolve_format_for_url(url, settings)
 
     def _run_queue_download_worker(
         self,
@@ -2258,189 +1779,34 @@ class QtYtDlpGui(QMainWindow):
         total: int,
         default_output_dir: str,
     ) -> None:
-        had_error = False
-        cancelled = False
-        try:
-            resolved = self._resolve_format_for_url(url, settings)
-            item_text = f"{index}/{total} {resolved.get('title') or url}"
-            self._signals.progress.emit({"status": "item", "item": item_text})
-
-            request = app_service.build_queue_download_request(
-                url=url,
-                settings=settings,
-                resolved=resolved,
-                default_output_dir=default_output_dir,
-            )
-
-            if request["playlist_enabled"]:
-                self._signals.log.emit(
-                    f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
-                )
-            result = app_service.run_download_request(
-                request=request,
-                cancel_event=self._cancel_event,
-                log=lambda msg: self._signals.log.emit(str(msg)),
-                update_progress=lambda payload: self._signals.progress.emit(
-                    dict(payload)
-                ),
-                record_output=lambda p: self._signals.record_output.emit(str(p), url),
-                ensure_output_dir=True,
-            )
-            had_error = result == download.DOWNLOAD_ERROR
-            cancelled = result == download.DOWNLOAD_CANCELLED
-        except Exception as exc:
-            had_error = True
-            self._signals.log.emit(f"[queue] failed: {exc}")
-        finally:
-            self._signals.queue_item_done.emit(had_error, cancelled)
+        self._run_queue_controller.run_queue_download_worker(
+            url=url,
+            settings=settings,
+            index=index,
+            total=total,
+            default_output_dir=default_output_dir,
+        )
 
     def _on_queue_item_done(self, had_error: bool, cancelled: bool) -> None:
-        if not self.queue_active or self.queue_index is None:
-            return
-        progress = core_workflow.advance_queue_progress(
-            queue_length=len(self.queue_items),
-            current_index=self.queue_index,
-            failed_items=self._queue_failed_items,
-            cancel_requested=self._cancel_requested,
-            had_error=had_error,
-            cancelled=cancelled,
-        )
-        self._queue_failed_items = progress.failed_items
-        self._cancel_requested = progress.cancel_requested
-        if progress.should_finish:
-            if progress.finish_cancelled:
-                self._append_log("[queue] cancelled")
-            self._finish_queue(cancelled=progress.finish_cancelled)
-            return
-        self.queue_index = progress.next_index
-        if self.queue_index is None:
-            self._append_log("[queue] cancelled")
-            self._finish_queue()
-            return
-        self._reset_progress_summary()
-        self._start_next_queue_item()
+        self._run_queue_controller.on_queue_item_done(had_error, cancelled)
 
     def _finish_queue(self, *, cancelled: bool = False) -> None:
-        failed_items = self._queue_failed_items
-        queue_started_ts = self._queue_started_ts
-        self.queue_active = False
-        self.queue_index = None
-        self._queue_failed_items = 0
-        self._queue_started_ts = None
-        self._is_downloading = False
-        self._show_progress_item = False
-        self._cancel_requested = False
-        self._cancel_event = None
+        self._run_queue_controller.finish_queue(cancelled=cancelled)
 
-        outcome = core_workflow.queue_finish_outcome(
-            cancelled=cancelled,
-            failed_items=failed_items,
-        )
-        if outcome == "cancelled":
-            self._append_log("[queue] stopped by cancellation")
-            self._set_status("Queue cancelled")
-            self._set_source_feedback(
-                "Queue cancelled. You can adjust items and restart.",
-                tone="warning",
-            )
-            self._clear_last_output_path()
-        elif outcome == "failed":
-            self._append_log(f"[queue] finished with {failed_items} failed item(s)")
-            failure = core_error_feedback.download_failed_feedback(self._last_error_log)
-            item_label = "item" if failed_items == 1 else "items"
-            self._set_status("Queue finished with errors")
-            self._set_source_feedback(
-                (
-                    f"Queue finished with {failed_items} failed {item_label}. "
-                    f"Last issue: {failure.reason}. Check Logs and retry."
-                ),
-                tone="warning",
-            )
-            self._show_feedback_popup(
-                title="Queue finished with errors",
-                message=(
-                    f"Queue finished with {failed_items} failed {item_label}. "
-                    f"Last issue: {failure.reason}."
-                ),
-                critical=False,
-            )
-        else:
-            self._append_log("[queue] finished successfully")
-            self._set_status("Queue complete")
-            self._set_source_feedback(
-                "Queue complete. Paste another URL or review your history.",
-                tone="success",
-            )
-
-        if queue_started_ts is not None:
-            elapsed_s = max(0.0, time.time() - queue_started_ts)
-            self._append_log(
-                f"[time] Queue total time: {download.format_duration(elapsed_s)}"
-            )
-
-        if outcome != "cancelled":
-            self._maybe_open_output_folder()
-
-        self._reset_progress_summary()
-        self._update_controls_state()
-        self._refresh_queue_panel()
-        self._maybe_close_after_cancel()
-
-    def _queue_selected_indices(self) -> list[int]:
-        indices = sorted({idx.row() for idx in self.queue_list.selectedIndexes()})
-        return [i for i in indices if 0 <= i < len(self.queue_items)]
+    def _queue_selection_rows(self) -> list[int]:
+        return [idx.row() for idx in self.queue_list.selectedIndexes()]
 
     def _queue_remove_selected(self) -> None:
-        if self.queue_active:
-            return
-        indices = self._queue_selected_indices()
-        if not indices:
-            return
-        for idx in sorted(indices, reverse=True):
-            self.queue_items.pop(idx)
-        self._refresh_queue_panel()
-        self._update_controls_state()
+        self._run_queue_controller.on_queue_remove_selected(self._queue_selection_rows())
 
     def _queue_move_up(self) -> None:
-        if self.queue_active:
-            return
-        indices = self._queue_selected_indices()
-        moved = False
-        for idx in indices:
-            if idx <= 0 or idx >= len(self.queue_items):
-                continue
-            self.queue_items[idx - 1], self.queue_items[idx] = (
-                self.queue_items[idx],
-                self.queue_items[idx - 1],
-            )
-            moved = True
-        if moved:
-            self._refresh_queue_panel()
+        self._run_queue_controller.on_queue_move_up(self._queue_selection_rows())
 
     def _queue_move_down(self) -> None:
-        if self.queue_active:
-            return
-        indices = self._queue_selected_indices()
-        moved = False
-        for idx in reversed(indices):
-            if idx < 0 or idx >= len(self.queue_items) - 1:
-                continue
-            self.queue_items[idx + 1], self.queue_items[idx] = (
-                self.queue_items[idx],
-                self.queue_items[idx + 1],
-            )
-            moved = True
-        if moved:
-            self._refresh_queue_panel()
+        self._run_queue_controller.on_queue_move_down(self._queue_selection_rows())
 
     def _queue_clear(self) -> None:
-        if self.queue_active:
-            return
-        if not self.queue_items:
-            return
-        self.queue_items.clear()
-        self._refresh_queue_panel()
-        self._update_controls_state()
+        self._run_queue_controller.on_queue_clear()
 
     def _refresh_queue_panel(self) -> None:
         self.queue_list.clear()
@@ -2497,7 +1863,7 @@ class QtYtDlpGui(QMainWindow):
         if not path_raw:
             return
         path = Path(path_raw)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        self._effects.desktop.open_path(path)
 
     def _open_selected_history_folder(self) -> None:
         item = self._selected_history_item()
@@ -2507,7 +1873,7 @@ class QtYtDlpGui(QMainWindow):
         if not path_raw:
             return
         path = Path(path_raw)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+        self._effects.desktop.open_path(path.parent)
 
     def _clear_download_history(self) -> None:
         if not self.download_history:
@@ -2591,15 +1957,15 @@ class QtYtDlpGui(QMainWindow):
             self._reset_progress_summary()
 
     def _export_diagnostics(self) -> None:
-        timestamp = datetime.now()
+        timestamp = self._effects.clock.now()
         base_dir = Path(
             self.output_dir_edit.text().strip() or (Path.home() / "Downloads")
         ).expanduser()
         try:
-            base_dir.mkdir(parents=True, exist_ok=True)
+            self._effects.filesystem.ensure_dir(base_dir)
         except OSError:
             base_dir = Path.home() / "Downloads"
-            base_dir.mkdir(parents=True, exist_ok=True)
+            self._effects.filesystem.ensure_dir(base_dir)
 
         output_path = base_dir / f"yt-dlp-gui-diagnostics-{timestamp:%Y%m%d-%H%M%S}.txt"
         options = self._snapshot_download_options()
@@ -2621,13 +1987,13 @@ class QtYtDlpGui(QMainWindow):
             logs_text="\n".join(self._log_lines),
         )
         try:
-            output_path.write_text(payload, encoding="utf-8")
+            self._effects.filesystem.write_text(output_path, payload, encoding="utf-8")
         except OSError as exc:
-            QMessageBox.critical(self, "Diagnostics export failed", str(exc))
+            self._effects.dialogs.critical(self, "Diagnostics export failed", str(exc))
             return
         self._append_log(f"[diag] exported {output_path}")
         self._set_status("Diagnostics exported")
-        QMessageBox.information(
+        self._effects.dialogs.information(
             self, "Diagnostics exported", f"Saved to:\n{output_path}"
         )
 
@@ -2662,44 +2028,11 @@ class QtYtDlpGui(QMainWindow):
             audio_containers=AUDIO_CONTAINERS,
             video_containers=VIDEO_CONTAINERS,
         )
-
-        self.start_button.setEnabled(state.can_start_single)
-        self.add_queue_button.setEnabled(state.can_add_queue)
-        self.start_queue_button.setEnabled(state.can_start_queue)
-        self.cancel_button.setEnabled(state.can_cancel)
-
-        self.video_radio.setEnabled(state.mode_enabled)
-        self.audio_radio.setEnabled(state.mode_enabled)
-
-        self.container_combo.setEnabled(state.container_enabled)
-        self.codec_combo.setEnabled(state.codec_enabled)
-        self.convert_check.setEnabled(state.convert_enabled)
-        if not self.convert_check.isEnabled():
-            self.convert_check.setChecked(False)
-
-        self.format_combo.setEnabled(state.format_enabled)
-
-        self.playlist_items_edit.setEnabled(state.playlist_items_enabled)
-        self.filename_edit.setEnabled(state.filename_enabled)
-
-        self.url_edit.setEnabled(state.input_fields_enabled)
-        self.paste_button.setEnabled(state.input_fields_enabled)
-        self.browse_button.setEnabled(state.input_fields_enabled)
-        mixed_actions_enabled = state.input_fields_enabled and bool(self._pending_mixed_url)
-        self.use_single_video_url_button.setEnabled(mixed_actions_enabled)
-        self.use_playlist_url_button.setEnabled(mixed_actions_enabled)
-
-        self.subtitle_languages_edit.setEnabled(state.subtitle_controls_enabled)
-        self.write_subtitles_check.setEnabled(state.subtitle_controls_enabled)
-        self.embed_subtitles_check.setEnabled(state.embed_allowed)
-        if not state.embed_allowed:
-            self.embed_subtitles_check.setChecked(False)
-
-        self.audio_language_combo.setEnabled(state.input_fields_enabled)
-        self.network_timeout_edit.setEnabled(state.input_fields_enabled)
-        self.network_retries_edit.setEnabled(state.input_fields_enabled)
-        self.retry_backoff_edit.setEnabled(state.input_fields_enabled)
-        self.concurrent_fragments_edit.setEnabled(state.input_fields_enabled)
+        apply_control_state(
+            self,
+            state,
+            pending_mixed_url=self._pending_mixed_url,
+        )
 
         self._refresh_ready_summary()
         self._refresh_download_result_view()
@@ -2721,33 +2054,31 @@ class QtYtDlpGui(QMainWindow):
             event.accept()
             return
         if self._cancel_requested:
-            force_quit = QMessageBox.question(
+            force_quit = self._effects.dialogs.question(
                 self,
                 "Cancellation in progress",
                 (
                     "A download is still shutting down.\n\n"
                     "Force close now?"
                 ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                default_yes=False,
             )
-            if force_quit == QMessageBox.StandardButton.Yes:
+            if force_quit:
                 event.accept()
                 return
             event.ignore()
             return
 
-        choice = QMessageBox.question(
+        choice = self._effects.dialogs.question(
             self,
             "Download in progress",
             (
                 "A download is currently running.\n\n"
                 "Cancel the download and close when it stops?"
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            default_yes=True,
         )
-        if choice == QMessageBox.StandardButton.Yes:
+        if choice:
             self._close_after_cancel = True
             self._on_cancel()
         event.ignore()

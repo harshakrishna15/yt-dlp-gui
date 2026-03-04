@@ -43,6 +43,7 @@ def build_report_payload(
     logs_text: str,
 ) -> str:
     lines: list[str] = []
+    lines.append("[settings]")
     lines.append(f"generated_at={generated_at.isoformat(timespec='seconds')}")
     lines.append(f"status={status}")
     lines.append(f"simple_state={simple_state}")

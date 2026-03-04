@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Callable
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -18,178 +19,254 @@ from PySide6.QtWidgets import (
 from ..common import download
 from .widgets import _NativeComboBox
 
-if TYPE_CHECKING:
-    from .app import QtYtDlpGui
+
+@dataclass(frozen=True)
+class SettingsPanelRefs:
+    panel: QWidget
+    subtitle_languages_edit: QLineEdit
+    write_subtitles_check: QCheckBox
+    embed_subtitles_check: QCheckBox
+    audio_language_combo: _NativeComboBox
+    network_timeout_edit: QLineEdit
+    network_retries_edit: QLineEdit
+    retry_backoff_edit: QLineEdit
+    concurrent_fragments_edit: QLineEdit
+    edit_friendly_encoder_combo: _NativeComboBox
+    open_folder_after_download_check: QCheckBox
+    export_diagnostics_button: QPushButton
 
 
-def build_settings_panel(window: "QtYtDlpGui") -> QWidget:
-    panel = QWidget(window)
+@dataclass(frozen=True)
+class QueuePanelRefs:
+    panel: QWidget
+    queue_list: QListWidget
+    queue_remove_button: QPushButton
+    queue_move_up_button: QPushButton
+    queue_move_down_button: QPushButton
+    queue_clear_button: QPushButton
+
+
+@dataclass(frozen=True)
+class HistoryPanelRefs:
+    panel: QWidget
+    history_list: QListWidget
+    history_open_file_button: QPushButton
+    history_open_folder_button: QPushButton
+    history_clear_button: QPushButton
+
+
+@dataclass(frozen=True)
+class LogsPanelRefs:
+    panel: QWidget
+    logs_view: QPlainTextEdit
+    logs_clear_button: QPushButton
+
+
+def build_settings_panel(
+    *,
+    parent: QWidget,
+    register_native_combo: Callable[[_NativeComboBox], None],
+    on_update_controls_state: Callable[[], None],
+    on_export_diagnostics: Callable[[], None],
+) -> SettingsPanelRefs:
+    panel = QWidget(parent)
     layout = QFormLayout(panel)
     layout.setHorizontalSpacing(16)
     layout.setVerticalSpacing(10)
 
-    window.subtitle_languages_edit = QLineEdit(panel)
-    window.subtitle_languages_edit.setPlaceholderText("en,es")
-    window.subtitle_languages_edit.hide()
+    subtitle_languages_edit = QLineEdit(panel)
+    subtitle_languages_edit.setPlaceholderText("en,es")
+    subtitle_languages_edit.hide()
 
     subtitle_opts = QWidget(panel)
     subtitle_opts_layout = QHBoxLayout(subtitle_opts)
     subtitle_opts_layout.setContentsMargins(0, 0, 0, 0)
-    window.write_subtitles_check = QCheckBox("Write subtitles", subtitle_opts)
-    window.embed_subtitles_check = QCheckBox("Embed subtitles", subtitle_opts)
-    window.write_subtitles_check.stateChanged.connect(
-        lambda _v: window._update_controls_state()
+    write_subtitles_check = QCheckBox("Write subtitles", subtitle_opts)
+    embed_subtitles_check = QCheckBox("Embed subtitles", subtitle_opts)
+    write_subtitles_check.stateChanged.connect(
+        lambda _v: on_update_controls_state()
     )
-    window.embed_subtitles_check.stateChanged.connect(
-        lambda _v: window._update_controls_state()
+    embed_subtitles_check.stateChanged.connect(
+        lambda _v: on_update_controls_state()
     )
-    subtitle_opts_layout.addWidget(window.write_subtitles_check)
-    subtitle_opts_layout.addWidget(window.embed_subtitles_check)
+    subtitle_opts_layout.addWidget(write_subtitles_check)
+    subtitle_opts_layout.addWidget(embed_subtitles_check)
     subtitle_opts_layout.addStretch(1)
     subtitle_opts.hide()
 
-    window.audio_language_combo = _NativeComboBox(panel)
-    window._register_native_combo(window.audio_language_combo)
-    window.audio_language_combo.addItem("Any")
-    window.audio_language_combo.hide()
+    audio_language_combo = _NativeComboBox(panel)
+    register_native_combo(audio_language_combo)
+    audio_language_combo.addItem("Any")
+    audio_language_combo.hide()
 
     network_row = QWidget(panel)
     network_layout = QHBoxLayout(network_row)
     network_layout.setContentsMargins(0, 0, 0, 0)
-    window.network_timeout_edit = QLineEdit(
+    network_timeout_edit = QLineEdit(
         str(download.YDL_SOCKET_TIMEOUT_SECONDS), network_row
     )
-    window.network_timeout_edit.setMaximumWidth(100)
-    window.network_retries_edit = QLineEdit(
+    network_timeout_edit.setMaximumWidth(100)
+    network_retries_edit = QLineEdit(
         str(download.YDL_ATTEMPT_RETRIES), network_row
     )
-    window.network_retries_edit.setMaximumWidth(100)
-    window.retry_backoff_edit = QLineEdit(
+    network_retries_edit.setMaximumWidth(100)
+    retry_backoff_edit = QLineEdit(
         str(download.YDL_RETRY_BACKOFF_SECONDS), network_row
     )
-    window.retry_backoff_edit.setMaximumWidth(100)
-    window.concurrent_fragments_edit = QLineEdit(
+    retry_backoff_edit.setMaximumWidth(100)
+    concurrent_fragments_edit = QLineEdit(
         str(download.YDL_MAX_CONCURRENT_FRAGMENTS), network_row
     )
-    window.concurrent_fragments_edit.setMaximumWidth(100)
+    concurrent_fragments_edit.setMaximumWidth(100)
     network_layout.addWidget(QLabel("Timeout", network_row))
-    network_layout.addWidget(window.network_timeout_edit)
+    network_layout.addWidget(network_timeout_edit)
     network_layout.addWidget(QLabel("Retries", network_row))
-    network_layout.addWidget(window.network_retries_edit)
+    network_layout.addWidget(network_retries_edit)
     network_layout.addWidget(QLabel("Backoff", network_row))
-    network_layout.addWidget(window.retry_backoff_edit)
+    network_layout.addWidget(retry_backoff_edit)
     network_layout.addWidget(QLabel("Fragments", network_row))
-    network_layout.addWidget(window.concurrent_fragments_edit)
+    network_layout.addWidget(concurrent_fragments_edit)
     network_layout.addStretch(1)
     network_row.hide()
 
-    window.edit_friendly_encoder_combo = _NativeComboBox(panel)
-    window._register_native_combo(window.edit_friendly_encoder_combo)
-    window.edit_friendly_encoder_combo.addItem("Auto (recommended)", "auto")
-    window.edit_friendly_encoder_combo.addItem("Apple GPU (VideoToolbox)", "apple")
-    window.edit_friendly_encoder_combo.addItem("NVIDIA GPU (NVENC)", "nvidia")
-    window.edit_friendly_encoder_combo.addItem("AMD GPU (AMF)", "amd")
-    window.edit_friendly_encoder_combo.addItem("Intel GPU (QSV)", "intel")
-    window.edit_friendly_encoder_combo.addItem("CPU (libx264)", "cpu")
-    layout.addRow("Edit-friendly encode", window.edit_friendly_encoder_combo)
+    edit_friendly_encoder_combo = _NativeComboBox(panel)
+    register_native_combo(edit_friendly_encoder_combo)
+    edit_friendly_encoder_combo.addItem("Auto (recommended)", "auto")
+    edit_friendly_encoder_combo.addItem("Apple GPU (VideoToolbox)", "apple")
+    edit_friendly_encoder_combo.addItem("NVIDIA GPU (NVENC)", "nvidia")
+    edit_friendly_encoder_combo.addItem("AMD GPU (AMF)", "amd")
+    edit_friendly_encoder_combo.addItem("Intel GPU (QSV)", "intel")
+    edit_friendly_encoder_combo.addItem("CPU (libx264)", "cpu")
+    layout.addRow("Edit-friendly encode", edit_friendly_encoder_combo)
 
-    window.open_folder_after_download_check = QCheckBox(
+    open_folder_after_download_check = QCheckBox(
         "Open output folder after downloads", panel
     )
-    layout.addRow("Post-download", window.open_folder_after_download_check)
+    layout.addRow("Post-download", open_folder_after_download_check)
 
-    window.export_diagnostics_button = QPushButton("Export diagnostics", panel)
-    window.export_diagnostics_button.clicked.connect(window._export_diagnostics)
-    layout.addRow("", window.export_diagnostics_button)
-    return panel
+    export_diagnostics_button = QPushButton("Export diagnostics", panel)
+    export_diagnostics_button.clicked.connect(on_export_diagnostics)
+    layout.addRow("", export_diagnostics_button)
+    return SettingsPanelRefs(
+        panel=panel,
+        subtitle_languages_edit=subtitle_languages_edit,
+        write_subtitles_check=write_subtitles_check,
+        embed_subtitles_check=embed_subtitles_check,
+        audio_language_combo=audio_language_combo,
+        network_timeout_edit=network_timeout_edit,
+        network_retries_edit=network_retries_edit,
+        retry_backoff_edit=retry_backoff_edit,
+        concurrent_fragments_edit=concurrent_fragments_edit,
+        edit_friendly_encoder_combo=edit_friendly_encoder_combo,
+        open_folder_after_download_check=open_folder_after_download_check,
+        export_diagnostics_button=export_diagnostics_button,
+    )
 
 
-def build_queue_panel(window: "QtYtDlpGui") -> QWidget:
-    panel = QWidget(window)
+def build_queue_panel(
+    *,
+    parent: QWidget,
+    on_remove_selected: Callable[[], None],
+    on_move_up: Callable[[], None],
+    on_move_down: Callable[[], None],
+    on_clear: Callable[[], None],
+) -> QueuePanelRefs:
+    panel = QWidget(parent)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(8)
 
-    window.queue_list = QListWidget(panel)
-    window.queue_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-    layout.addWidget(window.queue_list)
+    queue_list = QListWidget(panel)
+    queue_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+    layout.addWidget(queue_list)
 
     actions = QWidget(panel)
     actions_layout = QHBoxLayout(actions)
     actions_layout.setContentsMargins(0, 0, 0, 0)
-    window.queue_remove_button = QPushButton("Remove", actions)
-    window.queue_move_up_button = QPushButton("Move up", actions)
-    window.queue_move_down_button = QPushButton("Move down", actions)
-    window.queue_clear_button = QPushButton("Clear", actions)
-    window.queue_remove_button.clicked.connect(window._queue_remove_selected)
-    window.queue_move_up_button.clicked.connect(window._queue_move_up)
-    window.queue_move_down_button.clicked.connect(window._queue_move_down)
-    window.queue_clear_button.clicked.connect(window._queue_clear)
-    actions_layout.addWidget(window.queue_remove_button)
-    actions_layout.addWidget(window.queue_move_up_button)
-    actions_layout.addWidget(window.queue_move_down_button)
-    actions_layout.addWidget(window.queue_clear_button)
+    queue_remove_button = QPushButton("Remove", actions)
+    queue_move_up_button = QPushButton("Move up", actions)
+    queue_move_down_button = QPushButton("Move down", actions)
+    queue_clear_button = QPushButton("Clear", actions)
+    queue_remove_button.clicked.connect(on_remove_selected)
+    queue_move_up_button.clicked.connect(on_move_up)
+    queue_move_down_button.clicked.connect(on_move_down)
+    queue_clear_button.clicked.connect(on_clear)
+    actions_layout.addWidget(queue_remove_button)
+    actions_layout.addWidget(queue_move_up_button)
+    actions_layout.addWidget(queue_move_down_button)
+    actions_layout.addWidget(queue_clear_button)
     actions_layout.addStretch(1)
     layout.addWidget(actions)
-    window._set_uniform_button_width(
-        [
-            window.queue_remove_button,
-            window.queue_move_up_button,
-            window.queue_move_down_button,
-            window.queue_clear_button,
-        ],
-        extra_px=24,
+    return QueuePanelRefs(
+        panel=panel,
+        queue_list=queue_list,
+        queue_remove_button=queue_remove_button,
+        queue_move_up_button=queue_move_up_button,
+        queue_move_down_button=queue_move_down_button,
+        queue_clear_button=queue_clear_button,
     )
-    return panel
 
 
-def build_history_panel(window: "QtYtDlpGui") -> QWidget:
-    panel = QWidget(window)
+def build_history_panel(
+    *,
+    parent: QWidget,
+    on_open_file: Callable[[], None],
+    on_open_folder: Callable[[], None],
+    on_clear: Callable[[], None],
+) -> HistoryPanelRefs:
+    panel = QWidget(parent)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(8)
 
-    window.history_list = QListWidget(panel)
-    window.history_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-    layout.addWidget(window.history_list)
+    history_list = QListWidget(panel)
+    history_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+    layout.addWidget(history_list)
 
     actions = QWidget(panel)
     actions_layout = QHBoxLayout(actions)
     actions_layout.setContentsMargins(0, 0, 0, 0)
-    window.history_open_file_button = QPushButton("Open file", actions)
-    window.history_open_folder_button = QPushButton("Open folder", actions)
-    window.history_clear_button = QPushButton("Clear", actions)
-    window.history_open_file_button.clicked.connect(window._open_selected_history_file)
-    window.history_open_folder_button.clicked.connect(window._open_selected_history_folder)
-    window.history_clear_button.clicked.connect(window._clear_download_history)
-    actions_layout.addWidget(window.history_open_file_button)
-    actions_layout.addWidget(window.history_open_folder_button)
-    actions_layout.addWidget(window.history_clear_button)
+    history_open_file_button = QPushButton("Open file", actions)
+    history_open_folder_button = QPushButton("Open folder", actions)
+    history_clear_button = QPushButton("Clear", actions)
+    history_open_file_button.clicked.connect(on_open_file)
+    history_open_folder_button.clicked.connect(on_open_folder)
+    history_clear_button.clicked.connect(on_clear)
+    actions_layout.addWidget(history_open_file_button)
+    actions_layout.addWidget(history_open_folder_button)
+    actions_layout.addWidget(history_clear_button)
     actions_layout.addStretch(1)
     layout.addWidget(actions)
-    window._set_uniform_button_width(
-        [
-            window.history_open_file_button,
-            window.history_open_folder_button,
-            window.history_clear_button,
-        ],
-        extra_px=24,
+    return HistoryPanelRefs(
+        panel=panel,
+        history_list=history_list,
+        history_open_file_button=history_open_file_button,
+        history_open_folder_button=history_open_folder_button,
+        history_clear_button=history_clear_button,
     )
-    return panel
 
 
-def build_logs_panel(window: "QtYtDlpGui", *, max_lines: int) -> QWidget:
-    panel = QWidget(window)
+def build_logs_panel(
+    *,
+    parent: QWidget,
+    max_lines: int,
+    on_clear_logs: Callable[[], None],
+) -> LogsPanelRefs:
+    panel = QWidget(parent)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(8)
 
-    window.logs_view = QPlainTextEdit(panel)
-    window.logs_view.setReadOnly(True)
-    window.logs_view.setMaximumBlockCount(max_lines)
-    layout.addWidget(window.logs_view)
+    logs_view = QPlainTextEdit(panel)
+    logs_view.setReadOnly(True)
+    logs_view.setMaximumBlockCount(max_lines)
+    layout.addWidget(logs_view)
 
-    window.logs_clear_button = QPushButton("Clear logs", panel)
-    window.logs_clear_button.clicked.connect(window._clear_logs)
-    layout.addWidget(window.logs_clear_button)
-    return panel
+    logs_clear_button = QPushButton("Clear logs", panel)
+    logs_clear_button.clicked.connect(on_clear_logs)
+    layout.addWidget(logs_clear_button)
+    return LogsPanelRefs(
+        panel=panel,
+        logs_view=logs_view,
+        logs_clear_button=logs_clear_button,
+    )

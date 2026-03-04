@@ -100,3 +100,69 @@ def next_non_empty_queue_index(
 
 def queue_item(url: str, settings: QueueSettings) -> QueueItem:
     return {"url": str(url), "settings": settings}
+
+
+def normalize_selected_indices(
+    selected_indices: Sequence[int],
+    *,
+    queue_length: int,
+) -> list[int]:
+    max_length = max(0, int(queue_length))
+    unique: set[int] = set()
+    normalized: list[int] = []
+    for raw in selected_indices:
+        idx = int(raw)
+        if idx < 0 or idx >= max_length or idx in unique:
+            continue
+        unique.add(idx)
+        normalized.append(idx)
+    normalized.sort()
+    return normalized
+
+
+def remove_selected_queue_items(
+    queue_items: Sequence[QueueItem | Mapping[str, Any]],
+    selected_indices: Sequence[int],
+) -> list[QueueItem]:
+    items: list[QueueItem] = [dict(item or {}) for item in queue_items]
+    for idx in sorted(set(int(i) for i in selected_indices), reverse=True):
+        if 0 <= idx < len(items):
+            items.pop(idx)
+    return items
+
+
+def move_selected_queue_items_up(
+    queue_items: Sequence[QueueItem | Mapping[str, Any]],
+    selected_indices: Sequence[int],
+) -> tuple[list[QueueItem], bool]:
+    items: list[QueueItem] = [dict(item or {}) for item in queue_items]
+    moved = False
+    for idx in normalize_selected_indices(selected_indices, queue_length=len(items)):
+        if idx <= 0 or idx >= len(items):
+            continue
+        items[idx - 1], items[idx] = items[idx], items[idx - 1]
+        moved = True
+    return items, moved
+
+
+def move_selected_queue_items_down(
+    queue_items: Sequence[QueueItem | Mapping[str, Any]],
+    selected_indices: Sequence[int],
+) -> tuple[list[QueueItem], bool]:
+    items: list[QueueItem] = [dict(item or {}) for item in queue_items]
+    moved = False
+    ordered = normalize_selected_indices(selected_indices, queue_length=len(items))
+    for idx in reversed(ordered):
+        if idx < 0 or idx >= len(items) - 1:
+            continue
+        items[idx + 1], items[idx] = items[idx], items[idx + 1]
+        moved = True
+    return items, moved
+
+
+def clear_queue_items(
+    queue_items: Sequence[QueueItem | Mapping[str, Any]],
+) -> tuple[list[QueueItem], bool]:
+    if not queue_items:
+        return [], False
+    return [], True

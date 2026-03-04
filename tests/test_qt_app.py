@@ -1,5 +1,7 @@
 import os
+import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +17,6 @@ try:
         QCheckBox,
         QComboBox,
         QLineEdit,
-        QMessageBox,
         QPushButton,
         QRadioButton,
         QWidget,
@@ -583,10 +584,7 @@ class TestQtApp(unittest.TestCase):
         self.window._cancel_event = threading.Event()
 
         event = QCloseEvent()
-        with patch(
-            "gui.qt.app.QMessageBox.question",
-            return_value=QMessageBox.StandardButton.Yes,
-        ):
+        with patch.object(self.window._effects.dialogs, "question", return_value=True):
             self.window.closeEvent(event)
 
         self.assertFalse(event.isAccepted())
@@ -743,6 +741,167 @@ class TestQtApp(unittest.TestCase):
 
         self.assertFalse(self.window._logs_alert_active)
         self.assertFalse(self.window.logs_button.icon().isNull())
+
+    def test_start_queue_download_sets_queue_run_state_and_starts_next_item(self) -> None:
+        self.window.queue_items = [
+            {
+                "url": "https://example.com/watch?v=1",
+                "settings": {
+                    "mode": "audio",
+                    "format_filter": "mp3",
+                    "format_label": "High",
+                },
+            }
+        ]
+
+        with patch.object(
+            self.window._run_queue_controller, "start_next_queue_item"
+        ) as start_next:
+            self.window._start_queue_download()
+
+        self.assertTrue(self.window.queue_active)
+        self.assertEqual(self.window.queue_index, 0)
+        self.assertTrue(self.window._is_downloading)
+        self.assertTrue(self.window._show_progress_item)
+        self.assertFalse(self.window._cancel_requested)
+        self.assertIsNotNone(self.window._cancel_event)
+        self.assertEqual(self.window.status_value.text(), "Downloading queue...")
+        start_next.assert_called_once()
+
+    def test_start_queue_download_invalid_settings_shows_error(self) -> None:
+        self.window.queue_items = [
+            {
+                "url": "https://example.com/watch?v=1",
+                "settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "format_label": "1080p",
+                },
+            }
+        ]
+
+        with patch.object(self.window._effects.dialogs, "critical") as critical_mock:
+            self.window._start_queue_download()
+
+        self.assertFalse(self.window.queue_active)
+        self.assertFalse(self.window._is_downloading)
+        critical_mock.assert_called_once()
+
+    def test_on_queue_item_done_finishes_when_last_item_completes(self) -> None:
+        self.window.queue_items = [
+            {
+                "url": "https://example.com/watch?v=1",
+                "settings": {
+                    "mode": "audio",
+                    "format_filter": "mp3",
+                    "format_label": "High",
+                },
+            }
+        ]
+        self.window.queue_active = True
+        self.window.queue_index = 0
+        self.window._queue_failed_items = 0
+        self.window._cancel_requested = False
+
+        with patch.object(self.window._run_queue_controller, "finish_queue") as finish_mock:
+            self.window._on_queue_item_done(had_error=False, cancelled=False)
+
+        finish_mock.assert_called_once_with(cancelled=False)
+
+    def test_run_queue_download_worker_runs_download_request(self) -> None:
+        settings = {
+            "mode": "audio",
+            "format_filter": "mp3",
+            "format_label": "High",
+        }
+        request = {
+            "url": "https://example.com/watch?v=1",
+            "output_dir": Path("/tmp"),
+            "fmt_info": {},
+            "fmt_label": "High",
+            "format_filter": "mp3",
+            "convert_to_mp4": False,
+            "playlist_enabled": False,
+            "playlist_items": None,
+            "network_timeout_s": 20,
+            "network_retries": 1,
+            "retry_backoff_s": 1.5,
+            "concurrent_fragments": 2,
+            "subtitle_languages": [],
+            "write_subtitles": False,
+            "embed_subtitles": False,
+            "audio_language": "",
+            "custom_filename": "",
+            "edit_friendly_encoder": "auto",
+        }
+
+        with patch.object(
+            self.window._run_queue_controller,
+            "resolve_format_for_url",
+            return_value={"title": "Example"},
+        ) as resolve_mock:
+            with patch(
+                "gui.qt.controllers.app_service.build_queue_download_request",
+                return_value=request,
+            ) as request_mock:
+                with patch(
+                    "gui.qt.controllers.app_service.run_download_request",
+                    return_value=download.DOWNLOAD_SUCCESS,
+                ) as run_mock:
+                    self.window._run_queue_download_worker(
+                        url="https://example.com/watch?v=1",
+                        settings=settings,
+                        index=1,
+                        total=1,
+                        default_output_dir="/tmp",
+                    )
+
+        resolve_mock.assert_called_once()
+        request_mock.assert_called_once()
+        run_mock.assert_called_once()
+
+    def test_finish_queue_cancelled_resets_flags(self) -> None:
+        self.window.queue_active = True
+        self.window.queue_index = 1
+        self.window._queue_failed_items = 2
+        self.window._queue_started_ts = time.time() - 5
+        self.window._is_downloading = True
+        self.window._show_progress_item = True
+        self.window._cancel_requested = True
+        self.window._cancel_event = threading.Event()
+        self.window._set_last_output_path(Path("/tmp/test-video.mp4"))
+
+        with patch.object(self.window, "_maybe_open_output_folder") as open_folder_mock:
+            self.window._finish_queue(cancelled=True)
+
+        self.assertFalse(self.window.queue_active)
+        self.assertIsNone(self.window.queue_index)
+        self.assertFalse(self.window._is_downloading)
+        self.assertFalse(self.window._show_progress_item)
+        self.assertFalse(self.window._cancel_requested)
+        self.assertIsNone(self.window._cancel_event)
+        self.assertEqual(self.window.status_value.text(), "Queue cancelled")
+        self.assertIsNone(self.window._latest_output_path)
+        open_folder_mock.assert_not_called()
+
+    def test_export_diagnostics_writes_report_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self.window.output_dir_edit.setText(tmp_dir)
+            self.window.url_edit.setText("https://example.com/watch?v=abc123")
+            self.window._log_lines = ["line one", "line two"]
+
+            with patch.object(self.window._effects.dialogs, "information") as info_mock:
+                self.window._export_diagnostics()
+
+            outputs = list(Path(tmp_dir).glob("yt-dlp-gui-diagnostics-*.txt"))
+            self.assertEqual(len(outputs), 1)
+            payload = outputs[0].read_text(encoding="utf-8")
+            self.assertIn("[settings]", payload)
+            self.assertIn("[logs]", payload)
+            self.assertIn("line one", payload)
+            self.assertTrue(any(line.startswith("[diag] exported ") for line in self.window._log_lines))
+            self.assertEqual(self.window.status_value.text(), "Diagnostics exported")
+            info_mock.assert_called_once()
 
 
 if __name__ == "__main__":
