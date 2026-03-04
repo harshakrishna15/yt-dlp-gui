@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QPlainTextEdit,
     QStackedWidget,
@@ -73,7 +74,6 @@ MIN_WINDOW_HEIGHT = 760
 SOURCE_DETAILS_NONE_INDEX = 0
 SOURCE_DETAILS_PROMPT_INDEX = 1
 SOURCE_DETAILS_PLAYLIST_INDEX = 2
-SAMPLE_VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 TOP_ACTION_ICON_PX = 16
 
 
@@ -138,11 +138,13 @@ class QtYtDlpGui(QMainWindow):
 
         self._log_lines: list[str] = []
         self._last_error_log = ""
+        self._last_source_feedback_log: tuple[str, str] | None = None
         self._active_panel_name: str | None = None
         self._applying_user_settings = False
         self._latest_output_path: Path | None = None
         self._current_item_progress = "-"
         self._current_item_title = "-"
+        self._current_item_title_tooltip = "-"
 
         self._build_ui()
         self._update_source_details_visibility()
@@ -159,13 +161,13 @@ class QtYtDlpGui(QMainWindow):
         root.setObjectName("appRoot")
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(20, 18, 20, 18)
+        root_layout.setContentsMargins(20, 16, 20, 16)
         root_layout.setSpacing(12)
 
         header = QWidget(self)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(12)
+        header_layout.setSpacing(16)
 
         brand_col = QWidget(header)
         brand_layout = QVBoxLayout(brand_col)
@@ -181,12 +183,12 @@ class QtYtDlpGui(QMainWindow):
         self.top_actions = QWidget(header)
         top_actions_layout = QHBoxLayout(self.top_actions)
         top_actions_layout.setContentsMargins(0, 0, 0, 0)
-        top_actions_layout.setSpacing(6)
+        top_actions_layout.setSpacing(8)
 
         self.classic_actions = QWidget(self.top_actions)
         classic_layout = QHBoxLayout(self.classic_actions)
         classic_layout.setContentsMargins(0, 0, 0, 0)
-        classic_layout.setSpacing(6)
+        classic_layout.setSpacing(8)
         self.downloads_button = QPushButton("Downloads", self.classic_actions)
         self.queue_button = QPushButton("Queue", self.classic_actions)
         self.history_button = QPushButton("History", self.classic_actions)
@@ -200,6 +202,7 @@ class QtYtDlpGui(QMainWindow):
             self.settings_button,
         ):
             button.setCheckable(True)
+            button.setObjectName("topNavButton")
             classic_layout.addWidget(button)
 
         top_actions_layout.addWidget(self.classic_actions)
@@ -257,27 +260,38 @@ class QtYtDlpGui(QMainWindow):
         self.mixed_url_overlay_layout.addStretch(1)
         self.mixed_url_overlay.hide()
 
-        self.main_page = QWidget(self.panel_stack)
+        self.main_scroll = QScrollArea(self.panel_stack)
+        self.main_scroll.setObjectName("downloadsScrollArea")
+        self.main_scroll.setWidgetResizable(True)
+        self.main_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.main_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.main_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        self.main_page = QWidget(self.main_scroll)
         main_layout = QVBoxLayout(self.main_page)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(6)
+        main_layout.setSpacing(14)
 
-        source = QGroupBox("1. Source", self.main_page)
+        source = QGroupBox("Video Source", self.main_page)
         source.setObjectName("sourceSection")
         source_layout = QFormLayout(source)
-        source_layout.setContentsMargins(10, 12, 10, 8)
+        source_layout.setContentsMargins(0, 0, 0, 0)
         source_layout.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         source_layout.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
         source_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        source_layout.setHorizontalSpacing(14)
-        source_layout.setVerticalSpacing(8)
+        source_layout.setHorizontalSpacing(16)
+        source_layout.setVerticalSpacing(6)
 
         url_row = QWidget(source)
         url_row_layout = QHBoxLayout(url_row)
         url_row_layout.setContentsMargins(0, 0, 0, 0)
-        url_row_layout.setSpacing(8)
+        url_row_layout.setSpacing(12)
         self.url_edit = QLineEdit(source)
         self.url_edit.setPlaceholderText("Paste video or playlist URL (YouTube, Vimeo, etc.)")
         self.url_edit.textChanged.connect(self._on_url_changed)
@@ -287,25 +301,9 @@ class QtYtDlpGui(QMainWindow):
         url_row_layout.addWidget(self.url_edit, stretch=1)
         url_row_layout.addWidget(self.paste_button)
         source_layout.addRow("Video URL", url_row)
-
-        sample_row = QWidget(source)
-        sample_row_layout = QHBoxLayout(sample_row)
-        sample_row_layout.setContentsMargins(0, 0, 0, 0)
-        sample_row_layout.setSpacing(8)
-        sample_hint = QLabel("Need a quick test link?", sample_row)
-        sample_hint.setObjectName("sourceHelperHint")
-        self.sample_url_button = QPushButton("Use sample URL", sample_row)
-        self.sample_url_button.setObjectName("ghostButton")
-        self.sample_url_button.clicked.connect(self._populate_sample_url)
-        sample_row_layout.addWidget(sample_hint)
-        sample_row_layout.addWidget(self.sample_url_button)
-        sample_row_layout.addStretch(1)
-        source_layout.addRow("", sample_row)
-
-        self.source_feedback_label = QLabel(source)
-        self.source_feedback_label.setObjectName("sourceFeedback")
-        self.source_feedback_label.setWordWrap(True)
-        source_layout.addRow("", self.source_feedback_label)
+        source_url_label = source_layout.labelForField(url_row)
+        if isinstance(source_url_label, QLabel):
+            source_url_label.setObjectName("sectionFormLabel")
 
         self.source_details_host = QWidget(source)
         self.source_details_host.setSizePolicy(
@@ -327,50 +325,53 @@ class QtYtDlpGui(QMainWindow):
 
         self.playlist_items_panel = QWidget(self.source_details_stack)
         playlist_items_layout = QHBoxLayout(self.playlist_items_panel)
-        playlist_items_layout.setContentsMargins(0, 4, 0, 4)
-        playlist_items_layout.setSpacing(10)
-        self.playlist_items_label = QLabel("Playlist items", self.playlist_items_panel)
-        self.playlist_items_label.setMinimumWidth(96)
-        self.playlist_items_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        playlist_items_layout.setContentsMargins(0, 1, 0, 1)
+        playlist_items_layout.setSpacing(0)
         self.playlist_items_edit = QLineEdit(self.playlist_items_panel)
         self.playlist_items_edit.setPlaceholderText("Optional: 1-5,7,10-")
         self.playlist_items_edit.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        playlist_items_layout.addWidget(self.playlist_items_label)
         playlist_items_layout.addWidget(self.playlist_items_edit, stretch=1)
         self.source_details_stack.addWidget(self.playlist_items_panel)
         self._sync_source_details_height()
 
         self.preview_value = QLabel("-", source)
         self.preview_value.setWordWrap(False)
-        self.preview_value.setMinimumHeight(30)
+        self.preview_value.setMinimumHeight(24)
+        self.preview_value.setMargin(3)
         self.preview_title_label = QLabel("Preview title", source)
-        source_layout.addRow(self.preview_title_label, self.preview_value)
-        source_layout.addRow("", self.source_details_host)
+        self.preview_title_label.setObjectName("sectionFormLabel")
+        preview_value_row = QWidget(source)
+        preview_value_layout = QHBoxLayout(preview_value_row)
+        preview_value_layout.setContentsMargins(6, 2, 0, 2)
+        preview_value_layout.setSpacing(0)
+        preview_value_layout.addWidget(self.preview_value)
+        source_layout.addRow(self.preview_title_label, preview_value_row)
+        self.source_details_label = QLabel("", source)
+        self.source_details_label.setObjectName("sectionFormLabel")
+        source_layout.addRow(self.source_details_label, self.source_details_host)
         main_layout.addWidget(source)
 
-        self.output_section = QGroupBox("2. Output", self.main_page)
+        self.output_section = QGroupBox("Export Settings", self.main_page)
         self.output_section.setObjectName("outputSection")
         self.output_layout = QGridLayout(self.output_section)
-        self.output_layout.setContentsMargins(8, 8, 8, 6)
-        self.output_layout.setHorizontalSpacing(12)
-        self.output_layout.setVerticalSpacing(8)
-        self.output_layout.setColumnStretch(0, 1)
-        self.output_layout.setColumnStretch(1, 1)
+        self.output_layout.setContentsMargins(0, 0, 0, 0)
+        self.output_layout.setHorizontalSpacing(22)
+        self.output_layout.setVerticalSpacing(12)
+        self.output_layout.setColumnStretch(0, 5)
+        self.output_layout.setColumnStretch(1, 4)
 
         self.format_card = QGroupBox("Format setup", self.output_section)
         self.format_card.setObjectName("formatSection")
         self.format_layout = QVBoxLayout(self.format_card)
-        self.format_layout.setContentsMargins(8, 8, 8, 6)
-        self.format_layout.setSpacing(7)
+        self.format_layout.setContentsMargins(0, 2, 0, 0)
+        self.format_layout.setSpacing(8)
 
         mode_row = QWidget(self.format_card)
         self.mode_row_layout = QHBoxLayout(mode_row)
         self.mode_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.mode_row_layout.setSpacing(8)
+        self.mode_row_layout.setSpacing(10)
         self.video_radio = QRadioButton("Video and Audio", mode_row)
         self.audio_radio = QRadioButton("Audio only", mode_row)
         self.video_radio.toggled.connect(self._on_mode_change)
@@ -420,6 +421,8 @@ class QtYtDlpGui(QMainWindow):
             self.codec_label,
             self.format_label,
         ]
+        for label in self._output_form_labels:
+            label.setObjectName("outputFormLabel")
         self._output_form_rows: list[QWidget] = []
 
         def _add_output_row(
@@ -447,8 +450,8 @@ class QtYtDlpGui(QMainWindow):
         self.save_card = QGroupBox("Save options", self.output_section)
         self.save_card.setObjectName("saveSection")
         self.save_layout = QVBoxLayout(self.save_card)
-        self.save_layout.setContentsMargins(8, 8, 8, 6)
-        self.save_layout.setSpacing(8)
+        self.save_layout.setContentsMargins(0, 2, 0, 0)
+        self.save_layout.setSpacing(12)
         self.filename_edit = QLineEdit(self.save_card)
         self.filename_edit.setPlaceholderText("Optional single-video filename")
         self.file_name_label = QLabel("File name", self.save_card)
@@ -457,7 +460,7 @@ class QtYtDlpGui(QMainWindow):
         folder_row = QWidget(self.save_card)
         self.folder_row_layout = QHBoxLayout(folder_row)
         self.folder_row_layout.setContentsMargins(0, 0, 0, 0)
-        self.folder_row_layout.setSpacing(8)
+        self.folder_row_layout.setSpacing(10)
         self.output_dir_edit = QLineEdit(str(Path.home() / "Downloads"), self.save_card)
         self.output_dir_edit.setReadOnly(True)
         self.browse_button = QPushButton("Browse...", self.save_card)
@@ -471,7 +474,7 @@ class QtYtDlpGui(QMainWindow):
             block = QWidget(self.save_card)
             block_layout = QVBoxLayout(block)
             block_layout.setContentsMargins(0, 0, 0, 0)
-            block_layout.setSpacing(4)
+            block_layout.setSpacing(9)
             block_layout.addWidget(label)
             block_layout.addWidget(field)
             self.save_layout.addWidget(block)
@@ -479,17 +482,22 @@ class QtYtDlpGui(QMainWindow):
         _add_save_block(self.file_name_label, self.filename_edit)
         _add_save_block(self.output_folder_label, folder_row)
         self.save_layout.addStretch(1)
-        self._set_output_form_label_width(min_width=96)
+        self._set_output_form_label_width(min_width=112)
 
         self.output_layout.addWidget(self.format_card, 0, 0)
         self.output_layout.addWidget(self.save_card, 0, 1)
         main_layout.addWidget(self.output_section)
 
-        run = QGroupBox("3. Run", self.main_page)
+        run_divider = QFrame(self.main_page)
+        run_divider.setObjectName("sectionDivider")
+        run_divider.setFixedHeight(1)
+        main_layout.addWidget(run_divider)
+
+        run = QGroupBox("Start Download", self.main_page)
         run.setObjectName("runSection")
         run_layout = QVBoxLayout(run)
-        run_layout.setContentsMargins(10, 12, 10, 8)
-        run_layout.setSpacing(6)
+        run_layout.setContentsMargins(0, 2, 0, 2)
+        run_layout.setSpacing(8)
         self.status_value = QLabel("Idle", run)
         self.status_value.setObjectName("statusLine")
         self.status_value.setVisible(False)
@@ -504,7 +512,7 @@ class QtYtDlpGui(QMainWindow):
         buttons_row = QWidget(run)
         buttons_layout = QHBoxLayout(buttons_row)
         buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(8)
+        buttons_layout.setSpacing(10)
 
         self.start_button = QPushButton("Download", buttons_row)
         self.start_button.setObjectName("primaryActionButton")
@@ -522,6 +530,13 @@ class QtYtDlpGui(QMainWindow):
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addStretch(1)
         run_layout.addWidget(buttons_row)
+
+        self.ready_summary_label = QLabel("", run)
+        self.ready_summary_label.setObjectName("readySummaryLine")
+        self.ready_summary_label.setToolTip(
+            "Current output summary based on selected format and save folder."
+        )
+        run_layout.addWidget(self.ready_summary_label)
 
         self.metrics_strip = QFrame(run)
         self.metrics_strip.setObjectName("metricsStrip")
@@ -549,7 +564,7 @@ class QtYtDlpGui(QMainWindow):
         self.download_result_card.setObjectName("downloadResultCard")
         self.download_result_card.setProperty("state", "info")
         result_layout = QHBoxLayout(self.download_result_card)
-        result_layout.setContentsMargins(10, 6, 10, 6)
+        result_layout.setContentsMargins(12, 8, 12, 8)
         result_layout.setSpacing(10)
         self.download_result_title = QLabel("Download info:", self.download_result_card)
         self.download_result_title.setObjectName("downloadResultTitle")
@@ -582,7 +597,7 @@ class QtYtDlpGui(QMainWindow):
         result_actions = QWidget(self.download_result_card)
         result_actions_layout = QHBoxLayout(result_actions)
         result_actions_layout.setContentsMargins(0, 0, 0, 0)
-        result_actions_layout.setSpacing(8)
+        result_actions_layout.setSpacing(10)
         self.open_last_output_folder_button = QPushButton("Open folder", result_actions)
         self.open_last_output_folder_button.clicked.connect(self._open_last_output_folder)
         self.copy_output_path_button = QPushButton("Copy path", result_actions)
@@ -599,7 +614,8 @@ class QtYtDlpGui(QMainWindow):
         main_layout.addWidget(run)
         main_layout.addStretch(1)
 
-        self._main_page_index = self.panel_stack.addWidget(self.main_page)
+        self.main_scroll.setWidget(self.main_page)
+        self._main_page_index = self.panel_stack.addWidget(self.main_scroll)
 
         settings_panel = self._build_settings_panel()
         queue_panel = self._build_queue_panel()
@@ -644,7 +660,6 @@ class QtYtDlpGui(QMainWindow):
             "Paste a video or playlist URL to load available formats.",
             tone="neutral",
         )
-        self._reserve_source_feedback_height()
 
     def _register_native_combo(self, combo: QComboBox) -> None:
         combo.setMinimumHeight(27)
@@ -707,7 +722,7 @@ class QtYtDlpGui(QMainWindow):
             return
         width = max(min_width, max(label.sizeHint().width() for label in labels))
         for label in labels:
-            label.setMinimumWidth(width)
+            label.setFixedWidth(width)
             label.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
@@ -733,7 +748,7 @@ class QtYtDlpGui(QMainWindow):
 
     def _normalize_control_sizing(self) -> None:
         metrics = QFontMetrics(self.font())
-        control_height = max(27, metrics.height() + 7)
+        control_height = max(29, metrics.height() + 9)
         toggle_height = max(20, control_height - 7)
         for edit in (
             self.url_edit,
@@ -766,7 +781,6 @@ class QtYtDlpGui(QMainWindow):
             self.use_single_video_url_button,
             self.use_playlist_url_button,
             self.browse_button,
-            self.sample_url_button,
             self.start_button,
             self.add_queue_button,
             self.start_queue_button,
@@ -784,6 +798,7 @@ class QtYtDlpGui(QMainWindow):
             self.logs_clear_button,
         ):
             button.setMinimumHeight(control_height)
+        self.start_button.setMinimumHeight(control_height + 4)
 
         for toggle in (
             self.video_radio,
@@ -806,7 +821,7 @@ class QtYtDlpGui(QMainWindow):
                 self.history_button,
                 self.logs_button,
             ],
-            extra_px=26,
+            extra_px=18,
         )
         self._set_uniform_button_width(
             [
@@ -832,7 +847,7 @@ class QtYtDlpGui(QMainWindow):
             extra_px=18,
         )
 
-        self._set_output_form_label_width(min_width=96)
+        self._set_output_form_label_width(min_width=112)
         self._normalize_input_widths()
 
     def _normalize_input_widths(self) -> None:
@@ -864,7 +879,7 @@ class QtYtDlpGui(QMainWindow):
             self.save_card.setMinimumWidth(0)
             self.save_card.setMaximumWidth(16777215)
         else:
-            save_card_width = max(290, min(390, int(width * 0.34)))
+            save_card_width = max(350, min(540, int(width * 0.40)))
             self.save_card.setMinimumWidth(save_card_width)
             self.save_card.setMaximumWidth(save_card_width)
 
@@ -875,22 +890,22 @@ class QtYtDlpGui(QMainWindow):
             self.output_layout.addWidget(self.save_card, 1, 0)
             self.output_layout.setColumnStretch(0, 1)
             self.output_layout.setColumnStretch(1, 0)
-            self.output_layout.setHorizontalSpacing(8)
-            self.output_layout.setVerticalSpacing(8)
+            self.output_layout.setHorizontalSpacing(0)
+            self.output_layout.setVerticalSpacing(14)
         else:
             self.output_layout.addWidget(self.format_card, 0, 0)
             self.output_layout.addWidget(self.save_card, 0, 1)
-            self.output_layout.setColumnStretch(0, 1)
-            self.output_layout.setColumnStretch(1, 0)
-            self.output_layout.setHorizontalSpacing(14)
-            self.output_layout.setVerticalSpacing(8)
+            self.output_layout.setColumnStretch(0, 5)
+            self.output_layout.setColumnStretch(1, 4)
+            self.output_layout.setHorizontalSpacing(22)
+            self.output_layout.setVerticalSpacing(12)
 
-        self.format_layout.setSpacing(7)
-        self.save_layout.setSpacing(8)
-        self._set_output_form_label_width(min_width=96)
+        self.format_layout.setSpacing(8)
+        self.save_layout.setSpacing(12)
+        self._set_output_form_label_width(min_width=112)
         self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self.folder_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.folder_row_layout.setSpacing(8)
+        self.folder_row_layout.setSpacing(10)
         self.folder_row_layout.setStretch(0, 1)
 
     def _apply_responsive_layout(self) -> None:
@@ -981,10 +996,6 @@ class QtYtDlpGui(QMainWindow):
 
         self.logs_view.setToolTip("Download logs.")
         self.logs_clear_button.setToolTip("Clear logs.")
-        self.sample_url_button.setToolTip("Fill a sample URL for quick testing.")
-        self.source_feedback_label.setToolTip(
-            "Current source URL validation and format-loading feedback."
-        )
         self.open_last_output_folder_button.setToolTip(
             "Open the folder containing the latest downloaded file."
         )
@@ -1006,19 +1017,24 @@ class QtYtDlpGui(QMainWindow):
             if tone in {"neutral", "loading", "success", "warning", "error", "hidden"}
             else "neutral"
         )
-        self.source_feedback_label.setText(str(text or "").strip())
-        if self.source_feedback_label.property("tone") != tone_value:
-            self.source_feedback_label.setProperty("tone", tone_value)
-            self._refresh_widget_style(self.source_feedback_label)
-
-    def _reserve_source_feedback_height(self) -> None:
-        reserved = self.source_feedback_label.sizeHint().height()
-        if reserved > 0:
-            self.source_feedback_label.setMinimumHeight(reserved)
-
-    def _populate_sample_url(self) -> None:
-        self.url_edit.setText(SAMPLE_VIDEO_URL)
-        self.url_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        message = str(text or "").strip()
+        if not message:
+            if tone_value == "hidden":
+                self._last_source_feedback_log = None
+            return
+        key = (tone_value, message)
+        if self._last_source_feedback_log == key:
+            return
+        self._last_source_feedback_log = key
+        prefix_map = {
+            "neutral": "[source]",
+            "loading": "[source][loading]",
+            "success": "[source][success]",
+            "warning": "[source][warning]",
+            "error": "[source][error]",
+        }
+        prefix = prefix_map.get(tone_value, "[source]")
+        self._append_log(f"{prefix} {message}")
 
     def _set_metrics_visible(self, visible: bool) -> None:
         # Keep the info row mounted in the result card to avoid layout shifts.
@@ -1027,6 +1043,78 @@ class QtYtDlpGui(QMainWindow):
         if bool(visible):
             self.download_result_stack.setCurrentIndex(self._download_result_info_index)
             self.download_result_title.setText("Download info:")
+
+    def _ready_summary_quality(self, format_label: str) -> str:
+        label = str(format_label or "").strip()
+        if not label:
+            return "Auto quality"
+        match = re.search(r"\b(\d{3,4}p)\b", label, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        if self._current_mode() == "audio":
+            bitrate = re.search(r"\b(\d{2,4}k)\b", label, re.IGNORECASE)
+            if bitrate:
+                return bitrate.group(1).lower()
+        compact = re.sub(r"\s+", " ", label).strip()
+        if len(compact) > 24:
+            compact = f"{compact[:24].rstrip()}..."
+        return compact or "Auto quality"
+
+    def _ready_summary_codec(self) -> str:
+        codec = self._current_codec()
+        if codec:
+            return codec.upper()
+
+        info = self._selected_format_info() or {}
+        mode = self._current_mode()
+        if mode == "audio":
+            raw_codec = str(info.get("acodec") or "").strip().lower()
+        else:
+            raw_codec = str(info.get("vcodec") or "").strip().lower()
+            if raw_codec in {"", "none"}:
+                raw_codec = str(info.get("acodec") or "").strip().lower()
+
+        if not raw_codec or raw_codec == "none":
+            return "Codec"
+
+        alias_map = {
+            "avc1": "AVC1",
+            "av01": "AV01",
+            "h264": "H264",
+            "h265": "H265",
+            "hev1": "H265",
+            "hvc1": "H265",
+            "vp9": "VP9",
+            "vp8": "VP8",
+            "mp4a": "AAC",
+            "aac": "AAC",
+            "opus": "OPUS",
+        }
+        for prefix, label in alias_map.items():
+            if raw_codec.startswith(prefix):
+                return label
+        return raw_codec.split(".", 1)[0].upper()
+
+    def _ready_summary_folder(self) -> str:
+        raw = self.output_dir_edit.text().strip() or self._default_output_dir()
+        try:
+            folder = Path(raw).expanduser()
+        except (TypeError, ValueError, OSError):
+            folder = Path(self._default_output_dir())
+        name = folder.name.strip()
+        if name:
+            return f"{name} folder"
+        return "Output folder"
+
+    def _refresh_ready_summary(self) -> None:
+        container = self._current_container()
+        container_text = container.upper() if container else "Container"
+        codec_text = self._ready_summary_codec()
+        quality_text = self._ready_summary_quality(self._selected_format_label())
+        folder_text = self._ready_summary_folder()
+        self.ready_summary_label.setText(
+            f"{container_text} • {codec_text} • {quality_text} • {folder_text}"
+        )
 
     def _refresh_download_result_view(self) -> None:
         show_latest_output = (self._latest_output_path is not None) and (
@@ -1081,6 +1169,7 @@ class QtYtDlpGui(QMainWindow):
     def _set_last_output_path(self, output_path: Path) -> None:
         resolved = Path(output_path).expanduser()
         self._latest_output_path = resolved
+        self.download_result_path.setToolTip(str(resolved))
         self._refresh_download_result_view()
         QTimer.singleShot(0, self._refresh_last_output_text)
 
@@ -1153,13 +1242,17 @@ class QtYtDlpGui(QMainWindow):
                 )
                 shown_text = f"{prefix}{shown_title}"
         self.item_label.setText(shown_text)
-        self.item_label.setToolTip(title_clean)
+        self.item_label.setToolTip(str(self._current_item_title_tooltip or "-"))
 
     def _set_current_item_display(self, *, progress: str, title: str) -> None:
         progress_clean = str(progress or "-").strip() or "-"
-        title_clean = re.sub(r"\s+", " ", str(title or "-").strip()) or "-"
+        raw_title = str(title if title is not None else "-")
+        if not raw_title.strip():
+            raw_title = "-"
+        title_clean = re.sub(r"\s+", " ", raw_title.strip()) or "-"
         self._current_item_progress = progress_clean
         self._current_item_title = title_clean
+        self._current_item_title_tooltip = raw_title
         self._refresh_current_item_text()
         self.item_label.setVisible(True)
 
@@ -1292,7 +1385,9 @@ class QtYtDlpGui(QMainWindow):
 
     def _toggle_panel(self, name: str) -> None:
         if self._active_panel_name == name:
-            self._close_panel()
+            for panel_name, button in self._panel_buttons.items():
+                button.setChecked(panel_name == name)
+            self._refresh_top_action_icons()
             return
         self._open_panel(name)
 
@@ -1331,50 +1426,15 @@ class QtYtDlpGui(QMainWindow):
 
     def _refresh_top_action_icons(self) -> None:
         full_icon_size = QSize(TOP_ACTION_ICON_PX, TOP_ACTION_ICON_PX)
-        alert_dot_size = QSize(8, 8)
-
-        if self._header_icons_enabled:
-            self.downloads_button.setIcon(QIcon())
-            self.settings_button.setIcon(
-                self._panel_icon("settings", checked=self.settings_button.isChecked())
-            )
-            self.queue_button.setIcon(
-                self._panel_icon("queue", checked=self.queue_button.isChecked())
-            )
-            self.history_button.setIcon(
-                self._panel_icon("history", checked=self.history_button.isChecked())
-            )
-            self.logs_button.setIcon(
-                self._panel_icon(
-                    "logs",
-                    checked=self.logs_button.isChecked(),
-                    alert=self._logs_alert_active,
-                )
-            )
-            for button in (
-                self.downloads_button,
-                self.settings_button,
-                self.queue_button,
-                self.history_button,
-                self.logs_button,
-            ):
-                button.setIconSize(full_icon_size)
-        else:
-            self.downloads_button.setIcon(QIcon())
-            self.settings_button.setIcon(QIcon())
-            self.queue_button.setIcon(QIcon())
-            self.history_button.setIcon(QIcon())
-            self.logs_button.setIcon(
-                self._legacy_log_alert_icon if self._logs_alert_active else QIcon()
-            )
-            self.logs_button.setIconSize(alert_dot_size)
-            for button in (
-                self.downloads_button,
-                self.settings_button,
-                self.queue_button,
-                self.history_button,
-            ):
-                button.setIconSize(full_icon_size)
+        for button in (
+            self.downloads_button,
+            self.settings_button,
+            self.queue_button,
+            self.history_button,
+            self.logs_button,
+        ):
+            button.setIcon(QIcon())
+            button.setIconSize(full_icon_size)
 
         self._set_uniform_button_width(
             [
@@ -1384,7 +1444,7 @@ class QtYtDlpGui(QMainWindow):
                 self.history_button,
                 self.logs_button,
             ],
-            extra_px=26,
+            extra_px=18,
         )
 
     def _configure_top_action_icons(self) -> None:
@@ -1500,6 +1560,7 @@ class QtYtDlpGui(QMainWindow):
     def _clear_logs(self) -> None:
         self._log_lines.clear()
         self._last_error_log = ""
+        self._last_source_feedback_log = None
         self.logs_view.clear()
         self._set_logs_alert(False)
 
@@ -1538,9 +1599,12 @@ class QtYtDlpGui(QMainWindow):
 
     def _set_playlist_items_visible(self, visible: bool) -> None:
         if bool(visible):
+            self.source_details_label.setText("Playlist items")
             self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_PLAYLIST_INDEX)
-        elif self.source_details_stack.currentIndex() == SOURCE_DETAILS_PLAYLIST_INDEX:
-            self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_NONE_INDEX)
+        else:
+            self.source_details_label.setText("")
+            if self.source_details_stack.currentIndex() == SOURCE_DETAILS_PLAYLIST_INDEX:
+                self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_NONE_INDEX)
         self._sync_source_details_height()
 
     def _sync_source_details_height(self) -> None:
@@ -1553,8 +1617,6 @@ class QtYtDlpGui(QMainWindow):
             target = 0
         else:
             target = max(0, current.sizeHint().height(), current.minimumSizeHint().height())
-            if target > 0:
-                target += 2
         self.source_details_host.setFixedHeight(target)
         self.source_details_stack.setFixedHeight(target)
 
@@ -1612,6 +1674,7 @@ class QtYtDlpGui(QMainWindow):
         selected = QFileDialog.getExistingDirectory(self, "Select output folder")
         if selected:
             self.output_dir_edit.setText(selected)
+            self._refresh_ready_summary()
 
     def _on_url_changed(self) -> None:
         current = self.url_edit.text()
@@ -1986,7 +2049,7 @@ class QtYtDlpGui(QMainWindow):
         self._is_downloading = True
         self._cancel_requested = False
         self._cancel_event = threading.Event()
-        self._show_progress_item = bool(self._playlist_mode)
+        self._show_progress_item = True
         self._clear_logs()
         self._reset_progress_summary()
         self._clear_last_output_path()
@@ -2621,7 +2684,6 @@ class QtYtDlpGui(QMainWindow):
 
         self.url_edit.setEnabled(state.input_fields_enabled)
         self.paste_button.setEnabled(state.input_fields_enabled)
-        self.sample_url_button.setEnabled(state.input_fields_enabled)
         self.browse_button.setEnabled(state.input_fields_enabled)
         mixed_actions_enabled = state.input_fields_enabled and bool(self._pending_mixed_url)
         self.use_single_video_url_button.setEnabled(mixed_actions_enabled)
@@ -2639,6 +2701,7 @@ class QtYtDlpGui(QMainWindow):
         self.retry_backoff_edit.setEnabled(state.input_fields_enabled)
         self.concurrent_fragments_edit.setEnabled(state.input_fields_enabled)
 
+        self._refresh_ready_summary()
         self._refresh_download_result_view()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]

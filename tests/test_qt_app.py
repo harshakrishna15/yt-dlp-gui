@@ -70,14 +70,41 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.source_details_host.height(), 0)
         self.assertTrue(self.window.mixed_url_overlay.isHidden())
 
-    def test_source_feedback_reserves_height_for_hidden_tone(self) -> None:
-        reserved_height = self.window.source_feedback_label.minimumHeight()
-        self.assertGreater(reserved_height, 0)
+    def test_source_feedback_routes_messages_to_logs(self) -> None:
+        self.window._clear_logs()
 
+        self.window._set_source_feedback(
+            "Formats are ready. Choose options and start the download.",
+            tone="success",
+        )
+        self.window._set_source_feedback(
+            "Formats are ready. Choose options and start the download.",
+            tone="success",
+        )
+
+        source_logs = [line for line in self.window._log_lines if line.startswith("[source]")]
+        self.assertEqual(
+            source_logs,
+            [
+                "[source][success] Formats are ready. Choose options and start the download."
+            ],
+        )
+
+    def test_hidden_source_feedback_resets_dedupe_state(self) -> None:
+        self.window._clear_logs()
+
+        message = "URL captured. Loading available formats..."
+        self.window._set_source_feedback(message, tone="loading")
         self.window._set_source_feedback("", tone="hidden")
-        self.assertEqual(self.window.source_feedback_label.text(), "")
-        self.assertEqual(self.window.source_feedback_label.property("tone"), "hidden")
-        self.assertEqual(self.window.source_feedback_label.minimumHeight(), reserved_height)
+        self.window._set_source_feedback(message, tone="loading")
+
+        source_logs = [
+            line for line in self.window._log_lines if line.startswith("[source][loading]")
+        ]
+        self.assertEqual(
+            source_logs,
+            [f"[source][loading] {message}", f"[source][loading] {message}"],
+        )
 
     def test_load_settings_always_defaults_output_folder_to_downloads(self) -> None:
         with patch(
@@ -676,6 +703,16 @@ class TestQtApp(unittest.TestCase):
             self.window.item_label.text(),
             "Item: 41/169 - #41 Festival Plaza Mission Complete! - Pokemon",
         )
+
+    def test_item_progress_update_accepts_title_only(self) -> None:
+        self.window._show_progress_item = True
+        self.window._on_progress_update(
+            {
+                "status": "item",
+                "item": "Single Video Title",
+            }
+        )
+        self.assertEqual(self.window.item_label.text(), "Item: Single Video Title")
 
     def test_item_label_elides_long_title_with_three_dots(self) -> None:
         self.window.show()

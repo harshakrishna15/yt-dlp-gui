@@ -857,6 +857,31 @@ class TestProgressHookResilience(unittest.TestCase):
         self.assertIsNone(downloading_updates[-1]["percent"])
         self.assertEqual(downloading_updates[-1]["eta"], "—")
 
+    def test_progress_hook_emits_single_video_item_title_once(self) -> None:
+        updates: list[dict] = []
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=updates.append,
+            cancel_event=None,
+            ranges=[],
+        )
+        payload = {
+            "status": "downloading",
+            "downloaded_bytes": 50,
+            "total_bytes": 100,
+            "speed": 1024,
+            "eta": 5,
+            "info_dict": {"title": "Single Video Title"},
+        }
+        hook(payload)
+        hook(payload)
+
+        item_updates = [u for u in updates if u.get("status") == "item"]
+        self.assertEqual(
+            item_updates,
+            [{"status": "item", "item": "Single Video Title"}],
+        )
+
     def test_progress_hook_includes_playlist_eta_for_playlist_downloads(self) -> None:
         updates: list[dict] = []
         hook = download._progress_hook_factory(

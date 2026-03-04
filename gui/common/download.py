@@ -1016,20 +1016,31 @@ def _progress_hook_factory(
         if display_index and ranges:
             display_index = _playlist_position_for_index(ranges, display_index)
 
-        title = info.get("title") or ""
-        if display_index and last_item["key"] != display_index:
-            last_item["key"] = display_index
-            active_item["key"] = display_index
-            active_item["started_at"] = time.time()
-            if playlist_count and display_index:
-                log(f"[item] {display_index}/{playlist_count} {title}".strip())
-            else:
-                log(f"[item] {display_index} {title}".strip())
+        title = str(info.get("title") or "").strip()
+        item_key: tuple[str, int | str] | None = None
+        if display_index:
+            item_key = ("index", int(display_index))
             item_text = (
                 f"{display_index}/{playlist_count} {title}".strip()
                 if playlist_count and display_index
                 else f"{display_index} {title}".strip()
             )
+        elif title:
+            item_key = ("title", title)
+            item_text = title
+        else:
+            item_text = ""
+        if item_key is not None and last_item["key"] != item_key:
+            last_item["key"] = item_key
+            if display_index:
+                active_item["key"] = display_index
+                active_item["started_at"] = time.time()
+                if playlist_count and display_index:
+                    log(f"[item] {display_index}/{playlist_count} {title}".strip())
+                else:
+                    log(f"[item] {display_index} {title}".strip())
+            else:
+                log(f"[item] {item_text}")
             _safe_update({"status": "item", "item": item_text})
 
         if status.get("status") == "downloading":
