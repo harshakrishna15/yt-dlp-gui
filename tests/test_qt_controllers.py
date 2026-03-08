@@ -129,6 +129,7 @@ class FakeWindow:
         self.logs: list[str] = []
         self.popups: list[tuple[str, str, bool]] = []
         self.preview_title = ""
+        self.source_summary: dict[str, object] | None = None
         self.audio_languages: list[str] = []
         self.metrics_visible = False
         self.progress_resets = 0
@@ -162,6 +163,9 @@ class FakeWindow:
 
     def _set_preview_title(self, title: str) -> None:
         self.preview_title = str(title)
+
+    def _set_source_summary(self, summary: dict[str, object] | None) -> None:
+        self.source_summary = dict(summary) if isinstance(summary, dict) else None
 
     def _set_audio_language_values(self, values: list[str]) -> None:
         self.audio_languages = list(values)
@@ -351,6 +355,26 @@ def build_ports(*, executor: FakeExecutor | None = None) -> tuple[SideEffectPort
 
 
 class TestSourceController(unittest.TestCase):
+    def test_on_url_changed_requires_explicit_analyze_action(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc")
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        state = SourceState()
+        controller = SourceController(window, state=state, ports=ports)
+
+        controller.on_url_changed()
+
+        self.assertFalse(state.is_fetching)
+        self.assertEqual(window._fetch_timer.starts, 0)
+        self.assertFalse(window._fetch_timer.active)
+        self.assertIn(
+            (
+                "URL ready. Click Analyze URL to load formats and preview details.",
+                "neutral",
+            ),
+            window.feedback_updates,
+        )
+
     def test_start_fetch_formats_sets_state_and_submits_worker(self) -> None:
         window = FakeWindow()
         window.url_edit.setText("https://example.com/watch?v=abc")
@@ -388,6 +412,14 @@ class TestSourceController(unittest.TestCase):
                 "audio_languages": ["en"],
             },
             "preview_title": "Example title",
+            "source_summary": {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "Example Channel",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "12m 08s",
+                "detail_three_text": "1 video format",
+            },
         }
         controller.on_formats_loaded(
             request_id=9,
@@ -402,6 +434,17 @@ class TestSourceController(unittest.TestCase):
         self.assertEqual(state.audio_labels, ["128k"])
         self.assertEqual(state.audio_languages, ["en"])
         self.assertEqual(window.preview_title, "Example title")
+        self.assertEqual(
+            window.source_summary,
+            {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "Example Channel",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "12m 08s",
+                "detail_three_text": "1 video format",
+            },
+        )
         self.assertEqual(window.status_value.text(), "Formats loaded")
 
     def test_fetch_formats_worker_ignores_deleted_signal_source(self) -> None:

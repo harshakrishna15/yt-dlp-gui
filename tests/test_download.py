@@ -163,7 +163,7 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertTrue(opts["writethumbnail"])
         self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertTrue(str(opts["outtmpl"]).endswith("%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s"))
-        self.assertIn("[ffmpeg] source=missing (some merges/conversions may fail)", self.logs)
+        self.assertIn("[media] source=missing (some merges/conversions may fail)", self.logs)
 
     @patch("gui.common.download.resolve_binary")
     def test_build_opts_simple_range_sets_start_end(self, mock_resolve_binary) -> None:
@@ -312,7 +312,7 @@ class TestEditFriendlyMp4Postprocess(unittest.TestCase):
                 log=logs.append,
             )
         self.assertTrue(
-            any("ffmpeg missing; skipped edit-friendly MP4 re-encode" in line for line in logs)
+            any("media tools missing; skipped edit-friendly MP4 re-encode" in line for line in logs)
         )
 
     @patch("gui.common.download._reencode_edit_friendly_mp4_file")

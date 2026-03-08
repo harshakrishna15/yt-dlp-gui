@@ -14,7 +14,7 @@ from .tooling import resolve_binary
 
 
 _MISSING_YT_DLP_MESSAGE = (
-    "yt-dlp is not installed. Activate your venv and run: pip install -r requirements.txt"
+    "Required download components are not installed. Activate your environment and run: pip install -r requirements.txt"
 )
 
 
@@ -227,9 +227,9 @@ def build_ydl_opts(
         opts["format_sort"] = [f"lang:{audio_lang_clean.lower()}"]
     if ffmpeg_path:
         opts["ffmpeg_location"] = str(ffmpeg_path)
-        log(f"[ffmpeg] source={ffmpeg_source} path={ffmpeg_path}")
+        log(f"[media] source={ffmpeg_source} available=yes")
     else:
-        log("[ffmpeg] source=missing (some merges/conversions may fail)")
+        log("[media] source=missing (some merges/conversions may fail)")
     if playlist_enabled and playlist_items:
         opts["playlist_items"] = playlist_items
         opts["extractor_args"] = {
@@ -400,7 +400,7 @@ def run_download(
                 _mark_cancelled()
                 break
             except Exception as exc:
-                log(f"[fcp] edit-friendly step failed: {exc}")
+                log(f"[export] edit-friendly step failed: {exc}")
             result = DOWNLOAD_SUCCESS
             log("[done] Download complete.")
             break
@@ -427,7 +427,7 @@ def _postprocess_edit_friendly_mp4(
 
     ffmpeg_path, _ffmpeg_source = resolve_binary("ffmpeg")
     if ffmpeg_path is None:
-        log("[fcp] ffmpeg missing; skipped edit-friendly MP4 re-encode.")
+        log("[export] media tools missing; skipped edit-friendly MP4 re-encode.")
         return
     selected_video_codec = _select_edit_friendly_video_codec(
         ffmpeg_path=ffmpeg_path,
@@ -469,7 +469,7 @@ def _postprocess_edit_friendly_mp4(
         )
         if (not success) and selected_video_codec != EDIT_FRIENDLY_VIDEO_CODEC:
             log(
-                "[fcp] Hardware encoder unavailable at runtime; "
+                "[export] Hardware encoder unavailable at runtime; "
                 "falling back to libx264."
             )
             selected_video_codec = EDIT_FRIENDLY_VIDEO_CODEC
@@ -485,7 +485,7 @@ def _postprocess_edit_friendly_mp4(
                 log=log,
             )
         if not success:
-            log(f"[fcp] Skipped edit-friendly output for {output_path.name}.")
+            log(f"[export] Skipped edit-friendly output for {output_path.name}.")
         if isinstance(duration_s, (int, float)) and duration_s > 0:
             completed_duration_s += float(duration_s)
 
@@ -589,7 +589,7 @@ def _reencode_edit_friendly_mp4_file(
         "+faststart",
         str(temp_output),
     ]
-    log(f"[fcp] Re-encoding for Final Cut ({video_codec}): {input_path.name}")
+    log(f"[export] Re-encoding with {video_codec}: {input_path.name}")
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -663,8 +663,12 @@ def _reencode_edit_friendly_mp4_file(
                 stderr_text = ""
         if process.returncode != 0:
             detail = stderr_text
-            message = detail.splitlines()[-1] if detail else "ffmpeg exited with an error"
-            log(f"[fcp] Re-encode failed for {input_path.name}: {message}")
+            message = (
+                detail.splitlines()[-1]
+                if detail
+                else "media processing exited with an error"
+            )
+            log(f"[export] Re-encode failed for {input_path.name}: {message}")
             try:
                 if temp_output.exists():
                     temp_output.unlink()
@@ -690,7 +694,7 @@ def _reencode_edit_friendly_mp4_file(
         try:
             os.replace(temp_output, input_path)
         except OSError as exc:
-            log(f"[fcp] Failed to finalize re-encode for {input_path.name}: {exc}")
+            log(f"[export] Failed to finalize re-encode for {input_path.name}: {exc}")
             try:
                 if temp_output.exists():
                     temp_output.unlink()
@@ -698,7 +702,7 @@ def _reencode_edit_friendly_mp4_file(
                 pass
             return False
 
-        log(f"[fcp] Re-encoded for Final Cut: {input_path.name}")
+        log(f"[export] Re-encoded output: {input_path.name}")
         return True
     finally:
         if process is not None and process.stderr is not None:
@@ -754,10 +758,10 @@ def _select_edit_friendly_video_codec(
     if preference in manual_map:
         codec = manual_map[preference]
         if codec in encoders:
-            log(f"[fcp] Using manual encoder preference: {codec}")
+            log(f"[export] Using manual encoder preference: {codec}")
             return codec
         log(
-            f"[fcp] Preferred encoder '{preference}' unavailable; "
+            f"[export] Preferred encoder '{preference}' unavailable; "
             "falling back to libx264."
         )
         return EDIT_FRIENDLY_VIDEO_CODEC
@@ -765,12 +769,12 @@ def _select_edit_friendly_video_codec(
     preferred_hardware = _hardware_encoder_priority()
     for codec in preferred_hardware:
         if codec in encoders:
-            log(f"[fcp] Using hardware encoder: {codec}")
+            log(f"[export] Using hardware encoder: {codec}")
             return codec
     if EDIT_FRIENDLY_VIDEO_CODEC in encoders:
-        log("[fcp] Using software encoder: libx264")
+        log("[export] Using software encoder: libx264")
         return EDIT_FRIENDLY_VIDEO_CODEC
-    log("[fcp] Could not confirm encoder list; using libx264.")
+    log("[export] Could not confirm encoder list; using libx264.")
     return EDIT_FRIENDLY_VIDEO_CODEC
 
 

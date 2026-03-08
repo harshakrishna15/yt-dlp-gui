@@ -17,6 +17,42 @@ class TestFormatPipeline(unittest.TestCase):
         info = {"title": "  Hello \n  there\tworld  "}
         self.assertEqual(format_pipeline.preview_title_from_info(info), "Hello there world")
 
+    def test_source_summary_from_info_builds_video_summary(self) -> None:
+        info = {
+            "title": "Top Title",
+            "uploader": "Example Channel",
+            "duration": 367,
+        }
+
+        summary = format_pipeline.source_summary_from_info(
+            info,
+            video_format_count=5,
+            audio_format_count=2,
+        )
+
+        self.assertEqual(summary["badge_text"], "VID")
+        self.assertEqual(summary["eyebrow_text"], "Video ready")
+        self.assertEqual(summary["subtitle_text"], "Example Channel")
+        self.assertEqual(summary["detail_one_text"], "Formats ready")
+        self.assertEqual(summary["detail_two_text"], "6m 07s")
+        self.assertEqual(summary["detail_three_text"], "5 video formats")
+
+    def test_source_summary_from_info_builds_playlist_summary(self) -> None:
+        info = {
+            "_type": "playlist",
+            "playlist_uploader": "Example Curator",
+            "playlist_count": 23,
+        }
+
+        summary = format_pipeline.source_summary_from_info(info)
+
+        self.assertEqual(summary["badge_text"], "LIST")
+        self.assertEqual(summary["eyebrow_text"], "Playlist ready")
+        self.assertEqual(summary["subtitle_text"], "Example Curator")
+        self.assertEqual(summary["detail_one_text"], "Formats ready")
+        self.assertEqual(summary["detail_two_text"], "23 items")
+        self.assertEqual(summary["detail_three_text"], "")
+
     def test_build_labeled_sets_inserts_best_audio_option(self) -> None:
         video_fmt = {"format_id": "137"}
         audio_fmt = {"format_id": "251"}

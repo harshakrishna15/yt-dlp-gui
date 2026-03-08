@@ -17,6 +17,7 @@ class ControlState:
     can_add_queue: bool
     can_start_queue: bool
     can_cancel: bool
+    can_fetch_formats: bool
     mode_enabled: bool
     container_enabled: bool
     codec_enabled: bool
@@ -76,6 +77,7 @@ def compute_control_state(
     can_add_queue = can_start_single and (not is_playlist_url) and (not queue_active)
     can_start_queue = queue_ready and (not is_downloading) and (not mixed_prompt_active)
     can_cancel = is_downloading and (not cancel_requested)
+    can_fetch_formats = url_present and (not is_fetching) and (not is_downloading) and (not mixed_prompt_active)
     mode_enabled = url_present and formats_ready and (not is_downloading)
 
     show_convert = container_value == "webm"
@@ -99,6 +101,7 @@ def compute_control_state(
         can_add_queue=can_add_queue,
         can_start_queue=can_start_queue,
         can_cancel=can_cancel,
+        can_fetch_formats=can_fetch_formats,
         mode_enabled=mode_enabled,
         container_enabled=input_ready,
         codec_enabled=is_video_mode and input_ready and filter_chosen,

@@ -92,7 +92,7 @@ def _classify_reason(error_text: str) -> str:
 
 def _reason_label(reason: str) -> str:
     labels = {
-        "missing_ffmpeg": "ffmpeg/ffprobe not found",
+        "missing_ffmpeg": "required media tools not found",
         "login_required": "login required",
         "private_video": "private video",
         "geo_restricted": "region-restricted video",
@@ -114,12 +114,12 @@ def download_failed_feedback(error_text: str) -> FailureFeedback:
     reason_label = _reason_label(reason)
     status = f"Download failed: {reason_label}"
     message_by_reason = {
-        "missing_ffmpeg": "ffmpeg/ffprobe is required for some downloads. Install ffmpeg, restart the app, and retry.",
+        "missing_ffmpeg": "Required media tools are missing. Install the missing components, restart the app, and retry.",
         "login_required": "This video needs sign-in or membership access. Try another URL or use content you can access publicly.",
         "private_video": "This video is private. Confirm you have access or try a different URL.",
         "geo_restricted": "This video is blocked in your region. Try a different video.",
         "format_unavailable": "The selected format is unavailable. Reload formats and choose another option.",
-        "unsupported_url": "This URL is not supported by yt-dlp. Check the link and try again.",
+        "unsupported_url": "This URL is not supported. Check the link and try again.",
         "rate_limited": "The site is rate limiting requests. Wait a bit, then retry.",
         "access_denied": "Access was denied by the source site. Check the URL and permissions, then retry.",
         "network": "Network request failed. Check your connection and retry.",
@@ -143,7 +143,7 @@ def formats_fetch_failed_feedback(error_text: str) -> FailureFeedback:
         "network": "Could not load formats due to a network issue. Check your connection and retry.",
         "rate_limited": "Format fetch is rate limited right now. Wait a bit, then retry.",
         "access_denied": "Access was denied while loading formats. Check the URL and try again.",
-        "unsupported_url": "This URL is not supported by yt-dlp. Paste a supported video URL.",
+        "unsupported_url": "This URL is not supported. Paste a supported video URL.",
         "private_video": "This video is private. Use a URL you can access.",
         "login_required": "This video needs sign-in access. Try a public URL.",
         "unavailable": "This video is unavailable or removed. Try a different URL.",

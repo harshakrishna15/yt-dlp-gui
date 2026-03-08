@@ -27,9 +27,9 @@ class TestCoreErrorFeedback(unittest.TestCase):
         feedback = error_feedback.download_failed_feedback(
             "ffmpeg not found. Please install"
         )
-        self.assertEqual(feedback.reason, "ffmpeg/ffprobe not found")
-        self.assertIn("ffmpeg", feedback.status.lower())
-        self.assertIn("install ffmpeg", feedback.message.lower())
+        self.assertEqual(feedback.reason, "required media tools not found")
+        self.assertIn("required media tools", feedback.status.lower())
+        self.assertIn("missing components", feedback.message.lower())
 
     def test_formats_feedback_uses_unknown_fallback(self) -> None:
         feedback = error_feedback.formats_fetch_failed_feedback("random unexpected error")

@@ -34,6 +34,7 @@ def apply_control_state(
 
     window.url_edit.setEnabled(state.input_fields_enabled)
     window.paste_button.setEnabled(state.input_fields_enabled)
+    window.analyze_button.setEnabled(state.can_fetch_formats)
     window.browse_button.setEnabled(state.input_fields_enabled)
     mixed_actions_enabled = state.input_fields_enabled and bool(pending_mixed_url)
     window.use_single_video_url_button.setEnabled(mixed_actions_enabled)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QComboBox
 
@@ -28,6 +30,19 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#bfdad1") -> No
 
 
 class _NativeComboBox(QComboBox):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._before_popup_callback: Callable[[], None] | None = None
+
+    def set_before_popup_callback(
+        self, callback: Callable[[], None] | None
+    ) -> None:
+        self._before_popup_callback = callback
+
     def showPopup(self) -> None:
+        if self._before_popup_callback is not None:
+            self._before_popup_callback()
         super().showPopup()
+        if self._before_popup_callback is not None:
+            self._before_popup_callback()
         _style_combo_popup(self)

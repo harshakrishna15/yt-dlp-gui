@@ -42,17 +42,22 @@ if (-not (Test-Path $VenvPython)) {
 $env:PIP_REQUIRE_VIRTUALENV = "true"
 
 & $VenvPython -m pip install -r requirements.txt
-& $VenvPython -m pip install pyinstaller
+& $VenvPython -m pip install pyinstaller pillow
 
 # Remove prior outputs to avoid interactive delete prompts and stale locks.
 if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+
+& $VenvPython scripts/make-macos-icon.py --output "build/yt-dlp-gui-icon.ico" --size 1024
+& $VenvPython scripts/write_pyinstaller_version_info.py --output "build/pyinstaller-version-info.txt"
 
 & $VenvPython -m PyInstaller `
   --noconfirm `
   --clean `
   --windowed `
   --name "yt-dlp-gui" `
+  --icon "build/yt-dlp-gui-icon.ico" `
+  --version-file "build/pyinstaller-version-info.txt" `
   --add-data "gui/qt/assets;gui/qt/assets" `
   pyinstaller_entry.py
 

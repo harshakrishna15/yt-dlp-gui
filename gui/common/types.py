@@ -14,6 +14,16 @@ class FormatsCacheEntry(TypedDict):
     audio_lookup: FormatLookup
     audio_languages: list[str]
     preview_title: str
+    source_summary: "SourceSummary"
+
+
+class SourceSummary(TypedDict):
+    badge_text: str
+    eyebrow_text: str
+    subtitle_text: str
+    detail_one_text: str
+    detail_two_text: str
+    detail_three_text: str
 
 
 class ProgressUpdate(TypedDict, total=False):

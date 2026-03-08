@@ -9,13 +9,14 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import QRect
+    from PySide6.QtCore import QEasingCurve, QRect, Qt
     from PySide6.QtGui import QCloseEvent, QFontMetrics
     from PySide6.QtWidgets import (
         QApplication,
         QBoxLayout,
         QCheckBox,
         QComboBox,
+        QLabel,
         QLineEdit,
         QPushButton,
         QRadioButton,
@@ -24,6 +25,7 @@ try:
     )
 
     from gui.common import download
+    from gui.app_meta import APP_DISPLAY_NAME, APP_VERSION
     from gui.core import urls as core_urls
     from gui.qt.app import (
         PREVIEW_TITLE_TOOLTIP_DEFAULT,
@@ -31,6 +33,7 @@ try:
         SOURCE_DETAILS_PLAYLIST_INDEX,
         QtYtDlpGui,
     )
+    from gui.qt.constants import PANEL_SWITCH_FADE_MS
 
     HAS_QT = True
 except ModuleNotFoundError:
@@ -72,6 +75,126 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.source_details_host.height(), 0)
         self.assertTrue(self.window.mixed_url_overlay.isHidden())
 
+    def test_app_title_and_primary_analyze_action_defaults(self) -> None:
+        self.assertEqual(self.window.windowTitle(), APP_DISPLAY_NAME)
+        self.assertFalse(self.window.windowIcon().isNull())
+        self.assertEqual(self.window.analyze_button.text(), "Analyze URL")
+        self.assertFalse(self.window.analyze_button.isEnabled())
+        self.assertEqual(
+            self.window.source_feedback_label.text(),
+            "Paste a video or playlist URL to load available formats.",
+        )
+
+    def test_source_preview_defaults_to_placeholder_copy(self) -> None:
+        self.assertEqual(self.window.source_preview_badge.text(), "URL")
+        self.assertEqual(self.window.preview_title_label.text(), "Source preview")
+        self.assertEqual(
+            self.window.source_preview_placeholder.text(),
+            "Analyze a URL to load source details.",
+        )
+        self.assertEqual(self.window.source_preview_detail_one.text(), "")
+
+    def test_source_preview_copy_is_not_vertically_clipped(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for label in (
+            self.window.preview_title_label,
+            self.window.source_preview_placeholder,
+            self.window.source_preview_subtitle,
+        ):
+            self.assertGreaterEqual(
+                label.geometry().height(),
+                label.sizeHint().height(),
+                f"{label.objectName()} is vertically clipped at the default window size",
+            )
+
+    def test_url_entry_enables_analyze_action_without_auto_fetching(self) -> None:
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+
+        self.assertTrue(self.window.analyze_button.isEnabled())
+        self.assertEqual(self.window.analyze_button.text(), "Analyze URL")
+        self.assertFalse(self.window._fetch_timer.isActive())
+        self.assertIn("Analyze URL", self.window.source_feedback_label.text())
+
+    def test_url_entry_does_not_resize_source_row_controls(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        source_row = self.window.main_page.findChild(QWidget, "sourceHeroRow")
+        self.assertIsNotNone(source_row)
+        assert source_row is not None
+        before = {
+            "url": self.window.url_edit.height(),
+            "paste": self.window.paste_button.height(),
+            "analyze": self.window.analyze_button.height(),
+            "row": source_row.height(),
+        }
+
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.url_edit.height(), before["url"])
+        self.assertEqual(self.window.paste_button.height(), before["paste"])
+        self.assertEqual(self.window.analyze_button.height(), before["analyze"])
+        self.assertEqual(source_row.height(), before["row"])
+
+    def test_loaded_formats_shift_analyze_button_into_refresh_state(self) -> None:
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._video_labels = ["1080p"]
+        self.window._update_controls_state()
+
+        self.assertEqual(self.window.analyze_button.text(), "Refresh formats")
+
+    def test_secondary_panels_start_with_empty_states(self) -> None:
+        self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
+        self.assertEqual(
+            self.window.history_stack.currentIndex(),
+            self.window._history_empty_index,
+        )
+
+        self.window._clear_logs()
+
+        self.assertEqual(self.window.logs_stack.currentIndex(), self.window._logs_empty_index)
+
+    def test_empty_state_cards_are_not_vertically_clipped(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window._clear_logs()
+        QApplication.processEvents()
+
+        for panel_name, stack in (
+            ("queue", self.window.queue_stack),
+            ("history", self.window.history_stack),
+            ("logs", self.window.logs_stack),
+        ):
+            self.window._open_panel(panel_name)
+            QApplication.processEvents()
+            page = stack.currentWidget()
+            self.assertIsNotNone(page)
+            assert page is not None
+            labels = [
+                label
+                for label in page.findChildren(QLabel)
+                if label.objectName()
+                in {
+                    "panelEmptyBadge",
+                    "panelEmptyTitle",
+                    "panelEmptyDescription",
+                    "panelEmptyHint",
+                }
+            ]
+            self.assertTrue(labels, f"No empty-state labels found for {panel_name}")
+            for label in labels:
+                self.assertGreaterEqual(
+                    label.geometry().height(),
+                    label.sizeHint().height(),
+                    (
+                        f"{panel_name} empty-state label {label.objectName()} "
+                        "is vertically clipped"
+                    ),
+                )
+
     def test_source_feedback_routes_messages_to_logs(self) -> None:
         self.window._clear_logs()
 
@@ -107,6 +230,16 @@ class TestQtApp(unittest.TestCase):
             source_logs,
             [f"[source][loading] {message}", f"[source][loading] {message}"],
         )
+
+    def test_about_dialog_uses_app_metadata(self) -> None:
+        with patch.object(self.window._effects.dialogs, "information") as info_mock:
+            self.window._show_about_dialog()
+
+        info_mock.assert_called_once()
+        _parent, title, message = info_mock.call_args.args
+        self.assertIn(APP_DISPLAY_NAME, title)
+        self.assertIn(APP_DISPLAY_NAME, message)
+        self.assertIn(APP_VERSION, message)
 
     def test_load_settings_always_defaults_output_folder_to_downloads(self) -> None:
         with patch(
@@ -495,6 +628,34 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.panel_stack.currentIndex(), self.window._main_page_index)
         self.assertTrue(self.window.downloads_button.isChecked())
 
+    def test_downloads_button_is_noop_when_main_view_is_already_active(self) -> None:
+        self.assertIsNone(self.window._active_panel_name)
+        self.assertEqual(
+            self.window.panel_stack.currentIndex(), self.window._main_page_index
+        )
+
+        before = len(self.window._active_animations)
+        self.window.downloads_button.click()
+        QApplication.processEvents()
+
+        self.assertIsNone(self.window._active_panel_name)
+        self.assertEqual(
+            self.window.panel_stack.currentIndex(), self.window._main_page_index
+        )
+        self.assertTrue(self.window.downloads_button.isChecked())
+        self.assertEqual(len(self.window._active_animations), before)
+
+    def test_panel_switch_uses_smoother_fade_timing(self) -> None:
+        self.window._open_panel("queue")
+
+        self.assertTrue(self.window._active_animations)
+        animation = self.window._active_animations[-1]
+        self.assertEqual(animation.duration(), PANEL_SWITCH_FADE_MS)
+        self.assertEqual(
+            animation.easingCurve().type(),
+            QEasingCurve.Type.InOutCubic,
+        )
+
     def test_on_url_changed_invalidates_fetch_and_resets_selection_state(self) -> None:
         self.window.video_radio.setChecked(True)
         mp4_index = self.window.container_combo.findData("mp4")
@@ -544,6 +705,8 @@ class TestQtApp(unittest.TestCase):
             self.window.preview_value.toolTip(),
             PREVIEW_TITLE_TOOLTIP_DEFAULT,
         )
+        self.assertEqual(self.window.source_preview_badge.text(), "URL")
+        self.assertEqual(self.window.preview_title_label.text(), "Source preview")
 
     def test_fetching_state_keeps_format_controls_disabled_until_ready(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
@@ -580,6 +743,14 @@ class TestQtApp(unittest.TestCase):
                 "audio_languages": [],
             },
             "preview_title": "Sample",
+            "source_summary": {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "Example Channel",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 42s",
+                "detail_three_text": "1 video format",
+            },
         }
         self.window._on_formats_loaded(
             request_id=15,
@@ -588,6 +759,10 @@ class TestQtApp(unittest.TestCase):
             error=False,
             is_playlist=False,
         )
+        self.assertEqual(self.window.source_preview_badge.text(), "VID")
+        self.assertEqual(self.window.preview_title_label.text(), "Video ready")
+        self.assertEqual(self.window.preview_value.text(), "Sample")
+        self.assertEqual(self.window.source_preview_subtitle.text(), "Example Channel")
         mp4_index = self.window.container_combo.findData("mp4")
         self.assertGreaterEqual(mp4_index, 0)
         self.window.container_combo.setCurrentIndex(mp4_index)
@@ -606,6 +781,29 @@ class TestQtApp(unittest.TestCase):
             combo.showPopup()
             QApplication.processEvents()
             self.assertTrue(combo.view().window().isVisible())
+            combo.hidePopup()
+            QApplication.processEvents()
+
+    def test_combo_popups_expand_to_full_option_count(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        QApplication.processEvents()
+
+        combos = (
+            self.window.container_combo,
+            self.window.codec_combo,
+        )
+        for combo in combos:
+            self.assertGreater(combo.count(), 0)
+            combo.showPopup()
+            QApplication.processEvents()
+            self.assertEqual(combo.maxVisibleItems(), combo.count())
+            self.assertEqual(
+                combo.view().verticalScrollBarPolicy(),
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+            )
             combo.hidePopup()
             QApplication.processEvents()
 
@@ -635,12 +833,18 @@ class TestQtApp(unittest.TestCase):
         close_mock.assert_called_once()
         self.assertFalse(self.window._close_after_cancel)
 
-    def test_download_result_defaults_to_download_info_mode(self) -> None:
+    def test_download_result_defaults_to_empty_mode(self) -> None:
         self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(self.window.download_result_title.text(), "Download info:")
-        self.assertEqual(self.window.download_result_card.property("state"), "info")
+        self.assertEqual(
+            self.window.download_result_title.text(),
+            "No completed download yet.",
+        )
+        self.assertEqual(self.window.download_result_card.property("state"), "empty")
         self.assertFalse(self.window.copy_output_path_button.isEnabled())
-        self.assertEqual(self.window.download_result_path.text(), "-")
+        self.assertEqual(
+            self.window.download_result_path.text(),
+            "Files will appear here after a download finishes.",
+        )
 
     def test_record_output_updates_latest_download_card(self) -> None:
         output_path = Path("/tmp/test-video.mp4")
@@ -648,8 +852,11 @@ class TestQtApp(unittest.TestCase):
         self.window._record_download_output(output_path, "https://example.com/video")
 
         self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(self.window.download_result_title.text(), "Latest:")
-        self.assertEqual(self.window.download_result_card.property("state"), "latest")
+        self.assertEqual(
+            self.window.download_result_title.text(),
+            "Latest completed download",
+        )
+        self.assertEqual(self.window.download_result_card.property("state"), "ready")
         self.assertTrue(self.window.download_result_path.text().endswith(".mp4"))
         self.assertEqual(
             self.window.download_result_path.toolTip(),
@@ -657,7 +864,7 @@ class TestQtApp(unittest.TestCase):
         )
         self.assertTrue(self.window.copy_output_path_button.isEnabled())
 
-    def test_record_output_while_downloading_defers_latest_actions_until_done(self) -> None:
+    def test_record_output_while_downloading_keeps_latest_output_available(self) -> None:
         output_path = Path("/tmp/test-video.mp4")
         self.window._is_downloading = True
         self.window._update_controls_state()
@@ -665,16 +872,22 @@ class TestQtApp(unittest.TestCase):
         self.window._record_download_output(output_path, "https://example.com/video")
 
         self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(self.window.download_result_title.text(), "Download info:")
-        self.assertEqual(self.window.download_result_card.property("state"), "info")
-        self.assertFalse(self.window.copy_output_path_button.isEnabled())
+        self.assertEqual(
+            self.window.download_result_title.text(),
+            "Latest completed download",
+        )
+        self.assertEqual(self.window.download_result_card.property("state"), "ready")
+        self.assertTrue(self.window.copy_output_path_button.isEnabled())
         self.assertEqual(self.window.download_result_path.toolTip(), str(output_path))
 
         self.window._on_download_done(download.DOWNLOAD_SUCCESS)
 
         self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(self.window.download_result_title.text(), "Latest:")
-        self.assertEqual(self.window.download_result_card.property("state"), "latest")
+        self.assertEqual(
+            self.window.download_result_title.text(),
+            "Latest completed download",
+        )
+        self.assertEqual(self.window.download_result_card.property("state"), "ready")
         self.assertTrue(self.window.copy_output_path_button.isEnabled())
 
     def test_clearing_latest_output_resets_download_card(self) -> None:
@@ -685,9 +898,15 @@ class TestQtApp(unittest.TestCase):
         self.window._clear_last_output_path()
 
         self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(self.window.download_result_title.text(), "Download info:")
-        self.assertEqual(self.window.download_result_card.property("state"), "info")
-        self.assertEqual(self.window.download_result_path.text(), "-")
+        self.assertEqual(
+            self.window.download_result_title.text(),
+            "No completed download yet.",
+        )
+        self.assertEqual(self.window.download_result_card.property("state"), "empty")
+        self.assertEqual(
+            self.window.download_result_path.text(),
+            "Files will appear here after a download finishes.",
+        )
         self.assertFalse(self.window.copy_output_path_button.isEnabled())
 
     def test_on_download_done_resets_progress_details(self) -> None:

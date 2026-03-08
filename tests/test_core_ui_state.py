@@ -54,6 +54,7 @@ class TestUiState(unittest.TestCase):
         )
         self.assertTrue(state.can_start_single)
         self.assertTrue(state.can_add_queue)
+        self.assertTrue(state.can_fetch_formats)
         self.assertTrue(state.codec_enabled)
         self.assertTrue(state.subtitle_controls_enabled)
         self.assertTrue(state.embed_allowed)
@@ -81,6 +82,7 @@ class TestUiState(unittest.TestCase):
             video_containers=("mp4", "webm"),
         )
         self.assertTrue(state.can_cancel)
+        self.assertFalse(state.can_fetch_formats)
         self.assertFalse(state.input_fields_enabled)
         self.assertFalse(state.filename_enabled)
         self.assertFalse(state.playlist_items_enabled)
@@ -110,6 +112,7 @@ class TestUiState(unittest.TestCase):
         )
         self.assertFalse(state.mode_enabled)
         self.assertFalse(state.can_start_single)
+        self.assertFalse(state.can_fetch_formats)
 
     def test_fetching_state_disables_container_and_codec_choice_with_mode_selected(self) -> None:
         state = ui_state.compute_control_state(
@@ -137,6 +140,7 @@ class TestUiState(unittest.TestCase):
         self.assertFalse(state.codec_enabled)
         self.assertFalse(state.format_enabled)
         self.assertFalse(state.can_start_single)
+        self.assertFalse(state.can_fetch_formats)
 
 
 if __name__ == "__main__":

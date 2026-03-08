@@ -16,6 +16,7 @@ REQUIRED_ASSET_FILENAMES = (
     "logs.svg",
     "logs-active.svg",
     "logs-alert.svg",
+    "tmp-mac-app-icon.png",
 )
 
 

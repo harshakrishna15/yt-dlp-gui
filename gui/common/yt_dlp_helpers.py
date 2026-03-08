@@ -5,7 +5,7 @@ from .tooling import resolve_binary
 
 
 _MISSING_YT_DLP_MESSAGE = (
-    "yt-dlp is not installed. Activate your venv and run: pip install -r requirements.txt"
+    "Required download components are not installed. Activate your environment and run: pip install -r requirements.txt"
 )
 
 

@@ -134,6 +134,7 @@ class SourceController:
         s.filtered_lookup = {}
         s.audio_languages = []
         w._set_preview_title("")
+        w._set_source_summary(None)
         w.format_combo.clear()
         w._set_audio_language_values([])
         w._update_source_details_visibility()
@@ -145,12 +146,10 @@ class SourceController:
             )
         elif (not has_mixed_url) and (not w._is_downloading):
             w._set_source_feedback(
-                "URL captured. Loading available formats...",
-                tone="loading",
+                "URL ready. Click Analyze URL to load formats and preview details.",
+                tone="neutral",
             )
 
-        if normalized and (not has_mixed_url) and (not w._is_downloading):
-            w._fetch_timer.start()
         w._update_controls_state()
 
     def start_fetch_formats(self) -> None:
@@ -178,6 +177,11 @@ class SourceController:
             payload = {
                 "collections": collections,
                 "preview_title": format_pipeline.preview_title_from_info(info),
+                "source_summary": format_pipeline.source_summary_from_info(
+                    info,
+                    video_format_count=len(collections.get("video_labels") or []),
+                    audio_format_count=len(collections.get("audio_labels") or []),
+                ),
             }
             is_playlist = bool(
                 info.get("_type") == "playlist" or info.get("entries") is not None
@@ -236,6 +240,7 @@ class SourceController:
             s.filtered_labels = []
             s.filtered_lookup = {}
             w._set_preview_title("")
+            w._set_source_summary(None)
             w.format_combo.clear()
             w._set_audio_language_values([])
             fetch_feedback = core_error_feedback.formats_fetch_failed_feedback(
@@ -269,6 +274,8 @@ class SourceController:
         s.audio_languages = list(collections.get("audio_languages", []))
         preview_title = str(payload.get("preview_title") or "").strip()
         w._set_preview_title(preview_title)
+        source_summary = payload.get("source_summary")
+        w._set_source_summary(source_summary if isinstance(source_summary, dict) else None)
         w._set_audio_language_values(s.audio_languages)
         if s.video_labels or s.audio_labels:
             w._set_status("Formats loaded")

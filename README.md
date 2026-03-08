@@ -1,8 +1,6 @@
 ## yt-dlp-gui
 
-A small desktop GUI for `yt-dlp`.
-This is a hobby project.
-Paste a URL, pick a format, and download.
+This is a small hobby project that makes a simplified GUI for `yt-dlp`.
 
 ### Supported Platforms
 
