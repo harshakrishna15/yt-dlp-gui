@@ -408,7 +408,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.use_playlist_url_button = mixed.use_playlist_url_button
 
         downloads = ui.downloads
-        self.main_scroll = downloads.main_scroll
         self.main_page = downloads.main_page
         self._main_page_index = downloads.main_page_index
         self.url_edit = downloads.url_edit

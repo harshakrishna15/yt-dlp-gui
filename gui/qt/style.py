@@ -51,12 +51,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
                 stop: 1 __page_bg_bottom__
             );
         }
-        QScrollArea#downloadsScrollArea {
+        QWidget#downloadsPage {
             background: transparent;
             border: none;
-        }
-        QScrollArea#downloadsScrollArea > QWidget > QWidget {
-            background: transparent;
         }
         QScrollBar:vertical {
             background: transparent;

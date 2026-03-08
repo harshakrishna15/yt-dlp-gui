@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -79,7 +78,6 @@ class RunSectionRefs:
 
 @dataclass(frozen=True)
 class DownloadsViewRefs:
-    main_scroll: QScrollArea
     main_page: QWidget
     main_page_index: int
     url_edit: QLineEdit
@@ -456,14 +454,8 @@ class DownloadsViewBuilder:
         register_native_combo: Callable[[_NativeComboBox], None],
         callbacks: DownloadsViewCallbacks,
     ) -> DownloadsViewRefs:
-        main_scroll = QScrollArea(panel_stack)
-        main_scroll.setObjectName("downloadsScrollArea")
-        main_scroll.setWidgetResizable(True)
-        main_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        main_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        main_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        main_page = QWidget(main_scroll)
+        main_page = QWidget(panel_stack)
+        main_page.setObjectName("downloadsPage")
         main_layout = QVBoxLayout(main_page)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(10)
@@ -482,11 +474,9 @@ class DownloadsViewBuilder:
         main_layout.addWidget(run.section)
         main_layout.addStretch(1)
 
-        main_scroll.setWidget(main_page)
-        main_page_index = panel_stack.addWidget(main_scroll)
+        main_page_index = panel_stack.addWidget(main_page)
 
         return DownloadsViewRefs(
-            main_scroll=main_scroll,
             main_page=main_page,
             main_page_index=main_page_index,
             url_edit=source.url_edit,

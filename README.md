@@ -33,6 +33,7 @@ Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
 - Python 3.10+
 - `ffmpeg` and `ffprobe` in `PATH`
 - Qt dependency: `PySide6` (installed from `requirements.txt`)
+- App entry points: `python -m gui` (module entry point) or `python run_gui.py` (wrapper that prefers the local `.venv`)
 
 ### Install and Run
 
@@ -49,7 +50,7 @@ brew install ffmpeg
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-python3 run_gui.py
+python3 -m gui
 ```
 
 4. Next time, run:
@@ -57,6 +58,12 @@ python3 run_gui.py
 ```bash
 cd /path/to/yt-dlp-gui
 source .venv/bin/activate
+python3 -m gui
+```
+
+Optional convenience launcher:
+
+```bash
 python3 run_gui.py
 ```
 
@@ -71,7 +78,7 @@ winget install ffmpeg
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python run_gui.py
+python -m gui
 ```
 
 4. Next time, run:
@@ -79,6 +86,12 @@ python run_gui.py
 ```powershell
 cd C:\path\to\yt-dlp-gui
 .\.venv\Scripts\Activate.ps1
+python -m gui
+```
+
+Optional convenience launcher:
+
+```powershell
 python run_gui.py
 ```
 
@@ -95,14 +108,14 @@ Tests include core unit tests and Qt UI tests (offscreen). No network calls.
 
 ```bash
 source .venv/bin/activate
-python3 -m unittest discover -s tests -v
+python3 scripts/run_tests.py -v
 ```
 
 - Windows
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m unittest discover -s tests -v
+python scripts/run_tests.py -v
 ```
 
 ### Code Structure
@@ -123,6 +136,7 @@ Build distributable app output from source.
 ```bash
 chmod +x scripts/build-macos.sh
 ./scripts/build-macos.sh
+python3 scripts/check_packaged_assets.py dist/yt-dlp-gui.app
 ```
 
 Output: `dist/yt-dlp-gui.app`
@@ -133,6 +147,7 @@ The macOS build script auto-generates and embeds an app icon during packaging.
 
 ```powershell
 .\scripts\build-windows.ps1
+python scripts/check_packaged_assets.py dist\yt-dlp-gui
 ```
 
 Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
@@ -169,6 +184,7 @@ This bypass only applies to that one command.
 - You can download playlists.
 - Use **Playlist items** for ranges like `1-5,7,10-`.
 - Leave Playlist items blank to download the full playlist.
+- The app keeps recent downloads in **History** and saves your output/network/subtitle settings between runs.
 
 ### Support Policy
 

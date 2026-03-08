@@ -19,6 +19,7 @@ try:
         QLineEdit,
         QPushButton,
         QRadioButton,
+        QScrollArea,
         QWidget,
     )
 
@@ -373,26 +374,25 @@ class TestQtApp(unittest.TestCase):
                         ),
                     )
 
+    def test_downloads_page_is_not_wrapped_in_scroll_area(self) -> None:
+        self.assertIs(self.window.panel_stack.widget(self.window._main_page_index), self.window.main_page)
+        self.assertNotIsInstance(self.window.main_page, QScrollArea)
+        self.assertEqual(self.window.main_page.findChildren(QScrollArea), [])
+
     def test_min_window_downloads_view_fits_without_vertical_scroll(self) -> None:
         self.window.show()
         QApplication.processEvents()
         self.window.resize(900, 760)
         QApplication.processEvents()
 
-        scrollbar = self.window.main_scroll.verticalScrollBar()
         run_section = self.window.main_page.findChild(QWidget, "runSection")
         self.assertIsNotNone(run_section)
         assert run_section is not None
 
-        bottom = run_section.mapTo(
-            self.window.main_scroll.viewport(),
-            run_section.rect().bottomLeft(),
-        ).y()
-
-        self.assertEqual(scrollbar.maximum(), 0)
+        bottom = run_section.mapTo(self.window.main_page, run_section.rect().bottomLeft()).y()
         self.assertLessEqual(
             bottom,
-            self.window.main_scroll.viewport().height() + 2,
+            self.window.main_page.height() + 2,
             "Downloads view should fit inside the minimum window height",
         )
 
