@@ -91,6 +91,11 @@ class FakeSignal:
         self.emits.append(args)
 
 
+class RaisingRuntimeSignal(FakeSignal):
+    def emit(self, *args: object) -> None:
+        raise RuntimeError("Signal source has been deleted")
+
+
 class FakeSignals:
     def __init__(self) -> None:
         self.formats_loaded = FakeSignal()
@@ -398,6 +403,20 @@ class TestSourceController(unittest.TestCase):
         self.assertEqual(state.audio_languages, ["en"])
         self.assertEqual(window.preview_title, "Example title")
         self.assertEqual(window.status_value.text(), "Formats loaded")
+
+    def test_fetch_formats_worker_ignores_deleted_signal_source(self) -> None:
+        window = FakeWindow()
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        state = SourceState()
+        controller = SourceController(window, state=state, ports=ports)
+        window._signals.log = RaisingRuntimeSignal()
+        window._signals.formats_loaded = RaisingRuntimeSignal()
+
+        with patch(
+            "gui.qt.controllers.helpers.fetch_info",
+            side_effect=RuntimeError("boom"),
+        ):
+            controller.fetch_formats_worker(1, "https://example.com/watch?v=abc")
 
 
 class TestRunQueueController(unittest.TestCase):

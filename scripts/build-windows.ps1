@@ -53,7 +53,7 @@ if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
   --clean `
   --windowed `
   --name "yt-dlp-gui" `
-  --add-data "font;font" `
+  --add-data "gui/qt/assets;gui/qt/assets" `
   pyinstaller_entry.py
 
 Write-Host "Build complete: dist\yt-dlp-gui\yt-dlp-gui.exe"

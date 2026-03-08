@@ -3,16 +3,23 @@ from typing import Any
 from .types import FormatInfo
 from .tooling import resolve_binary
 
-try:
-    import yt_dlp
-except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "yt-dlp is not installed. Activate your venv and run: pip install -r requirements.txt"
-    ) from exc
+
+_MISSING_YT_DLP_MESSAGE = (
+    "yt-dlp is not installed. Activate your venv and run: pip install -r requirements.txt"
+)
+
+
+def _import_yt_dlp():
+    try:
+        import yt_dlp
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(_MISSING_YT_DLP_MESSAGE) from exc
+    return yt_dlp
 
 
 def fetch_info(url: str) -> dict:
     """Fetch info dict without downloading."""
+    yt_dlp = _import_yt_dlp()
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -24,6 +31,7 @@ def fetch_info(url: str) -> dict:
 
 
 def detect_toolchain() -> dict[str, str]:
+    yt_dlp = _import_yt_dlp()
     yt_dlp_bin, yt_dlp_source = resolve_binary("yt-dlp")
     ffmpeg_bin, ffmpeg_source = resolve_binary("ffmpeg")
     ffprobe_bin, ffprobe_source = resolve_binary("ffprobe")

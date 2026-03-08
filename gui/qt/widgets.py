@@ -13,7 +13,7 @@ class _QtSignals(QObject):
     record_output = Signal(str, str)
 
 
-def _style_combo_popup(combo: QComboBox, *, border_color: str = "#bdd9d2") -> None:
+def _style_combo_popup(combo: QComboBox, *, border_color: str = "#bfdad1") -> None:
     popup = combo.view().window()
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
     popup.setAutoFillBackground(True)

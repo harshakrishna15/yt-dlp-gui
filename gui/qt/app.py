@@ -20,50 +20,44 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..common import (
-    diagnostics,
-    settings_store,
-)
-from . import panels as qt_panels
+from ..common import settings_store
 from . import style as qt_style
+from .constants import (
+    AUDIO_CONTAINERS,
+    CODECS,
+    DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
+    FETCH_DEBOUNCE_MS,
+    MIN_WINDOW_HEIGHT,
+    MIN_WINDOW_WIDTH,
+    SOURCE_DETAILS_NONE_INDEX,
+    SOURCE_DETAILS_PLAYLIST_INDEX,
+    TOP_ACTION_ICON_PX,
+    VIDEO_CONTAINERS,
+)
 from .controllers import RunQueueController, RunQueueState, SourceController, SourceState
 from .ports import SideEffectPorts
 from .qt_ports import build_qt_side_effect_ports
 from .presenter import StatusPresenter
 from .ui_state_mapper import apply_control_state
+from .window_feedback import WindowFeedbackMixin
+from .window_settings import WindowSettingsMixin
 from .view_builders import (
     DownloadsViewCallbacks,
     MainUiBuilder,
     RunSectionCallbacks,
     UiRefs,
 )
-from ..core import error_feedback as core_error_feedback
 from ..core import format_selection as core_format_selection
 from ..core import urls as core_urls
 from ..core import ui_state as core_ui_state
 from ..services import app_service
-from .state import PREVIEW_TITLE_TOOLTIP_DEFAULT, preview_title_fields
+from .state import PREVIEW_TITLE_TOOLTIP_DEFAULT
 from .widgets import _QtSignals
 from ..common.types import DownloadOptions, DownloadRequest, HistoryItem, QueueItem, QueueSettings
 
-VIDEO_CONTAINERS = ("mp4", "webm")
-AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
-CODECS = ("avc1", "av01")
 
-FETCH_DEBOUNCE_MS = 600
-HISTORY_MAX_ENTRIES = 250
-LOG_MAX_LINES = 1000
-DEFAULT_WINDOW_WIDTH = 900
-DEFAULT_WINDOW_HEIGHT = 760
-MIN_WINDOW_WIDTH = 900
-MIN_WINDOW_HEIGHT = 760
-SOURCE_DETAILS_NONE_INDEX = 0
-SOURCE_DETAILS_PROMPT_INDEX = 1
-SOURCE_DETAILS_PLAYLIST_INDEX = 2
-TOP_ACTION_ICON_PX = 16
-
-
-class QtYtDlpGui(QMainWindow):
+class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def __init__(self, *, effects: SideEffectPorts | None = None) -> None:
         super().__init__()
         self.setWindowTitle("yt-dlp-gui")
@@ -422,7 +416,6 @@ class QtYtDlpGui(QMainWindow):
         self.source_details_host = downloads.source_details_host
         self.source_details_stack = downloads.source_details_stack
         self.source_details_empty = downloads.source_details_empty
-        self.source_details_prompt_placeholder = downloads.source_details_prompt_placeholder
         self.playlist_items_panel = downloads.playlist_items_panel
         self.playlist_items_edit = downloads.playlist_items_edit
         self.preview_value = downloads.preview_value
@@ -701,13 +694,13 @@ class QtYtDlpGui(QMainWindow):
         self.output_layout.setColumnStretch(0, 5)
         self.output_layout.setColumnStretch(1, 4)
         self.output_layout.setHorizontalSpacing(22)
-        self.output_layout.setVerticalSpacing(12)
-        self.format_layout.setSpacing(8)
-        self.save_layout.setSpacing(12)
+        self.output_layout.setVerticalSpacing(8)
+        self.format_layout.setSpacing(4)
+        self.save_layout.setSpacing(8)
         self._set_output_form_label_width(min_width=112)
         self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self.folder_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.folder_row_layout.setSpacing(10)
+        self.folder_row_layout.setSpacing(8)
         self.folder_row_layout.setStretch(0, 1)
 
     def _apply_responsive_layout(self) -> None:
@@ -901,335 +894,6 @@ class QtYtDlpGui(QMainWindow):
             f"{container_text} • {codec_text} • {quality_text} • {folder_text}"
         )
 
-    def _refresh_download_result_view(self) -> None:
-        show_latest_output = (self._latest_output_path is not None) and (
-            not self._is_downloading
-        )
-        card_state = "latest" if show_latest_output else "info"
-        if self.download_result_card.property("state") != card_state:
-            self.download_result_card.setProperty("state", card_state)
-            self._refresh_widget_style(self.download_result_card)
-            self._refresh_widget_style(self.download_result_title)
-            self._refresh_widget_style(self.download_result_path)
-        if show_latest_output:
-            self.download_result_title.setText("Latest:")
-            self.download_result_stack.setCurrentIndex(
-                self._download_result_latest_index
-            )
-            self._refresh_last_output_text()
-        else:
-            self.download_result_title.setText("Download info:")
-            self.download_result_stack.setCurrentIndex(
-                self._download_result_info_index
-            )
-
-        self.open_last_output_folder_button.setEnabled(
-            show_latest_output
-            and bool(self._latest_output_path and self._latest_output_path.parent.exists())
-        )
-        self.copy_output_path_button.setEnabled(show_latest_output)
-
-    def _clear_last_output_path(self) -> None:
-        self._latest_output_path = None
-        self.download_result_path.setText("-")
-        self.download_result_path.setToolTip("")
-        self._refresh_download_result_view()
-
-    def _refresh_last_output_text(self) -> None:
-        if self._latest_output_path is None:
-            self.download_result_path.setText("-")
-            self.download_result_path.setToolTip("")
-            return
-        full_text = str(self._latest_output_path)
-        width = max(80, self.download_result_path.width() - 4)
-        metrics = QFontMetrics(self.download_result_path.font())
-        shown_text = metrics.elidedText(
-            full_text,
-            Qt.TextElideMode.ElideMiddle,
-            width,
-        )
-        self.download_result_path.setText(shown_text)
-        self.download_result_path.setToolTip(full_text)
-
-    def _set_last_output_path(self, output_path: Path) -> None:
-        resolved = Path(output_path).expanduser()
-        self._latest_output_path = resolved
-        self.download_result_path.setToolTip(str(resolved))
-        self._refresh_download_result_view()
-        QTimer.singleShot(0, self._refresh_last_output_text)
-
-    def _open_last_output_folder(self) -> None:
-        if self._latest_output_path is None:
-            return
-        folder = self._latest_output_path.parent
-        if not folder.exists():
-            return
-        self._effects.desktop.open_path(folder)
-
-    def _copy_last_output_path(self) -> None:
-        if self._latest_output_path is None:
-            return
-        self._effects.clipboard.set_text(str(self._latest_output_path))
-        self._set_status("Output path copied", log=False)
-
-    def _elide_text_right_with_dots(
-        self,
-        text: str,
-        *,
-        width: int,
-        metrics: QFontMetrics,
-    ) -> str:
-        clean = str(text or "")
-        if width <= 0:
-            return "..."
-        if metrics.horizontalAdvance(clean) <= width:
-            return clean
-        dots = "..."
-        dots_width = metrics.horizontalAdvance(dots)
-        if dots_width >= width:
-            return dots
-        low = 0
-        high = len(clean)
-        while low < high:
-            mid = (low + high + 1) // 2
-            candidate = clean[:mid]
-            if metrics.horizontalAdvance(candidate) + dots_width <= width:
-                low = mid
-            else:
-                high = mid - 1
-        trimmed = clean[:low].rstrip()
-        if not trimmed:
-            return dots
-        return f"{trimmed}{dots}"
-
-    def _refresh_current_item_text(self) -> None:
-        progress_clean = str(self._current_item_progress or "-").strip() or "-"
-        title_clean = re.sub(r"\s+", " ", str(self._current_item_title or "-").strip()) or "-"
-        prefix = "Item: " if progress_clean == "-" else f"Item: {progress_clean} - "
-        full_text = f"{prefix}{title_clean}"
-        metrics = QFontMetrics(self.item_label.font())
-        if (not self.isVisible()) or self.item_label.width() <= 0:
-            shown_text = full_text
-        else:
-            width = max(80, self.item_label.width() - 4)
-            if metrics.horizontalAdvance(full_text) <= width:
-                shown_text = full_text
-            else:
-                prefix_width = metrics.horizontalAdvance(prefix)
-                if prefix_width >= width:
-                    shown_text = self._elide_text_right_with_dots(
-                        full_text,
-                        width=width,
-                        metrics=metrics,
-                    )
-                else:
-                    shown_title = self._elide_text_right_with_dots(
-                        title_clean,
-                        width=max(0, width - prefix_width),
-                        metrics=metrics,
-                    )
-                    shown_text = f"{prefix}{shown_title}"
-        self.item_label.setText(shown_text)
-        self.item_label.setToolTip(str(self._current_item_title_tooltip or "-"))
-
-    def _set_current_item_display(self, *, progress: str, title: str) -> None:
-        progress_clean = str(progress or "-").strip() or "-"
-        raw_title = str(title if title is not None else "-")
-        if not raw_title.strip():
-            raw_title = "-"
-        title_clean = re.sub(r"\s+", " ", raw_title.strip()) or "-"
-        self._current_item_progress = progress_clean
-        self._current_item_title = title_clean
-        self._current_item_title_tooltip = raw_title
-        self._refresh_current_item_text()
-        self.item_label.setVisible(True)
-
-    def _set_current_item_from_text(self, item: str) -> None:
-        clean = re.sub(r"\s+", " ", str(item or "").strip())
-        if not clean:
-            self._set_current_item_display(progress="-", title="-")
-            return
-        match = re.match(r"^(\d+/\d+)\s+(.+)$", clean)
-        if match:
-            self._set_current_item_display(
-                progress=match.group(1),
-                title=match.group(2),
-            )
-            return
-        self._set_current_item_display(progress="-", title=clean)
-
-    def _build_settings_panel(self) -> QWidget:
-        refs = qt_panels.build_settings_panel(
-            parent=self,
-            register_native_combo=self._register_native_combo,
-            on_update_controls_state=self._update_controls_state,
-            on_export_diagnostics=self._export_diagnostics,
-        )
-        self.subtitle_languages_edit = refs.subtitle_languages_edit
-        self.write_subtitles_check = refs.write_subtitles_check
-        self.embed_subtitles_check = refs.embed_subtitles_check
-        self.audio_language_combo = refs.audio_language_combo
-        self.network_timeout_edit = refs.network_timeout_edit
-        self.network_retries_edit = refs.network_retries_edit
-        self.retry_backoff_edit = refs.retry_backoff_edit
-        self.concurrent_fragments_edit = refs.concurrent_fragments_edit
-        self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
-        self.open_folder_after_download_check = refs.open_folder_after_download_check
-        self.export_diagnostics_button = refs.export_diagnostics_button
-        return refs.panel
-
-    def _build_queue_panel(self) -> QWidget:
-        refs = qt_panels.build_queue_panel(
-            parent=self,
-            on_remove_selected=self._queue_remove_selected,
-            on_move_up=self._queue_move_up,
-            on_move_down=self._queue_move_down,
-            on_clear=self._queue_clear,
-        )
-        self.queue_list = refs.queue_list
-        self.queue_remove_button = refs.queue_remove_button
-        self.queue_move_up_button = refs.queue_move_up_button
-        self.queue_move_down_button = refs.queue_move_down_button
-        self.queue_clear_button = refs.queue_clear_button
-        self._set_uniform_button_width(
-            [
-                self.queue_remove_button,
-                self.queue_move_up_button,
-                self.queue_move_down_button,
-                self.queue_clear_button,
-            ],
-            extra_px=24,
-        )
-        return refs.panel
-
-    def _build_history_panel(self) -> QWidget:
-        refs = qt_panels.build_history_panel(
-            parent=self,
-            on_open_file=self._open_selected_history_file,
-            on_open_folder=self._open_selected_history_folder,
-            on_clear=self._clear_download_history,
-        )
-        self.history_list = refs.history_list
-        self.history_open_file_button = refs.history_open_file_button
-        self.history_open_folder_button = refs.history_open_folder_button
-        self.history_clear_button = refs.history_clear_button
-        self._set_uniform_button_width(
-            [
-                self.history_open_file_button,
-                self.history_open_folder_button,
-                self.history_clear_button,
-            ],
-            extra_px=24,
-        )
-        return refs.panel
-
-    def _build_logs_panel(self) -> QWidget:
-        refs = qt_panels.build_logs_panel(
-            parent=self,
-            max_lines=LOG_MAX_LINES,
-            on_clear_logs=self._clear_logs,
-        )
-        self.logs_view = refs.logs_view
-        self.logs_clear_button = refs.logs_clear_button
-        return refs.panel
-
-    def _default_output_dir(self) -> str:
-        return str(Path.home() / "Downloads")
-
-    def _load_user_settings(self) -> None:
-        settings = settings_store.load_settings(
-            default_output_dir=self._default_output_dir()
-        )
-        self._applying_user_settings = True
-        try:
-            self.output_dir_edit.setText(self._default_output_dir())
-            self.subtitle_languages_edit.setText(
-                str(settings.get("subtitle_languages") or "")
-            )
-            self.write_subtitles_check.setChecked(
-                bool(settings.get("write_subtitles"))
-            )
-            self.network_timeout_edit.setText(str(settings.get("network_timeout") or ""))
-            self.network_retries_edit.setText(str(settings.get("network_retries") or ""))
-            self.retry_backoff_edit.setText(str(settings.get("retry_backoff") or ""))
-            self.concurrent_fragments_edit.setText(
-                str(settings.get("concurrent_fragments") or "")
-            )
-            edit_friendly_encoder = str(
-                settings.get("edit_friendly_encoder") or "auto"
-            ).strip()
-            idx = self.edit_friendly_encoder_combo.findData(edit_friendly_encoder)
-            if idx < 0:
-                idx = self.edit_friendly_encoder_combo.findData("auto")
-            if idx < 0:
-                idx = 0
-            self.edit_friendly_encoder_combo.setCurrentIndex(idx)
-            self.open_folder_after_download_check.setChecked(
-                bool(settings.get("open_folder_after_download"))
-            )
-        finally:
-            self._applying_user_settings = False
-
-    def _capture_user_settings(self) -> dict[str, object]:
-        return {
-            "subtitle_languages": self.subtitle_languages_edit.text().strip(),
-            "write_subtitles": bool(self.write_subtitles_check.isChecked()),
-            "network_timeout": self.network_timeout_edit.text().strip(),
-            "network_retries": self.network_retries_edit.text().strip(),
-            "retry_backoff": self.retry_backoff_edit.text().strip(),
-            "concurrent_fragments": self.concurrent_fragments_edit.text().strip(),
-            "edit_friendly_encoder": str(
-                self.edit_friendly_encoder_combo.currentData() or "auto"
-            ).strip(),
-            "open_folder_after_download": bool(
-                self.open_folder_after_download_check.isChecked()
-            ),
-        }
-
-    def _save_user_settings(self) -> None:
-        if self._applying_user_settings:
-            return
-        settings_store.save_settings(
-            self._capture_user_settings(),
-            default_output_dir=self._default_output_dir(),
-        )
-
-    def _connect_settings_autosave(self) -> None:
-        self.subtitle_languages_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.write_subtitles_check.stateChanged.connect(
-            lambda _state: self._save_user_settings()
-        )
-        self.network_timeout_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.network_retries_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.retry_backoff_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.concurrent_fragments_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.edit_friendly_encoder_combo.currentIndexChanged.connect(
-            lambda _idx: self._save_user_settings()
-        )
-        self.open_folder_after_download_check.stateChanged.connect(
-            lambda _state: self._save_user_settings()
-        )
-
-    def _maybe_open_output_folder(self) -> None:
-        if not self.open_folder_after_download_check.isChecked():
-            return
-        output_dir = Path(
-            self.output_dir_edit.text().strip() or self._default_output_dir()
-        ).expanduser()
-        if not output_dir.exists():
-            return
-        self._effects.desktop.open_path(output_dir)
-
     def _apply_header_layout(self) -> None:
         self.classic_actions.setVisible(True)
         self._refresh_top_action_icons()
@@ -1288,10 +952,13 @@ class QtYtDlpGui(QMainWindow):
             ("logs", self.logs_button),
         ):
             icon = QIcon()
-            if self._header_icons_enabled and name != "downloads":
+            if self._header_icons_enabled:
                 icon = self._panel_icon(
                     name,
-                    checked=self._active_panel_name == name,
+                    checked=(
+                        name == "downloads" and self._active_panel_name is None
+                    )
+                    or self._active_panel_name == name,
                     alert=(
                         name == "logs"
                         and self._logs_alert_active
@@ -1316,22 +983,26 @@ class QtYtDlpGui(QMainWindow):
 
     def _configure_top_action_icons(self) -> None:
         self._top_action_icons = {
+            "downloads": {
+                "normal": self._load_asset_icon("downloads.svg"),
+                "active": self._load_asset_icon("downloads-active.svg"),
+            },
             "settings": {
-                "normal": self._load_asset_icon("tmp-settings.svg"),
-                "active": self._load_asset_icon("tmp-settings-active.svg"),
+                "normal": self._load_asset_icon("settings.svg"),
+                "active": self._load_asset_icon("settings-active.svg"),
             },
             "queue": {
-                "normal": self._load_asset_icon("tmp-queue.svg"),
-                "active": self._load_asset_icon("tmp-queue-active.svg"),
+                "normal": self._load_asset_icon("queue.svg"),
+                "active": self._load_asset_icon("queue-active.svg"),
             },
             "history": {
-                "normal": self._load_asset_icon("tmp-history.svg"),
-                "active": self._load_asset_icon("tmp-history-active.svg"),
+                "normal": self._load_asset_icon("history.svg"),
+                "active": self._load_asset_icon("history-active.svg"),
             },
             "logs": {
-                "normal": self._load_asset_icon("tmp-logs.svg"),
-                "active": self._load_asset_icon("tmp-logs-active.svg"),
-                "alert": self._load_asset_icon("tmp-logs-alert.svg"),
+                "normal": self._load_asset_icon("logs.svg"),
+                "active": self._load_asset_icon("logs-active.svg"),
+                "alert": self._load_asset_icon("logs-alert.svg"),
             },
         }
         self._refresh_top_action_icons()
@@ -1409,41 +1080,6 @@ class QtYtDlpGui(QMainWindow):
         self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
-
-    def _append_log(self, text: str) -> None:
-        clean = str(text or "").strip()
-        if not clean:
-            return
-        error_text = core_error_feedback.error_text_from_log(clean)
-        if error_text:
-            self._last_error_log = error_text
-        self._log_lines.append(clean)
-        if len(self._log_lines) > LOG_MAX_LINES:
-            self._log_lines = self._log_lines[-LOG_MAX_LINES:]
-        self.logs_view.appendPlainText(clean)
-        if self._active_panel_name != "logs" and self._is_attention_log(clean):
-            self._set_logs_alert(True)
-
-    def _clear_logs(self) -> None:
-        self._log_lines.clear()
-        self._last_error_log = ""
-        self._status_presenter.last_source_feedback_log = None
-        self._last_source_feedback_log = None
-        self.logs_view.clear()
-        self._set_logs_alert(False)
-
-    def _set_status(self, text: str, *, log: bool = True) -> None:
-        self._status_presenter.set_status(
-            text,
-            set_status_text=self.status_value.setText,
-            append_log=self._append_log,
-            log=log,
-        )
-
-    def _set_preview_title(self, title: str) -> None:
-        shown, tooltip = preview_title_fields(title)
-        self.preview_value.setText(shown)
-        self.preview_value.setToolTip(tooltip)
 
     def _set_mixed_url_alert_visible(self, visible: bool) -> None:
         should_show = bool(visible) and (
@@ -1546,7 +1182,7 @@ class QtYtDlpGui(QMainWindow):
             "Select output folder",
         )
         if selected:
-            self.output_dir_edit.setText(selected)
+            self._set_output_dir_text(selected)
             self._refresh_ready_summary()
 
     def _on_url_changed(self) -> None:
@@ -1828,174 +1464,6 @@ class QtYtDlpGui(QMainWindow):
 
     def _on_record_output(self, output_path_raw: str, source_url: str) -> None:
         self._record_download_output(Path(output_path_raw), source_url)
-
-    def _record_download_output(self, output_path: Path, source_url: str = "") -> None:
-        recorded = app_service.record_history_output(
-            history=self.download_history,
-            seen_paths=self._history_seen_paths,
-            output_path=output_path,
-            source_url=source_url,
-            max_entries=HISTORY_MAX_ENTRIES,
-        )
-        if not recorded:
-            return
-        self._set_last_output_path(output_path)
-        self._refresh_history_panel()
-
-    def _refresh_history_panel(self) -> None:
-        self.history_list.clear()
-        for item in self.download_history:
-            timestamp = item.get("timestamp", "")
-            name = item.get("name", "")
-            self.history_list.addItem(f"{timestamp}  {name}")
-
-    def _selected_history_item(self) -> HistoryItem | None:
-        row = self.history_list.currentRow()
-        if row < 0 or row >= len(self.download_history):
-            return None
-        return self.download_history[row]
-
-    def _open_selected_history_file(self) -> None:
-        item = self._selected_history_item()
-        if item is None:
-            return
-        path_raw = str(item.get("path", "")).strip()
-        if not path_raw:
-            return
-        path = Path(path_raw)
-        self._effects.desktop.open_path(path)
-
-    def _open_selected_history_folder(self) -> None:
-        item = self._selected_history_item()
-        if item is None:
-            return
-        path_raw = str(item.get("path", "")).strip()
-        if not path_raw:
-            return
-        path = Path(path_raw)
-        self._effects.desktop.open_path(path.parent)
-
-    def _clear_download_history(self) -> None:
-        if not self.download_history:
-            return
-        self.download_history.clear()
-        self._history_seen_paths.clear()
-        self._refresh_history_panel()
-        self._set_status("Download history cleared")
-
-    def _stop_progress_animation(self) -> None:
-        if self._progress_anim is None:
-            return
-        anim = self._progress_anim
-        self._progress_anim = None
-        if anim in self._active_animations:
-            self._active_animations.remove(anim)
-        anim.stop()
-        anim.deleteLater()
-
-    def _animate_progress_bar_to(self, percent: float, *, immediate: bool = False) -> None:
-        clamped = max(0.0, min(100.0, float(percent)))
-        target = int(round(clamped * 10))
-        if immediate:
-            self._stop_progress_animation()
-            self.progress_bar.setValue(target)
-            return
-        if target == self.progress_bar.value():
-            return
-        self._stop_progress_animation()
-        anim = QPropertyAnimation(self.progress_bar, b"value", self)
-        anim.setDuration(220)
-        anim.setStartValue(self.progress_bar.value())
-        anim.setEndValue(target)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._progress_anim = anim
-        self._track_animation(anim)
-        anim.start()
-
-    def _reset_progress_summary(self) -> None:
-        self._stop_progress_animation()
-        self.progress_bar.setValue(0)
-        self.progress_label.setText("Progress: -")
-        self.speed_label.setText("Speed: -")
-        self.eta_label.setText("ETA: -")
-        self._set_current_item_display(progress="-", title="-")
-        self._set_metrics_visible(False)
-
-    def _on_progress_update(self, payload: object) -> None:
-        if not isinstance(payload, dict):
-            return
-        status = payload.get("status")
-        if status == "downloading":
-            self._set_metrics_visible(True)
-            percent = payload.get("percent")
-            speed = payload.get("speed")
-            eta = payload.get("eta")
-            playlist_eta = str(payload.get("playlist_eta") or "").strip()
-            if isinstance(percent, (int, float)):
-                self._animate_progress_bar_to(float(percent))
-                self.progress_label.setText(f"Progress: {float(percent):.1f}%")
-            if isinstance(speed, str):
-                self.speed_label.setText(f"Speed: {speed or '-'}")
-            eta_text = str(eta).strip() if isinstance(eta, str) else ""
-            if playlist_eta:
-                self.eta_label.setText(f"ETA: {eta_text or '-'} / {playlist_eta}")
-            elif eta_text:
-                self.eta_label.setText(f"ETA: {eta_text}")
-            else:
-                self.eta_label.setText("ETA: -")
-        elif status == "item":
-            if not self._show_progress_item:
-                return
-            item = str(payload.get("item") or "").strip()
-            if item:
-                self._set_current_item_from_text(item)
-        elif status == "finished":
-            # yt-dlp may emit "finished" for intermediate steps (e.g. one stream
-            # before another starts). Do not force 100% here to avoid UI flicker.
-            self.eta_label.setText("ETA: Finalizing")
-        elif status == "cancelled":
-            self._reset_progress_summary()
-
-    def _export_diagnostics(self) -> None:
-        timestamp = self._effects.clock.now()
-        base_dir = Path(
-            self.output_dir_edit.text().strip() or (Path.home() / "Downloads")
-        ).expanduser()
-        try:
-            self._effects.filesystem.ensure_dir(base_dir)
-        except OSError:
-            base_dir = Path.home() / "Downloads"
-            self._effects.filesystem.ensure_dir(base_dir)
-
-        output_path = base_dir / f"yt-dlp-gui-diagnostics-{timestamp:%Y%m%d-%H%M%S}.txt"
-        options = self._snapshot_download_options()
-        payload = diagnostics.build_report_payload(
-            generated_at=timestamp,
-            status=self.status_value.text(),
-            simple_state=self.status_value.text(),
-            url=self.url_edit.text(),
-            mode=self._current_mode(),
-            container=self._current_container(),
-            codec=self._current_codec(),
-            format_label=self._selected_format_label(),
-            queue_items=self.queue_items,
-            queue_active=self.queue_active,
-            is_downloading=self._is_downloading,
-            preview_title=self.preview_value.text(),
-            options=options,
-            history_items=self.download_history,
-            logs_text="\n".join(self._log_lines),
-        )
-        try:
-            self._effects.filesystem.write_text(output_path, payload, encoding="utf-8")
-        except OSError as exc:
-            self._effects.dialogs.critical(self, "Diagnostics export failed", str(exc))
-            return
-        self._append_log(f"[diag] exported {output_path}")
-        self._set_status("Diagnostics exported")
-        self._effects.dialogs.information(
-            self, "Diagnostics exported", f"Saved to:\n{output_path}"
-        )
 
     def _update_controls_state(self) -> None:
         url_present = bool(self.url_edit.text().strip())

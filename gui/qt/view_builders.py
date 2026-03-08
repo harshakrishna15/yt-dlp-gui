@@ -29,11 +29,6 @@ from PySide6.QtWidgets import (
 from .widgets import _NativeComboBox
 
 
-SOURCE_DETAILS_NONE_INDEX = 0
-SOURCE_DETAILS_PROMPT_INDEX = 1
-SOURCE_DETAILS_PLAYLIST_INDEX = 2
-
-
 @dataclass(frozen=True)
 class TopBarRefs:
     header: QWidget
@@ -92,7 +87,6 @@ class DownloadsViewRefs:
     source_details_host: QWidget
     source_details_stack: QStackedWidget
     source_details_empty: QWidget
-    source_details_prompt_placeholder: QWidget
     playlist_items_panel: QWidget
     playlist_items_edit: QLineEdit
     preview_value: QLabel
@@ -161,18 +155,63 @@ class DownloadsViewCallbacks:
     run: RunSectionCallbacks
 
 
+@dataclass(frozen=True)
+class _SourceSectionRefs:
+    section: QGroupBox
+    url_edit: QLineEdit
+    paste_button: QPushButton
+    source_details_host: QWidget
+    source_details_stack: QStackedWidget
+    source_details_empty: QWidget
+    playlist_items_panel: QWidget
+    playlist_items_edit: QLineEdit
+    preview_value: QLabel
+    preview_title_label: QLabel
+    source_details_label: QLabel
+
+
+@dataclass(frozen=True)
+class _OutputSectionRefs:
+    section: QGroupBox
+    layout: QGridLayout
+    format_card: QGroupBox
+    format_layout: QVBoxLayout
+    mode_row_layout: QHBoxLayout
+    video_radio: QRadioButton
+    audio_radio: QRadioButton
+    content_type_label: QLabel
+    container_combo: _NativeComboBox
+    convert_check: QCheckBox
+    container_label: QLabel
+    post_process_label: QLabel
+    codec_combo: _NativeComboBox
+    codec_label: QLabel
+    format_combo: _NativeComboBox
+    format_label: QLabel
+    output_form_labels: list[QLabel]
+    output_form_rows: list[QWidget]
+    save_card: QGroupBox
+    save_layout: QVBoxLayout
+    filename_edit: QLineEdit
+    file_name_label: QLabel
+    folder_row_layout: QHBoxLayout
+    output_dir_edit: QLineEdit
+    browse_button: QPushButton
+    output_folder_label: QLabel
+
+
 class TopBarBuilder:
     @staticmethod
     def build(parent: QWidget) -> TopBarRefs:
         header = QWidget(parent)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(16)
+        header_layout.setSpacing(14)
 
         brand_col = QWidget(header)
         brand_layout = QVBoxLayout(brand_col)
         brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(2)
+        brand_layout.setSpacing(1)
         title = QLabel("yt-dlp-gui", brand_col)
         title.setObjectName("titleLabel")
         subtitle = QLabel("Paste a video URL to get started.", brand_col)
@@ -183,12 +222,12 @@ class TopBarBuilder:
         top_actions = QWidget(header)
         top_actions_layout = QHBoxLayout(top_actions)
         top_actions_layout.setContentsMargins(0, 0, 0, 0)
-        top_actions_layout.setSpacing(8)
+        top_actions_layout.setSpacing(6)
 
         classic_actions = QWidget(top_actions)
         classic_layout = QHBoxLayout(classic_actions)
         classic_layout.setContentsMargins(0, 0, 0, 0)
-        classic_layout.setSpacing(8)
+        classic_layout.setSpacing(6)
         downloads_button = QPushButton("Downloads", classic_actions)
         queue_button = QPushButton("Queue", classic_actions)
         history_button = QPushButton("History", classic_actions)
@@ -223,11 +262,12 @@ class TopBarBuilder:
 class RunSectionBuilder:
     @staticmethod
     def build(parent: QWidget, callbacks: RunSectionCallbacks) -> RunSectionRefs:
-        run = QGroupBox("Start Download", parent)
+        run = QGroupBox("", parent)
         run.setObjectName("runSection")
         run_layout = QVBoxLayout(run)
-        run_layout.setContentsMargins(0, 2, 0, 2)
+        run_layout.setContentsMargins(0, 0, 0, 0)
         run_layout.setSpacing(8)
+        run_layout.addWidget(_build_section_header(run, "Start Download", compact=False))
         status_value = QLabel("Idle", run)
         status_value.setObjectName("statusLine")
         status_value.setVisible(False)
@@ -242,7 +282,7 @@ class RunSectionBuilder:
         buttons_row = QWidget(run)
         buttons_layout = QHBoxLayout(buttons_row)
         buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(10)
+        buttons_layout.setSpacing(8)
 
         start_button = QPushButton("Download", buttons_row)
         start_button.setObjectName("primaryActionButton")
@@ -294,8 +334,8 @@ class RunSectionBuilder:
         download_result_card.setObjectName("downloadResultCard")
         download_result_card.setProperty("state", "info")
         result_layout = QHBoxLayout(download_result_card)
-        result_layout.setContentsMargins(12, 8, 12, 8)
-        result_layout.setSpacing(10)
+        result_layout.setContentsMargins(10, 7, 10, 7)
+        result_layout.setSpacing(8)
         download_result_title = QLabel("Download info:", download_result_card)
         download_result_title.setObjectName("downloadResultTitle")
         download_result_stack = QStackedWidget(download_result_card)
@@ -364,6 +404,50 @@ class RunSectionBuilder:
         )
 
 
+def _build_section_header(parent: QWidget, title: str, *, compact: bool) -> QWidget:
+    header = QWidget(parent)
+    header_layout = QVBoxLayout(header)
+    header_layout.setContentsMargins(0, 0, 0, 0)
+    header_layout.setSpacing(0)
+
+    title_label = QLabel(title, header)
+    title_label.setObjectName("cardHeaderTitle" if compact else "sectionHeaderTitle")
+    header_layout.addWidget(title_label)
+
+    return header
+
+
+def _add_labeled_row(
+    parent: QWidget,
+    layout: QVBoxLayout,
+    label: QLabel,
+    field: QWidget,
+) -> QWidget:
+    row = QWidget(parent)
+    row_layout = QHBoxLayout(row)
+    row_layout.setContentsMargins(0, 0, 0, 0)
+    row_layout.setSpacing(8)
+    row_layout.addWidget(label)
+    row_layout.addWidget(field, stretch=1)
+    layout.addWidget(row)
+    return row
+
+
+def _add_save_block(
+    parent: QWidget,
+    layout: QVBoxLayout,
+    label: QLabel,
+    field: QWidget,
+) -> None:
+    block = QWidget(parent)
+    block_layout = QVBoxLayout(block)
+    block_layout.setContentsMargins(0, 0, 0, 0)
+    block_layout.setSpacing(5)
+    block_layout.addWidget(label)
+    block_layout.addWidget(field)
+    layout.addWidget(block)
+
+
 class DownloadsViewBuilder:
     @staticmethod
     def build(
@@ -377,24 +461,98 @@ class DownloadsViewBuilder:
         main_scroll.setWidgetResizable(True)
         main_scroll.setFrameShape(QFrame.Shape.NoFrame)
         main_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        main_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        main_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         main_page = QWidget(main_scroll)
         main_layout = QVBoxLayout(main_page)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(10)
 
-        source = QGroupBox("Video Source", main_page)
+        source = DownloadsViewBuilder._build_source_section(main_page, callbacks)
+        main_layout.addWidget(source.section)
+
+        output = DownloadsViewBuilder._build_output_section(
+            main_page,
+            register_native_combo=register_native_combo,
+            callbacks=callbacks,
+        )
+        main_layout.addWidget(output.section)
+
+        run = RunSectionBuilder.build(main_page, callbacks.run)
+        main_layout.addWidget(run.section)
+        main_layout.addStretch(1)
+
+        main_scroll.setWidget(main_page)
+        main_page_index = panel_stack.addWidget(main_scroll)
+
+        return DownloadsViewRefs(
+            main_scroll=main_scroll,
+            main_page=main_page,
+            main_page_index=main_page_index,
+            url_edit=source.url_edit,
+            paste_button=source.paste_button,
+            source_details_host=source.source_details_host,
+            source_details_stack=source.source_details_stack,
+            source_details_empty=source.source_details_empty,
+            playlist_items_panel=source.playlist_items_panel,
+            playlist_items_edit=source.playlist_items_edit,
+            preview_value=source.preview_value,
+            preview_title_label=source.preview_title_label,
+            source_details_label=source.source_details_label,
+            output_section=output.section,
+            output_layout=output.layout,
+            format_card=output.format_card,
+            format_layout=output.format_layout,
+            mode_row_layout=output.mode_row_layout,
+            video_radio=output.video_radio,
+            audio_radio=output.audio_radio,
+            content_type_label=output.content_type_label,
+            container_combo=output.container_combo,
+            convert_check=output.convert_check,
+            container_label=output.container_label,
+            post_process_label=output.post_process_label,
+            codec_combo=output.codec_combo,
+            codec_label=output.codec_label,
+            format_combo=output.format_combo,
+            format_label=output.format_label,
+            output_form_labels=output.output_form_labels,
+            output_form_rows=output.output_form_rows,
+            save_card=output.save_card,
+            save_layout=output.save_layout,
+            filename_edit=output.filename_edit,
+            file_name_label=output.file_name_label,
+            folder_row_layout=output.folder_row_layout,
+            output_dir_edit=output.output_dir_edit,
+            browse_button=output.browse_button,
+            output_folder_label=output.output_folder_label,
+            run=run,
+        )
+
+    @staticmethod
+    def _build_source_section(
+        parent: QWidget,
+        callbacks: DownloadsViewCallbacks,
+    ) -> _SourceSectionRefs:
+        source = QGroupBox("", parent)
         source.setObjectName("sourceSection")
-        source_layout = QFormLayout(source)
+        source_shell_layout = QVBoxLayout(source)
+        source_shell_layout.setContentsMargins(0, 0, 0, 0)
+        source_shell_layout.setSpacing(10)
+        source_shell_layout.addWidget(
+            _build_section_header(source, "Video Source", compact=False)
+        )
+
+        source_content = QWidget(source)
+        source_shell_layout.addWidget(source_content)
+        source_layout = QFormLayout(source_content)
         source_layout.setContentsMargins(0, 0, 0, 0)
         source_layout.setFormAlignment(Qt.AlignmentFlag.AlignTop)
         source_layout.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
         source_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        source_layout.setHorizontalSpacing(16)
-        source_layout.setVerticalSpacing(6)
+        source_layout.setHorizontalSpacing(14)
+        source_layout.setVerticalSpacing(4)
 
         url_row = QWidget(source)
         url_row_layout = QHBoxLayout(url_row)
@@ -428,8 +586,6 @@ class DownloadsViewBuilder:
 
         source_details_empty = QWidget(source_details_stack)
         source_details_stack.addWidget(source_details_empty)
-        source_details_prompt_placeholder = QWidget(source_details_stack)
-        source_details_stack.addWidget(source_details_prompt_placeholder)
 
         playlist_items_panel = QWidget(source_details_stack)
         playlist_items_layout = QHBoxLayout(playlist_items_panel)
@@ -444,36 +600,69 @@ class DownloadsViewBuilder:
         source_details_stack.addWidget(playlist_items_panel)
 
         preview_value = QLabel("-", source)
+        preview_value.setObjectName("previewValue")
         preview_value.setWordWrap(False)
-        preview_value.setMinimumHeight(24)
-        preview_value.setMargin(3)
+        preview_value.setMinimumHeight(28)
+        preview_value.setMargin(0)
         preview_title_label = QLabel("Preview title", source)
         preview_title_label.setObjectName("sectionFormLabel")
         preview_value_row = QWidget(source)
         preview_value_layout = QHBoxLayout(preview_value_row)
-        preview_value_layout.setContentsMargins(6, 2, 0, 2)
+        preview_value_layout.setContentsMargins(0, 0, 0, 0)
         preview_value_layout.setSpacing(0)
         preview_value_layout.addWidget(preview_value)
         source_layout.addRow(preview_title_label, preview_value_row)
+
         source_details_label = QLabel("", source)
         source_details_label.setObjectName("sectionFormLabel")
         source_layout.addRow(source_details_label, source_details_host)
-        main_layout.addWidget(source)
+        return _SourceSectionRefs(
+            section=source,
+            url_edit=url_edit,
+            paste_button=paste_button,
+            source_details_host=source_details_host,
+            source_details_stack=source_details_stack,
+            source_details_empty=source_details_empty,
+            playlist_items_panel=playlist_items_panel,
+            playlist_items_edit=playlist_items_edit,
+            preview_value=preview_value,
+            preview_title_label=preview_title_label,
+            source_details_label=source_details_label,
+        )
 
-        output_section = QGroupBox("Export Settings", main_page)
+    @staticmethod
+    def _build_output_section(
+        parent: QWidget,
+        *,
+        register_native_combo: Callable[[_NativeComboBox], None],
+        callbacks: DownloadsViewCallbacks,
+    ) -> _OutputSectionRefs:
+        output_section = QGroupBox("", parent)
         output_section.setObjectName("outputSection")
-        output_layout = QGridLayout(output_section)
+        output_shell_layout = QVBoxLayout(output_section)
+        output_shell_layout.setContentsMargins(0, 0, 0, 0)
+        output_shell_layout.setSpacing(10)
+        output_shell_layout.addWidget(
+            _build_section_header(output_section, "Export Settings", compact=False)
+        )
+
+        output_content = QWidget(output_section)
+        output_shell_layout.addWidget(output_content)
+        output_layout = QGridLayout(output_content)
         output_layout.setContentsMargins(0, 0, 2, 0)
-        output_layout.setHorizontalSpacing(22)
-        output_layout.setVerticalSpacing(12)
+        output_layout.setHorizontalSpacing(18)
+        output_layout.setVerticalSpacing(8)
         output_layout.setColumnStretch(0, 5)
         output_layout.setColumnStretch(1, 4)
 
-        format_card = QGroupBox("Format setup", output_section)
+        format_card = QGroupBox("", output_section)
         format_card.setObjectName("formatSection")
         format_layout = QVBoxLayout(format_card)
-        format_layout.setContentsMargins(0, 2, 0, 0)
-        format_layout.setSpacing(8)
+        format_layout.setContentsMargins(0, 0, 0, 0)
+        format_layout.setSpacing(4)
+        format_layout.addWidget(
+            _build_section_header(format_card, "Format setup", compact=True)
+        )
 
         mode_row = QWidget(format_card)
         mode_row_layout = QHBoxLayout(mode_row)
@@ -530,30 +719,26 @@ class DownloadsViewBuilder:
         ]
         for label in output_form_labels:
             label.setObjectName("outputFormLabel")
-        output_form_rows: list[QWidget] = []
 
-        def _add_output_row(label: QLabel, field: QWidget) -> None:
-            row = QWidget(format_card)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(10)
-            row_layout.addWidget(label)
-            row_layout.addWidget(field, stretch=1)
-            format_layout.addWidget(row)
-            output_form_rows.append(row)
+        output_form_rows = [
+            _add_labeled_row(format_card, format_layout, content_type_label, mode_row),
+            _add_labeled_row(format_card, format_layout, container_label, container_row),
+            _add_labeled_row(format_card, format_layout, post_process_label, convert_check),
+            _add_labeled_row(format_card, format_layout, codec_label, codec_combo),
+        ]
+        format_layout.addSpacing(4)
+        output_form_rows.append(
+            _add_labeled_row(format_card, format_layout, format_label, format_combo)
+        )
 
-        _add_output_row(content_type_label, mode_row)
-        _add_output_row(container_label, container_row)
-        _add_output_row(post_process_label, convert_check)
-        _add_output_row(codec_label, codec_combo)
-        format_layout.addSpacing(6)
-        _add_output_row(format_label, format_combo)
-
-        save_card = QGroupBox("Save options", output_section)
+        save_card = QGroupBox("", output_section)
         save_card.setObjectName("saveSection")
         save_layout = QVBoxLayout(save_card)
-        save_layout.setContentsMargins(0, 2, 0, 0)
-        save_layout.setSpacing(12)
+        save_layout.setContentsMargins(0, 0, 0, 0)
+        save_layout.setSpacing(8)
+        save_layout.addWidget(
+            _build_section_header(save_card, "Save options", compact=True)
+        )
         filename_edit = QLineEdit(save_card)
         filename_edit.setPlaceholderText("Optional single-video filename")
         file_name_label = QLabel("File name", save_card)
@@ -572,52 +757,15 @@ class DownloadsViewBuilder:
         output_folder_label = QLabel("Output folder", save_card)
         output_folder_label.setObjectName("saveBlockLabel")
 
-        def _add_save_block(label: QLabel, field: QWidget) -> None:
-            block = QWidget(save_card)
-            block_layout = QVBoxLayout(block)
-            block_layout.setContentsMargins(0, 0, 0, 0)
-            block_layout.setSpacing(9)
-            block_layout.addWidget(label)
-            block_layout.addWidget(field)
-            save_layout.addWidget(block)
-
-        _add_save_block(file_name_label, filename_edit)
-        _add_save_block(output_folder_label, folder_row)
+        _add_save_block(save_card, save_layout, file_name_label, filename_edit)
+        _add_save_block(save_card, save_layout, output_folder_label, folder_row)
         save_layout.addStretch(1)
 
         output_layout.addWidget(format_card, 0, 0)
         output_layout.addWidget(save_card, 0, 1)
-        main_layout.addWidget(output_section)
-
-        run_divider = QFrame(main_page)
-        run_divider.setObjectName("sectionDivider")
-        run_divider.setFixedHeight(1)
-        main_layout.addWidget(run_divider)
-
-        run = RunSectionBuilder.build(main_page, callbacks.run)
-        main_layout.addWidget(run.section)
-        main_layout.addStretch(1)
-
-        main_scroll.setWidget(main_page)
-        main_page_index = panel_stack.addWidget(main_scroll)
-
-        return DownloadsViewRefs(
-            main_scroll=main_scroll,
-            main_page=main_page,
-            main_page_index=main_page_index,
-            url_edit=url_edit,
-            paste_button=paste_button,
-            source_details_host=source_details_host,
-            source_details_stack=source_details_stack,
-            source_details_empty=source_details_empty,
-            source_details_prompt_placeholder=source_details_prompt_placeholder,
-            playlist_items_panel=playlist_items_panel,
-            playlist_items_edit=playlist_items_edit,
-            preview_value=preview_value,
-            preview_title_label=preview_title_label,
-            source_details_label=source_details_label,
-            output_section=output_section,
-            output_layout=output_layout,
+        return _OutputSectionRefs(
+            section=output_section,
+            layout=output_layout,
             format_card=format_card,
             format_layout=format_layout,
             mode_row_layout=mode_row_layout,
@@ -642,7 +790,6 @@ class DownloadsViewBuilder:
             output_dir_edit=output_dir_edit,
             browse_button=browse_button,
             output_folder_label=output_folder_label,
-            run=run,
         )
 
 
@@ -657,8 +804,8 @@ class MainUiBuilder:
         root = QWidget(window)
         root.setObjectName("appRoot")
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(20, 16, 20, 16)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(18, 14, 18, 14)
+        root_layout.setSpacing(10)
 
         top_bar = TopBarBuilder.build(root)
         root_layout.addWidget(top_bar.header)
@@ -678,7 +825,7 @@ class MainUiBuilder:
         mixed_shadow = QGraphicsDropShadowEffect(mixed_url_alert)
         mixed_shadow.setBlurRadius(24)
         mixed_shadow.setOffset(0, 6)
-        mixed_shadow.setColor(QColor(19, 30, 46, 80))
+        mixed_shadow.setColor(QColor(15, 91, 81, 68))
         mixed_url_alert.setGraphicsEffect(mixed_shadow)
         mixed_alert_layout = QVBoxLayout(mixed_url_alert)
         mixed_alert_layout.setContentsMargins(12, 10, 12, 14)

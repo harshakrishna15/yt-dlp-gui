@@ -373,6 +373,37 @@ class TestQtApp(unittest.TestCase):
                         ),
                     )
 
+    def test_min_window_downloads_view_fits_without_vertical_scroll(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        scrollbar = self.window.main_scroll.verticalScrollBar()
+        run_section = self.window.main_page.findChild(QWidget, "runSection")
+        self.assertIsNotNone(run_section)
+        assert run_section is not None
+
+        bottom = run_section.mapTo(
+            self.window.main_scroll.viewport(),
+            run_section.rect().bottomLeft(),
+        ).y()
+
+        self.assertEqual(scrollbar.maximum(), 0)
+        self.assertLessEqual(
+            bottom,
+            self.window.main_scroll.viewport().height() + 2,
+            "Downloads view should fit inside the minimum window height",
+        )
+
+    def test_output_dir_field_resets_to_start_of_path(self) -> None:
+        path = "/Users/harshakrishnaswamy/Downloads/example/folder"
+
+        self.window._set_output_dir_text(path)
+
+        self.assertEqual(self.window.output_dir_edit.text(), path)
+        self.assertEqual(self.window.output_dir_edit.cursorPosition(), 0)
+
     def test_min_window_top_actions_have_icons_and_no_overlap(self) -> None:
         self.window.show()
         QApplication.processEvents()
@@ -405,7 +436,7 @@ class TestQtApp(unittest.TestCase):
                 actions_rect.contains(rect),
                 f"{type(widget).__name__} is clipped at 900x760",
             )
-            if isinstance(widget, QPushButton) and widget is not self.window.downloads_button:
+            if isinstance(widget, QPushButton):
                 self.assertFalse(
                     widget.icon().isNull(),
                     f"{widget.text()} icon is missing",

@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     from .app import QtYtDlpGui
 
 
+def _emit_window_signal(window: object, signal_name: str, *args: object) -> bool:
+    signals = getattr(window, "_signals", None)
+    if signals is None:
+        return False
+    signal = getattr(signals, signal_name, None)
+    if signal is None:
+        return False
+    try:
+        signal.emit(*args)
+    except RuntimeError:
+        return False
+    return True
+
+
 @dataclass
 class SourceState:
     fetch_request_seq: int = 0
@@ -168,12 +182,26 @@ class SourceController:
             is_playlist = bool(
                 info.get("_type") == "playlist" or info.get("entries") is not None
             )
-            self.window._signals.formats_loaded.emit(
+            _emit_window_signal(
+                self.window,
+                "formats_loaded",
                 request_id, url, payload, False, is_playlist
             )
         except Exception as exc:
-            self.window._signals.log.emit(f"[error] Could not fetch formats: {exc}")
-            self.window._signals.formats_loaded.emit(request_id, url, {}, True, False)
+            _emit_window_signal(
+                self.window,
+                "log",
+                f"[error] Could not fetch formats: {exc}",
+            )
+            _emit_window_signal(
+                self.window,
+                "formats_loaded",
+                request_id,
+                url,
+                {},
+                True,
+                False,
+            )
 
     def on_formats_loaded(
         self,
@@ -348,15 +376,18 @@ class RunQueueController:
         result = app_service.run_download_request(
             request=request,
             cancel_event=self.state.cancel_event,
-            log=lambda msg: self.window._signals.log.emit(str(msg)),
-            update_progress=lambda payload: self.window._signals.progress.emit(
-                dict(payload)
+            log=lambda msg: _emit_window_signal(self.window, "log", str(msg)),
+            update_progress=lambda payload: _emit_window_signal(
+                self.window, "progress", dict(payload)
             ),
-            record_output=lambda p: self.window._signals.record_output.emit(
-                str(p), str(request["url"])
+            record_output=lambda p: _emit_window_signal(
+                self.window,
+                "record_output",
+                str(p),
+                str(request["url"]),
             ),
         )
-        self.window._signals.download_done.emit(str(result))
+        _emit_window_signal(self.window, "download_done", str(result))
 
     def on_download_done(self, result: str) -> None:
         self._refresh_run_state()
@@ -579,7 +610,7 @@ class RunQueueController:
         return app_service.resolve_format_for_url(
             url=url,
             settings=settings,
-            log=lambda msg: self.window._signals.log.emit(msg),
+            log=lambda msg: _emit_window_signal(self.window, "log", msg),
         )
 
     def run_queue_download_worker(
@@ -596,7 +627,7 @@ class RunQueueController:
         try:
             resolved = self.resolve_format_for_url(url, settings)
             item_text = f"{index}/{total} {resolved.get('title') or url}"
-            self.window._signals.progress.emit({"status": "item", "item": item_text})
+            _emit_window_signal(self.window, "progress", {"status": "item", "item": item_text})
 
             request = app_service.build_queue_download_request(
                 url=url,
@@ -606,26 +637,30 @@ class RunQueueController:
             )
 
             if request["playlist_enabled"]:
-                self.window._signals.log.emit(
-                    f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
+                _emit_window_signal(
+                    self.window,
+                    "log",
+                    f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}",
                 )
             result = app_service.run_download_request(
                 request=request,
                 cancel_event=self.state.cancel_event,
-                log=lambda msg: self.window._signals.log.emit(str(msg)),
-                update_progress=lambda payload: self.window._signals.progress.emit(
-                    dict(payload)
+                log=lambda msg: _emit_window_signal(self.window, "log", str(msg)),
+                update_progress=lambda payload: _emit_window_signal(
+                    self.window, "progress", dict(payload)
                 ),
-                record_output=lambda p: self.window._signals.record_output.emit(str(p), url),
+                record_output=lambda p: _emit_window_signal(
+                    self.window, "record_output", str(p), url
+                ),
                 ensure_output_dir=True,
             )
             had_error = result == download.DOWNLOAD_ERROR
             cancelled = result == download.DOWNLOAD_CANCELLED
         except Exception as exc:
             had_error = True
-            self.window._signals.log.emit(f"[queue] failed: {exc}")
+            _emit_window_signal(self.window, "log", f"[queue] failed: {exc}")
         finally:
-            self.window._signals.queue_item_done.emit(had_error, cancelled)
+            _emit_window_signal(self.window, "queue_item_done", had_error, cancelled)
 
     def on_queue_item_done(self, had_error: bool, cancelled: bool) -> None:
         self._refresh_run_state()

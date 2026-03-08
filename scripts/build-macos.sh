@@ -25,7 +25,7 @@ python3 -m PyInstaller \
   --windowed \
   --name "yt-dlp-gui" \
   --icon "build/yt-dlp-gui-icon.png" \
-  --add-data "font:font" \
+  --add-data "gui/qt/assets:gui/qt/assets" \
   pyinstaller_entry.py
 
 echo "Build complete: dist/yt-dlp-gui.app"

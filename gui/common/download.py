@@ -8,12 +8,43 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadCancelled
-
 from ..core import options as core_options
 from .types import FormatInfo, ProgressUpdate
 from .tooling import resolve_binary
+
+
+_MISSING_YT_DLP_MESSAGE = (
+    "yt-dlp is not installed. Activate your venv and run: pip install -r requirements.txt"
+)
+
+
+YoutubeDL = None
+
+
+try:
+    from yt_dlp.utils import DownloadCancelled as DownloadCancelled
+except ModuleNotFoundError:
+    class DownloadCancelled(Exception):
+        """Fallback cancellation type when yt-dlp is unavailable at import time."""
+
+
+def _youtube_dl_class():
+    if YoutubeDL is not None:
+        return YoutubeDL
+    try:
+        from yt_dlp import YoutubeDL as YtDlpYoutubeDL
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(_MISSING_YT_DLP_MESSAGE) from exc
+
+    try:
+        from yt_dlp.utils import DownloadCancelled as YtDlpDownloadCancelled
+    except ModuleNotFoundError:
+        globals()["YoutubeDL"] = YtDlpYoutubeDL
+        return YtDlpYoutubeDL
+
+    globals()["DownloadCancelled"] = YtDlpDownloadCancelled
+    globals()["YoutubeDL"] = YtDlpYoutubeDL
+    return YtDlpYoutubeDL
 
 AUDIO_OUTPUT_CODECS = {"m4a", "mp3", "opus", "wav", "flac"}
 DOWNLOAD_SUCCESS = "success"
@@ -260,6 +291,7 @@ def run_download(
     result = DOWNLOAD_SUCCESS
     attempts = max(1, int(network_retries) + 1)
     update_warning_logged = {"value": False}
+    youtube_dl_cls = _youtube_dl_class()
 
     def _safe_update(payload: ProgressUpdate) -> None:
         try:
@@ -321,7 +353,7 @@ def run_download(
             record_output=_record_output,
         )
         try:
-            with YoutubeDL(opts) as ydl:
+            with youtube_dl_cls(opts) as ydl:
                 ydl.download([url])
         except DownloadCancelled:
             _mark_cancelled()
