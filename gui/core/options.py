@@ -105,15 +105,6 @@ def coerce_subtitle_languages(value: object) -> list[str]:
 
 def build_download_options(
     *,
-    network_timeout_raw: str,
-    network_retries_raw: str,
-    retry_backoff_raw: str,
-    concurrent_fragments_raw: str,
-    subtitle_languages_raw: str,
-    write_subtitles_requested: bool,
-    embed_subtitles_requested: bool,
-    is_video_mode: bool,
-    audio_language_raw: str,
     custom_filename_raw: str,
     edit_friendly_encoder_raw: str,
     timeout_default: int,
@@ -121,38 +112,15 @@ def build_download_options(
     backoff_default: float,
     fragments_default: int,
 ) -> DownloadOptions:
-    subtitle_languages = parse_subtitle_languages(subtitle_languages_raw)
-    write_subtitles = bool(write_subtitles_requested) and bool(is_video_mode)
-    embed_subtitles = write_subtitles and bool(embed_subtitles_requested)
     return {
-        "network_timeout_s": parse_int_setting(
-            network_timeout_raw,
-            default=timeout_default,
-            minimum=1,
-            maximum=300,
-        ),
-        "network_retries": parse_int_setting(
-            network_retries_raw,
-            default=retries_default,
-            minimum=0,
-            maximum=10,
-        ),
-        "retry_backoff_s": parse_float_setting(
-            retry_backoff_raw,
-            default=backoff_default,
-            minimum=0.0,
-            maximum=30.0,
-        ),
-        "concurrent_fragments": parse_int_setting(
-            concurrent_fragments_raw,
-            default=fragments_default,
-            minimum=1,
-            maximum=4,
-        ),
-        "subtitle_languages": subtitle_languages,
-        "write_subtitles": write_subtitles,
-        "embed_subtitles": embed_subtitles,
-        "audio_language": (audio_language_raw or "").strip(),
+        "network_timeout_s": int(timeout_default),
+        "network_retries": int(retries_default),
+        "retry_backoff_s": float(backoff_default),
+        "concurrent_fragments": int(fragments_default),
+        "subtitle_languages": [],
+        "write_subtitles": False,
+        "embed_subtitles": False,
+        "audio_language": "",
         "custom_filename": sanitize_custom_filename(custom_filename_raw),
         "edit_friendly_encoder": normalize_edit_friendly_encoder_preference(
             edit_friendly_encoder_raw

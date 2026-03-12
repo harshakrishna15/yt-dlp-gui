@@ -26,8 +26,6 @@ class ControlState:
     format_enabled: bool
     playlist_items_enabled: bool
     filename_enabled: bool
-    subtitle_controls_enabled: bool
-    embed_allowed: bool
     input_fields_enabled: bool
 
 
@@ -48,7 +46,6 @@ def compute_control_state(
     is_playlist_url: bool,
     mixed_prompt_active: bool,
     playlist_items_requested: bool,
-    write_subtitles_requested: bool,
     allow_queue_input_context: bool,
     audio_containers: tuple[str, ...],
     video_containers: tuple[str, ...],
@@ -85,8 +82,6 @@ def compute_control_state(
     format_enabled = (
         single_ready and filter_chosen and format_available and (is_audio_mode or codec_chosen)
     )
-    subtitle_controls_enabled = is_video_mode and (not is_downloading)
-    embed_allowed = subtitle_controls_enabled and write_subtitles_requested
 
     return ControlState(
         is_audio_mode=is_audio_mode,
@@ -110,7 +105,5 @@ def compute_control_state(
         format_enabled=format_enabled,
         playlist_items_enabled=playlist_items_requested and (not is_downloading),
         filename_enabled=(not is_downloading) and (not is_playlist_url),
-        subtitle_controls_enabled=subtitle_controls_enabled,
-        embed_allowed=embed_allowed,
         input_fields_enabled=not is_downloading,
     )

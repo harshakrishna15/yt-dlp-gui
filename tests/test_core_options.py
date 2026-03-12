@@ -24,26 +24,12 @@ class TestCoreOptions(unittest.TestCase):
             1.5,
         )
 
-    def test_language_parsing_and_coerce(self) -> None:
-        self.assertEqual(options.parse_subtitle_languages("en, es ,en"), ["en", "es"])
-        self.assertEqual(options.coerce_subtitle_languages(["en", "ES", "en"]), ["en", "es"])
-        self.assertEqual(options.coerce_subtitle_languages("fr, de"), ["fr", "de"])
-
     def test_sanitize_custom_filename(self) -> None:
         self.assertEqual(options.sanitize_custom_filename("  foo/bar.mp4 "), "foo bar")
         self.assertEqual(options.sanitize_custom_filename(".."), "")
 
-    def test_build_download_options(self) -> None:
+    def test_build_download_options_uses_supported_defaults(self) -> None:
         result = options.build_download_options(
-            network_timeout_raw="30",
-            network_retries_raw="3",
-            retry_backoff_raw="2.5",
-            concurrent_fragments_raw="9",
-            subtitle_languages_raw="en,es",
-            write_subtitles_requested=True,
-            embed_subtitles_requested=True,
-            is_video_mode=True,
-            audio_language_raw=" en ",
             custom_filename_raw=" my:file.mp4 ",
             edit_friendly_encoder_raw="nvenc",
             timeout_default=20,
@@ -51,14 +37,14 @@ class TestCoreOptions(unittest.TestCase):
             backoff_default=1.5,
             fragments_default=4,
         )
-        self.assertEqual(result["network_timeout_s"], 30)
-        self.assertEqual(result["network_retries"], 3)
-        self.assertEqual(result["retry_backoff_s"], 2.5)
+        self.assertEqual(result["network_timeout_s"], 20)
+        self.assertEqual(result["network_retries"], 1)
+        self.assertEqual(result["retry_backoff_s"], 1.5)
         self.assertEqual(result["concurrent_fragments"], 4)
-        self.assertEqual(result["subtitle_languages"], ["en", "es"])
-        self.assertTrue(result["write_subtitles"])
-        self.assertTrue(result["embed_subtitles"])
-        self.assertEqual(result["audio_language"], "en")
+        self.assertEqual(result["subtitle_languages"], [])
+        self.assertFalse(result["write_subtitles"])
+        self.assertFalse(result["embed_subtitles"])
+        self.assertEqual(result["audio_language"], "")
         self.assertEqual(result["custom_filename"], "my file")
         self.assertEqual(result["edit_friendly_encoder"], "nvidia")
 

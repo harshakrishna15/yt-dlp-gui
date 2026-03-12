@@ -96,6 +96,14 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._top_action_icons: dict[str, dict[str, QIcon]] = {}
         self._output_layout_mode: str | None = None
         self._source_row_control_height = 0
+        self._source_preview_locked_heights: dict[bool, int] = {
+            False: 0,
+            True: 0,
+        }
+        self._source_section_locked_heights: dict[bool, int] = {
+            False: 0,
+            True: 0,
+        }
         self._effects = effects or build_qt_side_effect_ports()
         self._source_state = SourceState()
         self._run_queue_state = RunQueueState()
@@ -142,7 +150,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._update_source_details_visibility()
         self._set_preview_title("")
         self._set_source_summary(None)
-        self._set_audio_language_values([])
         self._set_mode_unselected()
         self._load_user_settings()
         self._connect_settings_autosave()
@@ -228,14 +235,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     @_audio_lookup.setter
     def _audio_lookup(self, value: dict[str, dict]) -> None:
         self._source_state.audio_lookup = dict(value)
-
-    @property
-    def _audio_languages(self) -> list[str]:
-        return self._source_state.audio_languages
-
-    @_audio_languages.setter
-    def _audio_languages(self, value: list[str]) -> None:
-        self._source_state.audio_languages = list(value)
 
     @property
     def _filtered_labels(self) -> list[str]:
@@ -636,11 +635,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.playlist_items_edit,
             self.filename_edit,
             self.output_dir_edit,
-            self.subtitle_languages_edit,
-            self.network_timeout_edit,
-            self.network_retries_edit,
-            self.retry_backoff_edit,
-            self.concurrent_fragments_edit,
         ):
             edit.setMinimumHeight(control_height)
 
@@ -648,7 +642,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.container_combo,
             self.codec_combo,
             self.format_combo,
-            self.audio_language_combo,
         ):
             combo.setMinimumHeight(control_height)
 
@@ -694,7 +687,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             label.setMinimumHeight(toggle_height)
 
         for row in getattr(self, "_output_form_rows", []):
-            row.setMinimumHeight(control_height)
+            row.setMinimumHeight(max(control_height, row.minimumSizeHint().height()))
 
         self._set_uniform_button_width(
             [
@@ -741,6 +734,83 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         self._set_output_form_label_width(min_width=112)
         self._normalize_input_widths()
+        self._stabilize_source_preview_card_sizing()
+
+    def _stabilize_source_preview_card_sizing(self) -> None:
+        title_slot_height = max(
+            self.preview_value.minimumSizeHint().height(),
+            self.preview_value.sizeHint().height(),
+            self.source_preview_placeholder.minimumSizeHint().height(),
+            self.source_preview_placeholder.sizeHint().height(),
+        )
+        for label in (self.preview_value, self.source_preview_placeholder):
+            label.setFixedHeight(title_slot_height)
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+
+        detail_row = self.source_preview_detail_one.parentWidget()
+        detail_layout = detail_row.layout()
+        detail_row_margins = (
+            detail_layout.contentsMargins() if detail_layout is not None else None
+        )
+        detail_vertical_padding = (
+            detail_row_margins.top() + detail_row_margins.bottom()
+            if detail_row_margins is not None
+            else 0
+        )
+        detail_row_height = max(
+            self.source_preview_detail_one.minimumSizeHint().height(),
+            self.source_preview_detail_one.sizeHint().height(),
+            self.source_preview_detail_two.minimumSizeHint().height(),
+            self.source_preview_detail_two.sizeHint().height(),
+            self.source_preview_detail_three.minimumSizeHint().height(),
+            self.source_preview_detail_three.sizeHint().height(),
+        )
+        detail_row.setFixedHeight(detail_row_height + detail_vertical_padding + 2)
+
+        compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
+        if not self.isVisible():
+            self._source_preview_locked_heights[compact_height] = 0
+            self.source_preview_card.setMinimumHeight(0)
+            self.source_preview_card.setMaximumHeight(16777215)
+            self.source_preview_card.updateGeometry()
+            source_content = self.source_preview_card.parentWidget()
+            source_section = (
+                source_content.parentWidget() if source_content is not None else None
+            )
+            if source_section is not None:
+                source_section.setMinimumHeight(0)
+                source_section.updateGeometry()
+            return
+
+        base_min_height = 56 if compact_height else 66
+        preview_layout = self.source_preview_card.layout()
+        locked_height = self._source_preview_locked_heights[compact_height]
+        preview_height = max(
+            base_min_height,
+            locked_height,
+            self.source_preview_card.minimumSizeHint().height(),
+        )
+        if preview_layout is not None:
+            preview_layout.activate()
+            preview_height = max(
+                preview_height,
+                preview_layout.sizeHint().height(),
+            )
+        self._source_preview_locked_heights[compact_height] = preview_height
+        self.source_preview_card.setMinimumHeight(preview_height)
+        self.source_preview_card.setMaximumHeight(preview_height)
+        self.source_preview_card.updateGeometry()
+
+        source_content = self.source_preview_card.parentWidget()
+        source_section = (
+            source_content.parentWidget() if source_content is not None else None
+        )
+        if source_section is not None:
+            self._source_section_locked_heights[compact_height] = 0
+            source_section.setMinimumHeight(0)
+            source_section.updateGeometry()
 
     def _lock_source_row_control_heights(self) -> None:
         target = max(0, int(self._source_row_control_height))
@@ -756,62 +826,81 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         ):
             widget.setFixedHeight(target)
 
+    def _constrain_source_row_widths(self, *, preferred_url_width: int) -> None:
+        row_layout = self.source_row.layout()
+        row_spacing = row_layout.spacing() if row_layout is not None else 0
+        row_margins = row_layout.contentsMargins() if row_layout is not None else None
+        horizontal_padding = (
+            row_margins.left() + row_margins.right() if row_margins is not None else 0
+        )
+        action_width = sum(
+            max(button.minimumWidth(), button.minimumSizeHint().width())
+            for button in (self.paste_button, self.analyze_button)
+        )
+        reserved_width = action_width + horizontal_padding + (row_spacing * 2)
+        available_width = self.source_row.width()
+        if available_width <= 0:
+            available_width = max(self.width(), reserved_width + preferred_url_width)
+        url_width = min(
+            preferred_url_width,
+            max(0, available_width - reserved_width),
+        )
+        self.url_edit.setMinimumWidth(url_width)
+
     def _normalize_input_widths(self) -> None:
         width = max(1, self.width())
-        compact = width < 1280
-        field_ratio = 0.24 if compact else 0.20
-        field_width = max(140, min(320, int(width * field_ratio)))
-        folder_field_width = max(120, min(260, field_width - 70))
-        dropdown_width = max(120, min(240, int(width * 0.14)))
-        small_field_width = max(84, min(138, int(width * 0.105)))
+        compact = width < 1240
+        field_ratio = 0.26 if compact else 0.22
+        field_width = max(160, min(360, int(width * field_ratio)))
+        folder_field_width = max(220, min(420, int(width * 0.28)))
+        dropdown_width = max(128, min(250, int(width * 0.15)))
 
-        self.url_edit.setMinimumWidth(field_width)
+        self._constrain_source_row_widths(preferred_url_width=field_width)
         self.playlist_items_edit.setMinimumWidth(field_width)
         self.filename_edit.setMinimumWidth(field_width)
         self.output_dir_edit.setMinimumWidth(folder_field_width)
-        self.subtitle_languages_edit.setMinimumWidth(field_width)
 
         self.container_combo.setMinimumWidth(dropdown_width)
         self.codec_combo.setMinimumWidth(dropdown_width)
         self.format_combo.setMinimumWidth(dropdown_width)
-        self.audio_language_combo.setMinimumWidth(dropdown_width)
 
-        self.network_timeout_edit.setFixedWidth(small_field_width)
-        self.network_retries_edit.setFixedWidth(small_field_width)
-        self.retry_backoff_edit.setFixedWidth(small_field_width)
-        self.concurrent_fragments_edit.setFixedWidth(small_field_width)
-
-        save_card_width = max(350, min(540, int(width * 0.40)))
+        save_card_width = max(380, min(620, int(width * 0.44)))
         self.save_card.setMinimumWidth(save_card_width)
-        self.save_card.setMaximumWidth(save_card_width)
+        self.save_card.setMaximumWidth(16777215)
 
-    def _set_output_layout_mode(self) -> None:
+    def _set_output_layout_mode(self, mode: str) -> None:
+        balanced_mode = mode == "balanced"
         self.output_layout.addWidget(self.format_card, 0, 0)
         self.output_layout.addWidget(self.save_card, 0, 1)
-        self.output_layout.setColumnStretch(0, 5)
-        self.output_layout.setColumnStretch(1, 4)
-        self.output_layout.setHorizontalSpacing(22)
+        self.output_layout.setColumnStretch(0, 11 if balanced_mode else 5)
+        self.output_layout.setColumnStretch(1, 10 if balanced_mode else 4)
+        self.output_layout.setHorizontalSpacing(16 if balanced_mode else 22)
         self.output_layout.setVerticalSpacing(8)
-        self.format_layout.setSpacing(4)
-        self.save_layout.setSpacing(8)
-        self._set_output_form_label_width(min_width=112)
+        self.format_layout.setSpacing(7 if balanced_mode else 8)
+        self.save_layout.setSpacing(7 if balanced_mode else 8)
+        self._set_output_form_label_width(min_width=100 if balanced_mode else 112)
         self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self.folder_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.folder_row_layout.setSpacing(8)
+        self.folder_row_layout.setSpacing(6)
         self.folder_row_layout.setStretch(0, 1)
+        self.folder_row_layout.setAlignment(
+            self.browse_button,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
 
     def _apply_responsive_layout(self) -> None:
-        desired_mode = "wide"
-        if desired_mode != self._output_layout_mode:
-            self._set_output_layout_mode()
-            self._output_layout_mode = desired_mode
+        desired_mode = (
+            "balanced"
+            if max(self.width(), self.output_section.width()) < 1120
+            else "wide"
+        )
+        self._set_output_layout_mode(desired_mode)
+        self._output_layout_mode = desired_mode
 
         compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
-        self.source_preview_card.setMinimumHeight(64 if compact_height else 78)
         self.source_preview_subtitle.setVisible(not compact_height)
-        tone = str(self.source_feedback_label.property("tone") or "neutral")
-        show_source_feedback = tone not in {"", "neutral"}
-        self.source_feedback_label.setVisible(show_source_feedback)
+        self._stabilize_source_preview_card_sizing()
+        self._sync_source_feedback_visibility()
         self.mixed_buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self._sync_source_details_height()
 
@@ -850,21 +939,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self.output_dir_edit.setToolTip("Selected output folder.")
         self.browse_button.setToolTip("Choose output folder.")
-
-        self.subtitle_languages_edit.setToolTip(
-            "Comma-separated subtitle languages (for example en,es)."
-        )
-        self.write_subtitles_check.setToolTip("Write subtitle files.")
-        self.embed_subtitles_check.setToolTip("Embed subtitles into the media file.")
-        self.audio_language_combo.setToolTip(
-            "Prefer a specific detected audio language."
-        )
-        self.network_timeout_edit.setToolTip("Socket timeout in seconds.")
-        self.network_retries_edit.setToolTip("Number of retry attempts.")
-        self.retry_backoff_edit.setToolTip("Retry backoff in seconds.")
-        self.concurrent_fragments_edit.setToolTip(
-            "Concurrent fragment downloads (1-4, capped at 4)."
-        )
         self.edit_friendly_encoder_combo.setToolTip(
             "Choose how edit-friendly MP4 re-encoding selects hardware."
         )
@@ -1009,6 +1083,12 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             str(text or "Paste a video or playlist URL, then analyze it to load formats.")
         )
         self._set_widget_property(self.source_feedback_label, "tone", str(tone or "neutral"))
+        self._sync_source_feedback_visibility()
+
+    def _sync_source_feedback_visibility(self) -> None:
+        tone = str(self.source_feedback_label.property("tone") or "neutral")
+        show_source_feedback = tone not in {"", "neutral", "hidden"}
+        self.source_feedback_label.setVisible(show_source_feedback)
 
     def _set_metrics_visible(self, visible: bool) -> None:
         self.metrics_card.setVisible(True)
@@ -1082,7 +1162,47 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return f"{name} folder"
         return "Output folder"
 
+    def _refresh_downloads_page_geometry(self) -> None:
+        for widget in (
+            self.source_preview_card.parentWidget(),
+            self.output_section,
+            self.ready_summary_label.parentWidget(),
+            self.main_page,
+        ):
+            if widget is not None:
+                widget.updateGeometry()
+                layout = widget.layout()
+                if layout is not None:
+                    layout.activate()
+        main_layout = self.main_page.layout()
+        if main_layout is not None:
+            main_layout.activate()
+        self._sync_current_panel_geometry()
+
+    def _sync_current_panel_geometry(self) -> None:
+        current = self.panel_stack.currentWidget()
+        if current is None:
+            return
+        current.setGeometry(self.panel_stack.contentsRect())
+        layout = current.layout()
+        if layout is not None:
+            layout.activate()
+
     def _refresh_ready_summary(self) -> None:
+        show_summary = any(
+            (
+                bool(self._current_mode()),
+                bool(self._current_container()),
+                bool(self._current_codec()),
+                bool(self._selected_format_label()),
+            )
+        )
+        visibility_changed = self.ready_summary_label.isVisible() != show_summary
+        self.ready_summary_label.setVisible(show_summary)
+        if not show_summary:
+            if visibility_changed:
+                self._refresh_downloads_page_geometry()
+            return
         container = self._current_container()
         container_text = container.upper() if container else "Container"
         codec_text = self._ready_summary_codec()
@@ -1091,6 +1211,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.ready_summary_label.setText(
             f"{container_text} • {codec_text} • {quality_text} • {folder_text}"
         )
+        if visibility_changed:
+            self._refresh_downloads_page_geometry()
 
     def _apply_header_layout(self) -> None:
         self.classic_actions.setVisible(True)
@@ -1143,6 +1265,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        self._stabilize_source_preview_card_sizing()
+        self._refresh_downloads_page_geometry()
         self._apply_window_icon()
 
     def _set_header_icons_enabled(self, enabled: bool) -> None:
@@ -1329,6 +1453,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if index is None:
             return
         self.panel_stack.setCurrentIndex(index)
+        self._sync_current_panel_geometry()
         self._animate_widget_fade_in(self.panel_stack.currentWidget())
         self._active_panel_name = name
         if name == "logs":
@@ -1352,6 +1477,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return
         window_size = self.size()
         self.panel_stack.setCurrentIndex(self._main_page_index)
+        self._sync_current_panel_geometry()
         self._animate_widget_fade_in(self.panel_stack.currentWidget())
         self._active_panel_name = None
         for panel_name, button in self._panel_buttons.items():
@@ -1490,26 +1616,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             is_playlist=is_playlist,
         )
 
-    def _set_audio_language_values(self, languages: list[str]) -> None:
-        unique: list[str] = []
-        seen: set[str] = set()
-        for value in languages:
-            clean = str(value or "").strip().lower()
-            if not clean or clean in seen:
-                continue
-            seen.add(clean)
-            unique.append(clean)
-        values = ["Any"] + unique
-        current = self.audio_language_combo.currentText().strip() or "Any"
-        self.audio_language_combo.blockSignals(True)
-        self.audio_language_combo.clear()
-        self.audio_language_combo.addItems(values)
-        idx = self.audio_language_combo.findText(current, Qt.MatchFlag.MatchFixedString)
-        if idx < 0:
-            idx = 0
-        self.audio_language_combo.setCurrentIndex(idx)
-        self.audio_language_combo.blockSignals(False)
-
     def _set_mode_unselected(self) -> None:
         self.video_radio.setAutoExclusive(False)
         self.audio_radio.setAutoExclusive(False)
@@ -1620,15 +1726,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _snapshot_download_options(self) -> DownloadOptions:
         return app_service.build_download_options(
-            network_timeout_raw=self.network_timeout_edit.text(),
-            network_retries_raw=self.network_retries_edit.text(),
-            retry_backoff_raw=self.retry_backoff_edit.text(),
-            concurrent_fragments_raw=self.concurrent_fragments_edit.text(),
-            subtitle_languages_raw=self.subtitle_languages_edit.text(),
-            write_subtitles_requested=bool(self.write_subtitles_check.isChecked()),
-            embed_subtitles_requested=bool(self.embed_subtitles_check.isChecked()),
-            is_video_mode=self._current_mode() == "video",
-            audio_language_raw=self.audio_language_combo.currentText(),
             custom_filename_raw=self.filename_edit.text(),
             edit_friendly_encoder_raw=str(
                 self.edit_friendly_encoder_combo.currentData() or "auto"
@@ -1772,7 +1869,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             is_playlist_url=is_playlist_url,
             mixed_prompt_active=bool(self._pending_mixed_url),
             playlist_items_requested=bool(self._playlist_mode),
-            write_subtitles_requested=bool(self.write_subtitles_check.isChecked()),
             allow_queue_input_context=False,
             audio_containers=AUDIO_CONTAINERS,
             video_containers=VIDEO_CONTAINERS,
@@ -1790,6 +1886,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         self._refresh_ready_summary()
         self._refresh_download_result_view()
+        self._sync_current_panel_geometry()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         if (
@@ -1806,6 +1903,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         super().resizeEvent(event)
         self._normalize_control_sizing()
         self._apply_responsive_layout()
+        self._sync_current_panel_geometry()
         self._layout_mixed_url_overlay()
         self._refresh_current_item_text()
         if self._is_downloading:

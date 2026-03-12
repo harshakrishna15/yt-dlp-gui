@@ -18,6 +18,13 @@ if TYPE_CHECKING:
 
 
 class WindowFeedbackMixin:
+    def _set_metric_label_text(self: "QtYtDlpGui", label, text: str) -> None:
+        label.setText(text)
+        label.setFixedWidth(
+            max(label.minimumSizeHint().width(), label.sizeHint().width())
+        )
+        label.updateGeometry()
+
     def _refresh_download_result_view(self: "QtYtDlpGui") -> None:
         show_latest_output = self._latest_output_path is not None
         compact_mode = self.isVisible() and (
@@ -256,6 +263,9 @@ class WindowFeedbackMixin:
             widget.setText(text)
             widget.setVisible(bool(text))
 
+        self._stabilize_source_preview_card_sizing()
+        self._refresh_downloads_page_geometry()
+
     def _set_preview_title(self: "QtYtDlpGui", title: str) -> None:
         shown, tooltip = preview_title_fields(title)
         self.preview_value.setText(shown)
@@ -268,6 +278,8 @@ class WindowFeedbackMixin:
             "state",
             "ready" if has_title else "empty",
         )
+        self._apply_responsive_layout()
+        self._refresh_downloads_page_geometry()
 
     def _record_download_output(
         self: "QtYtDlpGui", output_path: Path, source_url: str = ""
@@ -360,9 +372,9 @@ class WindowFeedbackMixin:
     def _reset_progress_summary(self: "QtYtDlpGui") -> None:
         self._stop_progress_animation()
         self.progress_bar.setValue(0)
-        self.progress_label.setText("Progress: -")
-        self.speed_label.setText("Speed: -")
-        self.eta_label.setText("ETA: -")
+        self._set_metric_label_text(self.progress_label, "Progress: -")
+        self._set_metric_label_text(self.speed_label, "Speed: -")
+        self._set_metric_label_text(self.eta_label, "ETA: -")
         self._set_current_item_display(progress="-", title="-")
         self._set_metrics_visible(False)
 
@@ -378,16 +390,20 @@ class WindowFeedbackMixin:
             playlist_eta = str(payload.get("playlist_eta") or "").strip()
             if isinstance(percent, (int, float)):
                 self._animate_progress_bar_to(float(percent))
-                self.progress_label.setText(f"Progress: {float(percent):.1f}%")
+                self._set_metric_label_text(
+                    self.progress_label, f"Progress: {float(percent):.1f}%"
+                )
             if isinstance(speed, str):
-                self.speed_label.setText(f"Speed: {speed or '-'}")
+                self._set_metric_label_text(self.speed_label, f"Speed: {speed or '-'}")
             eta_text = str(eta).strip() if isinstance(eta, str) else ""
             if playlist_eta:
-                self.eta_label.setText(f"ETA: {eta_text or '-'} / {playlist_eta}")
+                self._set_metric_label_text(
+                    self.eta_label, f"ETA: {eta_text or '-'} / {playlist_eta}"
+                )
             elif eta_text:
-                self.eta_label.setText(f"ETA: {eta_text}")
+                self._set_metric_label_text(self.eta_label, f"ETA: {eta_text}")
             else:
-                self.eta_label.setText("ETA: -")
+                self._set_metric_label_text(self.eta_label, "ETA: -")
         elif status == "item":
             if not self._show_progress_item:
                 return
@@ -395,6 +411,6 @@ class WindowFeedbackMixin:
             if item:
                 self._set_current_item_from_text(item)
         elif status == "finished":
-            self.eta_label.setText("ETA: Finalizing")
+            self._set_metric_label_text(self.eta_label, "ETA: Finalizing")
         elif status == "cancelled":
             self._reset_progress_summary()

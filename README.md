@@ -182,7 +182,7 @@ This bypass only applies to that one command.
 - You can download playlists.
 - Use **Playlist items** for ranges like `1-5,7,10-`.
 - Leave Playlist items blank to download the full playlist.
-- The app keeps recent downloads in **History** and saves your output/network/subtitle settings between runs.
+- The app keeps recent downloads in **History** and saves your output and post-download preferences between runs.
 
 ### Support Policy
 

@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QPlainTextEdit,
     QPushButton,
@@ -22,21 +21,12 @@ from PySide6.QtWidgets import (
 )
 
 from ..app_meta import APP_VERSION
-from ..common import download
 from .widgets import _NativeComboBox
 
 
 @dataclass(frozen=True)
 class SettingsPanelRefs:
     panel: QWidget
-    subtitle_languages_edit: QLineEdit
-    write_subtitles_check: QCheckBox
-    embed_subtitles_check: QCheckBox
-    audio_language_combo: _NativeComboBox
-    network_timeout_edit: QLineEdit
-    network_retries_edit: QLineEdit
-    retry_backoff_edit: QLineEdit
-    concurrent_fragments_edit: QLineEdit
     edit_friendly_encoder_combo: _NativeComboBox
     open_folder_after_download_check: QCheckBox
     export_diagnostics_button: QPushButton
@@ -200,7 +190,6 @@ def build_settings_panel(
     *,
     parent: QWidget,
     register_native_combo: Callable[[_NativeComboBox], None],
-    on_update_controls_state: Callable[[], None],
     on_export_diagnostics: Callable[[], None],
     on_show_about: Callable[[], None],
 ) -> SettingsPanelRefs:
@@ -230,67 +219,14 @@ def build_settings_panel(
     layout.setHorizontalSpacing(18)
     layout.setVerticalSpacing(12)
 
-    subtitle_languages_edit = QLineEdit(form_host)
-    subtitle_languages_edit.setPlaceholderText("en,es")
-    subtitle_languages_edit.hide()
-
-    subtitle_opts = QWidget(form_host)
-    subtitle_opts_layout = QHBoxLayout(subtitle_opts)
-    subtitle_opts_layout.setContentsMargins(0, 0, 0, 0)
-    subtitle_opts_layout.setSpacing(10)
-    write_subtitles_check = QCheckBox("Write subtitles", subtitle_opts)
-    embed_subtitles_check = QCheckBox("Embed subtitles", subtitle_opts)
-    write_subtitles_check.stateChanged.connect(lambda _v: on_update_controls_state())
-    embed_subtitles_check.stateChanged.connect(lambda _v: on_update_controls_state())
-    subtitle_opts_layout.addWidget(write_subtitles_check)
-    subtitle_opts_layout.addWidget(embed_subtitles_check)
-    subtitle_opts_layout.addStretch(1)
-    subtitle_opts.hide()
-
-    audio_language_combo = _NativeComboBox(form_host)
-    register_native_combo(audio_language_combo)
-    audio_language_combo.addItem("Any")
-    audio_language_combo.hide()
-
-    network_row = QWidget(form_host)
-    network_layout = QHBoxLayout(network_row)
-    network_layout.setContentsMargins(0, 0, 0, 0)
-    network_layout.setSpacing(10)
-    network_timeout_edit = QLineEdit(
-        str(download.YDL_SOCKET_TIMEOUT_SECONDS), network_row
-    )
-    network_timeout_edit.setMaximumWidth(100)
-    network_retries_edit = QLineEdit(
-        str(download.YDL_ATTEMPT_RETRIES), network_row
-    )
-    network_retries_edit.setMaximumWidth(100)
-    retry_backoff_edit = QLineEdit(
-        str(download.YDL_RETRY_BACKOFF_SECONDS), network_row
-    )
-    retry_backoff_edit.setMaximumWidth(100)
-    concurrent_fragments_edit = QLineEdit(
-        str(download.YDL_MAX_CONCURRENT_FRAGMENTS), network_row
-    )
-    concurrent_fragments_edit.setMaximumWidth(100)
-    network_layout.addWidget(QLabel("Timeout", network_row))
-    network_layout.addWidget(network_timeout_edit)
-    network_layout.addWidget(QLabel("Retries", network_row))
-    network_layout.addWidget(network_retries_edit)
-    network_layout.addWidget(QLabel("Backoff", network_row))
-    network_layout.addWidget(retry_backoff_edit)
-    network_layout.addWidget(QLabel("Fragments", network_row))
-    network_layout.addWidget(concurrent_fragments_edit)
-    network_layout.addStretch(1)
-    network_row.hide()
-
     edit_friendly_encoder_combo = _NativeComboBox(form_host)
     register_native_combo(edit_friendly_encoder_combo)
-    edit_friendly_encoder_combo.addItem("Auto (recommended)", "auto")
-    edit_friendly_encoder_combo.addItem("System media engine", "apple")
-    edit_friendly_encoder_combo.addItem("Dedicated graphics engine", "nvidia")
-    edit_friendly_encoder_combo.addItem("Alternate graphics engine", "amd")
-    edit_friendly_encoder_combo.addItem("Integrated graphics engine", "intel")
-    edit_friendly_encoder_combo.addItem("Software encode", "cpu")
+    edit_friendly_encoder_combo.addItem("Automatic (recommended)", "auto")
+    edit_friendly_encoder_combo.addItem("Apple hardware encoder", "apple")
+    edit_friendly_encoder_combo.addItem("NVIDIA hardware encoder", "nvidia")
+    edit_friendly_encoder_combo.addItem("AMD hardware encoder", "amd")
+    edit_friendly_encoder_combo.addItem("Intel hardware encoder", "intel")
+    edit_friendly_encoder_combo.addItem("CPU software encoder", "cpu")
     layout.addRow("Edit-friendly encode", edit_friendly_encoder_combo)
 
     open_folder_after_download_check = QCheckBox(
@@ -321,14 +257,6 @@ def build_settings_panel(
     shell.body_layout.addStretch(1)
     return SettingsPanelRefs(
         panel=shell.panel,
-        subtitle_languages_edit=subtitle_languages_edit,
-        write_subtitles_check=write_subtitles_check,
-        embed_subtitles_check=embed_subtitles_check,
-        audio_language_combo=audio_language_combo,
-        network_timeout_edit=network_timeout_edit,
-        network_retries_edit=network_retries_edit,
-        retry_backoff_edit=retry_backoff_edit,
-        concurrent_fragments_edit=concurrent_fragments_edit,
         edit_friendly_encoder_combo=edit_friendly_encoder_combo,
         open_folder_after_download_check=open_folder_after_download_check,
         export_diagnostics_button=export_diagnostics_button,

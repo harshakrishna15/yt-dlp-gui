@@ -21,7 +21,6 @@ class TestUiState(unittest.TestCase):
             is_playlist_url=False,
             mixed_prompt_active=False,
             playlist_items_requested=False,
-            write_subtitles_requested=False,
             allow_queue_input_context=True,
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),
@@ -47,7 +46,6 @@ class TestUiState(unittest.TestCase):
             is_playlist_url=False,
             mixed_prompt_active=False,
             playlist_items_requested=False,
-            write_subtitles_requested=True,
             allow_queue_input_context=False,
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),
@@ -56,8 +54,6 @@ class TestUiState(unittest.TestCase):
         self.assertTrue(state.can_add_queue)
         self.assertTrue(state.can_fetch_formats)
         self.assertTrue(state.codec_enabled)
-        self.assertTrue(state.subtitle_controls_enabled)
-        self.assertTrue(state.embed_allowed)
 
     def test_downloading_state_disables_inputs(self) -> None:
         state = ui_state.compute_control_state(
@@ -76,7 +72,6 @@ class TestUiState(unittest.TestCase):
             is_playlist_url=False,
             mixed_prompt_active=False,
             playlist_items_requested=True,
-            write_subtitles_requested=True,
             allow_queue_input_context=False,
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),
@@ -86,7 +81,6 @@ class TestUiState(unittest.TestCase):
         self.assertFalse(state.input_fields_enabled)
         self.assertFalse(state.filename_enabled)
         self.assertFalse(state.playlist_items_enabled)
-        self.assertFalse(state.subtitle_controls_enabled)
 
     def test_fetching_state_keeps_mode_disabled_until_formats_ready(self) -> None:
         state = ui_state.compute_control_state(
@@ -105,7 +99,6 @@ class TestUiState(unittest.TestCase):
             is_playlist_url=False,
             mixed_prompt_active=False,
             playlist_items_requested=False,
-            write_subtitles_requested=False,
             allow_queue_input_context=False,
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),
@@ -131,7 +124,6 @@ class TestUiState(unittest.TestCase):
             is_playlist_url=False,
             mixed_prompt_active=False,
             playlist_items_requested=False,
-            write_subtitles_requested=False,
             allow_queue_input_context=False,
             audio_containers=("m4a", "mp3"),
             video_containers=("mp4", "webm"),

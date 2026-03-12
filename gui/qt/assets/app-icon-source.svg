@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shadow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#0d2b26" stop-opacity="0"/>
+      <stop offset="62%" stop-color="#0d2b26" stop-opacity="0.11"/>
+      <stop offset="100%" stop-color="#0d2b26" stop-opacity="0.23"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0.18" y1="0.04" x2="0.84" y2="0.96">
+      <stop offset="0%" stop-color="#f4fbf8"/>
+      <stop offset="52%" stop-color="#dcebe5"/>
+      <stop offset="100%" stop-color="#9cc2b8"/>
+    </linearGradient>
+    <radialGradient id="skyGlow" cx="0.28" cy="0.12" r="0.72">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.92"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dockShadow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#0b312d" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#0b312d" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="dock" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#f8fcfa"/>
+      <stop offset="100%" stop-color="#cfdfd9"/>
+    </linearGradient>
+    <linearGradient id="badgeShadow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#0a2d29" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#0a2d29" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="0.24" y1="0.10" x2="0.76" y2="0.88">
+      <stop offset="0%" stop-color="#25a08f"/>
+      <stop offset="58%" stop-color="#147267"/>
+      <stop offset="100%" stop-color="#0a514c"/>
+    </linearGradient>
+    <radialGradient id="badgeGlow" cx="0.28" cy="0.18" r="0.92">
+      <stop offset="0%" stop-color="#9ef4e0" stop-opacity="0.56"/>
+      <stop offset="40%" stop-color="#9ef4e0" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#9ef4e0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glyph" x1="0.5" y1="0.12" x2="0.5" y2="0.88">
+      <stop offset="0%" stop-color="#f8fffd"/>
+      <stop offset="100%" stop-color="#dbece6"/>
+    </linearGradient>
+    <clipPath id="tileClip">
+      <rect x="92" y="92" width="840" height="840" rx="196"/>
+    </clipPath>
+  </defs>
+
+  <rect x="120" y="148" width="784" height="776" rx="208" fill="url(#shadow)"/>
+  <rect x="92" y="92" width="840" height="840" rx="196" fill="url(#base)"/>
+
+  <g clip-path="url(#tileClip)">
+    <rect x="92" y="92" width="840" height="840" fill="url(#skyGlow)"/>
+    <path d="M92 92H932V422H92Z" fill="#ffffff" fill-opacity="0.05"/>
+    <rect x="92" y="684" width="840" height="248" fill="#5f9b90" fill-opacity="0.08"/>
+
+    <rect x="256" y="704" width="512" height="122" rx="61" fill="url(#dockShadow)"/>
+    <rect x="250" y="682" width="524" height="122" rx="61" fill="url(#dock)"/>
+    <path d="M286 706C328 691 414 682 512 682C610 682 696 691 738 706V726H286Z" fill="#ffffff" fill-opacity="0.28"/>
+    <rect x="348" y="736" width="328" height="22" rx="11" fill="#6ca79b" fill-opacity="0.28"/>
+    <rect x="250" y="682" width="524" height="122" rx="61" fill="none" stroke="#ffffff" stroke-opacity="0.34" stroke-width="8"/>
+
+    <ellipse cx="512" cy="560" rx="178" ry="52" fill="url(#badgeShadow)"/>
+    <circle cx="512" cy="426" r="188" fill="url(#badge)"/>
+    <circle cx="512" cy="426" r="188" fill="url(#badgeGlow)"/>
+    <ellipse cx="444" cy="344" rx="132" ry="104" fill="#c5fff1" fill-opacity="0.12"/>
+    <circle cx="512" cy="426" r="188" fill="none" stroke="#d8fff6" stroke-opacity="0.18" stroke-width="12"/>
+
+    <g transform="translate(0 12)" fill="#083c36" fill-opacity="0.20">
+      <rect x="484" y="312" width="56" height="178" rx="28"/>
+      <path d="M408 468L512 574L616 468Z"/>
+      <rect x="410" y="604" width="204" height="46" rx="23"/>
+    </g>
+    <g fill="url(#glyph)">
+      <rect x="484" y="300" width="56" height="178" rx="28"/>
+      <path d="M408 456L512 562L616 456Z"/>
+      <rect x="410" y="592" width="204" height="46" rx="23"/>
+    </g>
+  </g>
+
+  <rect x="98" y="98" width="828" height="828" rx="190" fill="none" stroke="#f9fffd" stroke-opacity="0.64" stroke-width="8"/>
+</svg>

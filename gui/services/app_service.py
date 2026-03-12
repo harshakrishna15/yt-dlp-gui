@@ -23,28 +23,10 @@ from ..common.types import (
 
 def build_download_options(
     *,
-    network_timeout_raw: str,
-    network_retries_raw: str,
-    retry_backoff_raw: str,
-    concurrent_fragments_raw: str,
-    subtitle_languages_raw: str,
-    write_subtitles_requested: bool,
-    embed_subtitles_requested: bool,
-    is_video_mode: bool,
-    audio_language_raw: str,
     custom_filename_raw: str,
     edit_friendly_encoder_raw: str,
 ) -> DownloadOptions:
     return core_options.build_download_options(
-        network_timeout_raw=network_timeout_raw,
-        network_retries_raw=network_retries_raw,
-        retry_backoff_raw=retry_backoff_raw,
-        concurrent_fragments_raw=concurrent_fragments_raw,
-        subtitle_languages_raw=subtitle_languages_raw,
-        write_subtitles_requested=write_subtitles_requested,
-        embed_subtitles_requested=embed_subtitles_requested,
-        is_video_mode=is_video_mode,
-        audio_language_raw=audio_language_raw,
         custom_filename_raw=custom_filename_raw,
         edit_friendly_encoder_raw=edit_friendly_encoder_raw,
         timeout_default=download.YDL_SOCKET_TIMEOUT_SECONDS,

@@ -33,15 +33,8 @@ class TestDiagnostics(unittest.TestCase):
             is_downloading=False,
             preview_title="Example",
             options={
-                "network_timeout_s": 20,
-                "network_retries": 1,
-                "retry_backoff_s": 1.5,
-                "concurrent_fragments": 4,
-                "write_subtitles": False,
-                "embed_subtitles": False,
-                "subtitle_languages": [],
-                "audio_language": "",
                 "custom_filename": "",
+                "edit_friendly_encoder": "auto",
             },
             history_items=[
                 {

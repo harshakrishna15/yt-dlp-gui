@@ -432,7 +432,6 @@ class TestSourceController(unittest.TestCase):
         self.assertFalse(state.is_fetching)
         self.assertEqual(state.video_labels, ["1080p"])
         self.assertEqual(state.audio_labels, ["128k"])
-        self.assertEqual(state.audio_languages, ["en"])
         self.assertEqual(window.preview_title, "Example title")
         self.assertEqual(
             window.source_summary,

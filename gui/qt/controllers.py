@@ -45,7 +45,6 @@ class SourceState:
     video_lookup: dict[str, dict] = field(default_factory=dict)
     audio_labels: list[str] = field(default_factory=list)
     audio_lookup: dict[str, dict] = field(default_factory=dict)
-    audio_languages: list[str] = field(default_factory=list)
     filtered_labels: list[str] = field(default_factory=list)
     filtered_lookup: dict[str, dict] = field(default_factory=dict)
 
@@ -132,11 +131,9 @@ class SourceController:
         s.audio_lookup = {}
         s.filtered_labels = []
         s.filtered_lookup = {}
-        s.audio_languages = []
         w._set_preview_title("")
         w._set_source_summary(None)
         w.format_combo.clear()
-        w._set_audio_language_values([])
         w._update_source_details_visibility()
 
         if not normalized:
@@ -236,13 +233,11 @@ class SourceController:
             s.video_lookup = {}
             s.audio_labels = []
             s.audio_lookup = {}
-            s.audio_languages = []
             s.filtered_labels = []
             s.filtered_lookup = {}
             w._set_preview_title("")
             w._set_source_summary(None)
             w.format_combo.clear()
-            w._set_audio_language_values([])
             fetch_feedback = core_error_feedback.formats_fetch_failed_feedback(
                 w._last_error_log
             )
@@ -271,12 +266,10 @@ class SourceController:
         s.video_lookup = dict(collections.get("video_lookup", {}))
         s.audio_labels = list(collections.get("audio_labels", []))
         s.audio_lookup = dict(collections.get("audio_lookup", {}))
-        s.audio_languages = list(collections.get("audio_languages", []))
         preview_title = str(payload.get("preview_title") or "").strip()
         w._set_preview_title(preview_title)
         source_summary = payload.get("source_summary")
         w._set_source_summary(source_summary if isinstance(source_summary, dict) else None)
-        w._set_audio_language_values(s.audio_languages)
         if s.video_labels or s.audio_labels:
             w._set_status("Formats loaded")
             w._set_source_feedback(

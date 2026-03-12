@@ -14,22 +14,28 @@ if TYPE_CHECKING:
 
 
 class WindowSettingsMixin:
+    def _display_output_dir(self: "QtYtDlpGui", value: str) -> str:
+        raw = str(value or self._default_output_dir()).strip() or self._default_output_dir()
+        try:
+            path = Path(raw).expanduser()
+        except (TypeError, ValueError, OSError):
+            return raw
+        home = Path.home()
+        try:
+            relative = path.relative_to(home)
+        except ValueError:
+            return str(path)
+        if not relative.parts:
+            return "~"
+        return f"~/{relative.as_posix()}"
+
     def _build_settings_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_settings_panel(
             parent=self,
             register_native_combo=self._register_native_combo,
-            on_update_controls_state=self._update_controls_state,
             on_export_diagnostics=self._export_diagnostics,
             on_show_about=self._show_about_dialog,
         )
-        self.subtitle_languages_edit = refs.subtitle_languages_edit
-        self.write_subtitles_check = refs.write_subtitles_check
-        self.embed_subtitles_check = refs.embed_subtitles_check
-        self.audio_language_combo = refs.audio_language_combo
-        self.network_timeout_edit = refs.network_timeout_edit
-        self.network_retries_edit = refs.network_retries_edit
-        self.retry_backoff_edit = refs.retry_backoff_edit
-        self.concurrent_fragments_edit = refs.concurrent_fragments_edit
         self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
         self.open_folder_after_download_check = refs.open_folder_after_download_check
         self.export_diagnostics_button = refs.export_diagnostics_button
@@ -108,7 +114,10 @@ class WindowSettingsMixin:
         return str(Path.home() / "Downloads")
 
     def _set_output_dir_text(self: "QtYtDlpGui", value: str) -> None:
-        self.output_dir_edit.setText(str(value or self._default_output_dir()))
+        raw = str(value or self._default_output_dir()).strip() or self._default_output_dir()
+        display = self._display_output_dir(raw)
+        self.output_dir_edit.setText(display)
+        self.output_dir_edit.setToolTip(str(Path(raw).expanduser()))
         self.output_dir_edit.setCursorPosition(0)
 
     def _load_user_settings(self: "QtYtDlpGui") -> None:
@@ -117,18 +126,8 @@ class WindowSettingsMixin:
         )
         self._applying_user_settings = True
         try:
-            self._set_output_dir_text(self._default_output_dir())
-            self.subtitle_languages_edit.setText(
-                str(settings.get("subtitle_languages") or "")
-            )
-            self.write_subtitles_check.setChecked(
-                bool(settings.get("write_subtitles"))
-            )
-            self.network_timeout_edit.setText(str(settings.get("network_timeout") or ""))
-            self.network_retries_edit.setText(str(settings.get("network_retries") or ""))
-            self.retry_backoff_edit.setText(str(settings.get("retry_backoff") or ""))
-            self.concurrent_fragments_edit.setText(
-                str(settings.get("concurrent_fragments") or "")
+            self._set_output_dir_text(
+                str(settings.get("output_dir") or self._default_output_dir())
             )
             edit_friendly_encoder = str(
                 settings.get("edit_friendly_encoder") or "auto"
@@ -147,12 +146,7 @@ class WindowSettingsMixin:
 
     def _capture_user_settings(self: "QtYtDlpGui") -> dict[str, object]:
         return {
-            "subtitle_languages": self.subtitle_languages_edit.text().strip(),
-            "write_subtitles": bool(self.write_subtitles_check.isChecked()),
-            "network_timeout": self.network_timeout_edit.text().strip(),
-            "network_retries": self.network_retries_edit.text().strip(),
-            "retry_backoff": self.retry_backoff_edit.text().strip(),
-            "concurrent_fragments": self.concurrent_fragments_edit.text().strip(),
+            "output_dir": self.output_dir_edit.text().strip(),
             "edit_friendly_encoder": str(
                 self.edit_friendly_encoder_combo.currentData() or "auto"
             ).strip(),
@@ -170,22 +164,7 @@ class WindowSettingsMixin:
         )
 
     def _connect_settings_autosave(self: "QtYtDlpGui") -> None:
-        self.subtitle_languages_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.write_subtitles_check.stateChanged.connect(
-            lambda _state: self._save_user_settings()
-        )
-        self.network_timeout_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.network_retries_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.retry_backoff_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.concurrent_fragments_edit.textChanged.connect(
+        self.output_dir_edit.textChanged.connect(
             lambda _text: self._save_user_settings()
         )
         self.edit_friendly_encoder_combo.currentIndexChanged.connect(
@@ -198,9 +177,12 @@ class WindowSettingsMixin:
     def _maybe_open_output_folder(self: "QtYtDlpGui") -> None:
         if not self.open_folder_after_download_check.isChecked():
             return
-        output_dir = Path(
-            self.output_dir_edit.text().strip() or self._default_output_dir()
-        ).expanduser()
+        if self._latest_output_path is not None:
+            output_dir = self._latest_output_path.parent
+        else:
+            output_dir = Path(
+                self.output_dir_edit.text().strip() or self._default_output_dir()
+            ).expanduser()
         if not output_dir.exists():
             return
         self._effects.desktop.open_path(output_dir)

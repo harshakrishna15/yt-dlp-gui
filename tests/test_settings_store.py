@@ -16,7 +16,6 @@ class TestSettingsStore(unittest.TestCase):
             ):
                 loaded = settings_store.load_settings(default_output_dir="/tmp/out")
         self.assertEqual(loaded["output_dir"], "/tmp/out")
-        self.assertEqual(loaded["concurrent_fragments"], "4")
         self.assertEqual(loaded["edit_friendly_encoder"], "auto")
         self.assertFalse(loaded["open_folder_after_download"])
 
@@ -29,12 +28,6 @@ class TestSettingsStore(unittest.TestCase):
                 ok = settings_store.save_settings(
                     {
                         "output_dir": "/tmp/downloads",
-                        "subtitle_languages": "en,es",
-                        "write_subtitles": True,
-                        "network_timeout": "18",
-                        "network_retries": "3",
-                        "retry_backoff": "2.5",
-                        "concurrent_fragments": "3",
                         "edit_friendly_encoder": "intel",
                         "open_folder_after_download": True,
                     },
@@ -45,12 +38,6 @@ class TestSettingsStore(unittest.TestCase):
                 )
         self.assertTrue(ok)
         self.assertEqual(loaded["output_dir"], "/tmp/downloads")
-        self.assertEqual(loaded["subtitle_languages"], "en,es")
-        self.assertTrue(loaded["write_subtitles"])
-        self.assertEqual(loaded["network_timeout"], "18")
-        self.assertEqual(loaded["network_retries"], "3")
-        self.assertEqual(loaded["retry_backoff"], "2.5")
-        self.assertEqual(loaded["concurrent_fragments"], "3")
         self.assertEqual(loaded["edit_friendly_encoder"], "intel")
         self.assertTrue(loaded["open_folder_after_download"])
 
@@ -60,10 +47,7 @@ class TestSettingsStore(unittest.TestCase):
             settings_path.write_text(
                 (
                     "{"
-                    '"network_timeout":"",'
-                    '"network_retries":"",'
-                    '"retry_backoff":"",'
-                    '"concurrent_fragments":"999",'
+                    '"output_dir":"   ",'
                     '"edit_friendly_encoder":"nvenc",'
                     '"open_folder_after_download":"yes"'
                     "}"
@@ -74,11 +58,7 @@ class TestSettingsStore(unittest.TestCase):
                 os.environ, {"YT_DLP_GUI_SETTINGS_PATH": str(settings_path)}
             ):
                 loaded = settings_store.load_settings(default_output_dir="/tmp/default")
-        defaults = settings_store.default_settings(default_output_dir="/tmp/default")
-        self.assertEqual(loaded["network_timeout"], defaults["network_timeout"])
-        self.assertEqual(loaded["network_retries"], defaults["network_retries"])
-        self.assertEqual(loaded["retry_backoff"], defaults["retry_backoff"])
-        self.assertEqual(loaded["concurrent_fragments"], "4")
+        self.assertEqual(loaded["output_dir"], "/tmp/default")
         self.assertEqual(loaded["edit_friendly_encoder"], "nvidia")
         self.assertTrue(loaded["open_folder_after_download"])
 

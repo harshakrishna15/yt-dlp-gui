@@ -56,17 +56,8 @@ def build_report_payload(
     lines.append(f"queue_active={int(queue_active)}")
     lines.append(f"is_downloading={int(is_downloading)}")
     lines.append(f"preview_title={preview_title[:120] if preview_title else ''}")
-    lines.append(f"network_timeout_s={options['network_timeout_s']}")
-    lines.append(f"network_retries={options['network_retries']}")
-    lines.append(f"retry_backoff_s={options['retry_backoff_s']}")
-    lines.append(f"concurrent_fragments={options['concurrent_fragments']}")
-    lines.append(f"write_subtitles={int(bool(options['write_subtitles']))}")
-    lines.append(f"embed_subtitles={int(bool(options['embed_subtitles']))}")
-    lines.append(
-        f"subtitle_languages={','.join(options['subtitle_languages']) if options['subtitle_languages'] else ''}"
-    )
-    lines.append(f"audio_language={options['audio_language']}")
     lines.append(f"custom_filename={options['custom_filename']}")
+    lines.append(f"edit_friendly_encoder={options['edit_friendly_encoder']}")
     lines.append("")
     lines.append("[queue]")
     for idx, item in enumerate(queue_items, start=1):

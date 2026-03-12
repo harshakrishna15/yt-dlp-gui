@@ -16,6 +16,7 @@ try:
         QBoxLayout,
         QCheckBox,
         QComboBox,
+        QGroupBox,
         QLabel,
         QLineEdit,
         QPushButton,
@@ -109,6 +110,110 @@ class TestQtApp(unittest.TestCase):
                 f"{label.objectName()} is vertically clipped at the default window size",
             )
 
+    def test_ready_summary_stays_hidden_until_output_choices_exist(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.assertFalse(self.window.ready_summary_label.isVisible())
+
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        self.window._refresh_ready_summary()
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.ready_summary_label.isVisible())
+
+    def test_source_preview_keeps_output_section_stable_when_metadata_arrives(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        before_preview_height = self.window.source_preview_card.height()
+        before_output_height = self.window.output_section.height()
+
+        self.window._set_preview_title(
+            "How did they fit an entire PC in this?? - HP @ CES 2026"
+        )
+        self.window._set_source_summary(
+            {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "ShortCircuit",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 32s",
+                "detail_three_text": "13 video formats",
+            }
+        )
+        QApplication.processEvents()
+
+        self.assertGreaterEqual(
+            self.window.source_preview_card.height(), before_preview_height
+        )
+        self.assertEqual(self.window.output_section.height(), before_output_height)
+        self.assertTrue(self.window.source_preview_subtitle.isVisible())
+
+    def test_convert_check_only_appears_for_webm_container(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._video_labels = ["1080p"]
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        self.window._update_controls_state()
+
+        mp4_index = self.window.container_combo.findData("mp4")
+        webm_index = self.window.container_combo.findData("webm")
+        self.assertGreaterEqual(mp4_index, 0)
+        self.assertGreaterEqual(webm_index, 0)
+
+        self.window.container_combo.setCurrentIndex(mp4_index)
+        self.window._update_controls_state()
+        QApplication.processEvents()
+        self.assertFalse(self.window.convert_check.isVisible())
+
+        self.window.container_combo.setCurrentIndex(webm_index)
+        self.window._update_controls_state()
+        QApplication.processEvents()
+        self.assertTrue(self.window.convert_check.isVisible())
+
+    def test_source_preview_detail_chips_reflow_after_metric_change(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for chip in (
+            self.window.source_preview_detail_one,
+            self.window.source_preview_detail_two,
+            self.window.source_preview_detail_three,
+        ):
+            chip.setStyleSheet(
+                "font-size: 14px; padding: 6px 10px; border: 1px solid #000;"
+            )
+
+        self.window._set_preview_title(
+            "How did they fit an entire PC in this?? - HP @ CES 2026"
+        )
+        self.window._set_source_summary(
+            {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "ShortCircuit",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 32s",
+                "detail_three_text": "13 video formats",
+            }
+        )
+        QApplication.processEvents()
+
+        for chip in (
+            self.window.source_preview_detail_one,
+            self.window.source_preview_detail_two,
+            self.window.source_preview_detail_three,
+        ):
+            self.assertGreaterEqual(
+                chip.geometry().height(),
+                chip.sizeHint().height(),
+                f"{chip.objectName()} is vertically clipped after chip metrics change",
+            )
+
     def test_url_entry_enables_analyze_action_without_auto_fetching(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
 
@@ -138,6 +243,94 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.paste_button.height(), before["paste"])
         self.assertEqual(self.window.analyze_button.height(), before["analyze"])
         self.assertEqual(source_row.height(), before["row"])
+
+    def test_source_row_buttons_remain_visible_at_min_width(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        self.window.url_edit.setText(
+            "https://www.youtube.com/watch?v="
+            "abc1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        )
+        QApplication.processEvents()
+
+        source_rect = self.window.source_row.rect().adjusted(0, 0, -1, -1)
+        mapped: list[tuple[QPushButton, QRect]] = []
+        for button in (self.window.paste_button, self.window.analyze_button):
+            top_left = button.mapTo(self.window.source_row, button.rect().topLeft())
+            bottom_right = button.mapTo(
+                self.window.source_row, button.rect().bottomRight()
+            )
+            rect = QRect(top_left, bottom_right).normalized()
+            mapped.append((button, rect))
+            self.assertTrue(
+                source_rect.contains(rect),
+                f"{button.text()} is clipped inside the source row",
+            )
+
+        overlap = mapped[0][1].intersected(mapped[1][1])
+        self.assertFalse(
+            overlap.width() > 2 and overlap.height() > 2,
+            "Source row action buttons overlap at the minimum window width",
+        )
+
+    def test_shortening_url_keeps_download_cards_full_width(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        source_section = self.window.main_page.findChild(QGroupBox, "sourceSection")
+        self.assertIsNotNone(source_section)
+        assert source_section is not None
+
+        widths = [
+            "https://www.youtube.com/watch?v=abc123",
+            "https://www.youtube.com/watch?",
+            "https://www.youtube.com/watch",
+            "https://www.youtube.com/",
+            "https://",
+            "h",
+            "",
+        ]
+        for url in widths:
+            self.window.url_edit.setText(url)
+            QApplication.processEvents()
+            panel_width = self.window.panel_stack.width()
+            self.assertEqual(self.window.main_page.width(), panel_width)
+            self.assertEqual(source_section.width(), panel_width)
+            self.assertEqual(self.window.output_section.width(), panel_width)
+            self.assertEqual(self.window.run_section.width(), panel_width)
+
+    def test_geometry_refresh_does_not_shrink_header_or_main_page(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        header = self.window.top_actions.parentWidget()
+        self.assertIsNotNone(header)
+        assert header is not None
+        before_header_width = header.width()
+        before_main_page_width = self.window.main_page.width()
+
+        self.window._set_preview_title(
+            "How did they fit an entire PC in this?? - HP @ CES 2026"
+        )
+        self.window._set_source_summary(
+            {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "ShortCircuit",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 32s",
+                "detail_three_text": "13 video formats",
+            }
+        )
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        self.window._refresh_ready_summary()
+        QApplication.processEvents()
+
+        self.assertEqual(header.width(), before_header_width)
+        self.assertEqual(self.window.main_page.width(), before_main_page_width)
+        self.assertEqual(self.window.main_page.width(), self.window.panel_stack.width())
 
     def test_loaded_formats_shift_analyze_button_into_refresh_state(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
@@ -231,6 +424,29 @@ class TestQtApp(unittest.TestCase):
             [f"[source][loading] {message}", f"[source][loading] {message}"],
         )
 
+    def test_source_feedback_visibility_tracks_current_tone(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.window._set_source_feedback(
+            "Formats are ready. Choose options and start the download.",
+            tone="success",
+        )
+        QApplication.processEvents()
+        self.assertTrue(self.window.source_feedback_label.isVisible())
+
+        self.window._set_source_feedback(
+            "URL ready. Click Analyze URL to load formats and preview details.",
+            tone="neutral",
+        )
+        QApplication.processEvents()
+        self.assertFalse(self.window.source_feedback_label.isVisible())
+
+        self.window._set_source_feedback("", tone="hidden")
+        self.window._apply_responsive_layout()
+        QApplication.processEvents()
+        self.assertFalse(self.window.source_feedback_label.isVisible())
+
     def test_about_dialog_uses_app_metadata(self) -> None:
         with patch.object(self.window._effects.dialogs, "information") as info_mock:
             self.window._show_about_dialog()
@@ -241,26 +457,17 @@ class TestQtApp(unittest.TestCase):
         self.assertIn(APP_DISPLAY_NAME, message)
         self.assertIn(APP_VERSION, message)
 
-    def test_load_settings_always_defaults_output_folder_to_downloads(self) -> None:
+    def test_load_settings_applies_saved_output_folder(self) -> None:
         with patch(
             "gui.qt.app.settings_store.load_settings",
             return_value={
                 "output_dir": "/tmp/custom",
-                "subtitle_languages": "",
-                "write_subtitles": False,
-                "network_timeout": "20",
-                "network_retries": "1",
-                "retry_backoff": "1.5",
-                "concurrent_fragments": "4",
                 "open_folder_after_download": False,
             },
         ):
             window = QtYtDlpGui()
         try:
-            self.assertEqual(
-                window.output_dir_edit.text().strip(),
-                str(Path.home() / "Downloads"),
-            )
+            self.assertEqual(window.output_dir_edit.text().strip(), "/tmp/custom")
         finally:
             window.close()
             window.deleteLater()
@@ -270,12 +477,6 @@ class TestQtApp(unittest.TestCase):
             "gui.qt.app.settings_store.load_settings",
             return_value={
                 "output_dir": "/tmp/custom",
-                "subtitle_languages": "",
-                "write_subtitles": False,
-                "network_timeout": "20",
-                "network_retries": "1",
-                "retry_backoff": "1.5",
-                "concurrent_fragments": "4",
                 "edit_friendly_encoder": "nvidia",
                 "open_folder_after_download": False,
             },
@@ -286,6 +487,19 @@ class TestQtApp(unittest.TestCase):
         finally:
             window.close()
             window.deleteLater()
+
+    def test_open_folder_after_download_prefers_latest_output_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as output_dir:
+            target = Path(output_dir) / "video.mp4"
+            target.write_text("x", encoding="utf-8")
+            self.window.open_folder_after_download_check.setChecked(True)
+            self.window._set_output_dir_text("/tmp/other-folder")
+            self.window._set_last_output_path(target)
+
+            with patch.object(self.window._effects.desktop, "open_path") as open_mock:
+                self.window._maybe_open_output_folder()
+
+        open_mock.assert_called_once_with(Path(output_dir))
 
     def test_mixed_url_shows_overlay_alert(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
@@ -534,8 +748,49 @@ class TestQtApp(unittest.TestCase):
 
         self.window._set_output_dir_text(path)
 
-        self.assertEqual(self.window.output_dir_edit.text(), path)
+        self.assertEqual(
+            self.window.output_dir_edit.text(),
+            "~/Downloads/example/folder",
+        )
+        self.assertEqual(self.window.output_dir_edit.toolTip(), path)
         self.assertEqual(self.window.output_dir_edit.cursorPosition(), 0)
+
+    def test_min_width_save_card_keeps_output_folder_controls_clear_and_roomy(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 800)
+        QApplication.processEvents()
+
+        save_rect = self.window.save_card.rect().adjusted(0, 0, -1, -1)
+        output_rect = QRect(
+            self.window.output_dir_edit.mapTo(
+                self.window.save_card, self.window.output_dir_edit.rect().topLeft()
+            ),
+            self.window.output_dir_edit.mapTo(
+                self.window.save_card, self.window.output_dir_edit.rect().bottomRight()
+            ),
+        ).normalized()
+        browse_rect = QRect(
+            self.window.browse_button.mapTo(
+                self.window.save_card, self.window.browse_button.rect().topLeft()
+            ),
+            self.window.browse_button.mapTo(
+                self.window.save_card, self.window.browse_button.rect().bottomRight()
+            ),
+        ).normalized()
+
+        self.assertTrue(save_rect.contains(output_rect))
+        self.assertTrue(save_rect.contains(browse_rect))
+        overlap = output_rect.intersected(browse_rect)
+        self.assertFalse(
+            overlap.width() > 2 and overlap.height() > 2,
+            "Output folder field overlaps the browse button at the minimum window width",
+        )
+        self.assertGreaterEqual(
+            self.window.output_dir_edit.width(),
+            220,
+            "Output folder field should keep enough visible width at the minimum window size",
+        )
 
     def test_min_window_top_actions_have_icons_and_no_overlap(self) -> None:
         self.window.show()
@@ -590,6 +845,42 @@ class TestQtApp(unittest.TestCase):
                         f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
                     ),
                 )
+
+    def test_top_actions_geometry_stays_stable_after_header_refreshes(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        before_width = self.window.top_actions.width()
+
+        self.window._set_logs_alert(True)
+        self.window._refresh_top_action_icons()
+        self.window._open_panel("queue")
+        self.window._close_panel()
+        self.window._set_logs_alert(False)
+        self.window._refresh_top_action_icons()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.top_actions.width(), before_width)
+
+        actions_rect = self.window.top_actions.rect().adjusted(0, 0, -1, -1)
+        for button in (
+            self.window.downloads_button,
+            self.window.queue_button,
+            self.window.history_button,
+            self.window.logs_button,
+            self.window.settings_button,
+        ):
+            top_left = button.mapTo(self.window.top_actions, button.rect().topLeft())
+            bottom_right = button.mapTo(
+                self.window.top_actions, button.rect().bottomRight()
+            )
+            rect = QRect(top_left, bottom_right).normalized()
+            self.assertTrue(
+                actions_rect.contains(rect),
+                f"{button.text()} shifted outside the top actions rail",
+            )
 
     def test_classic_top_actions_keep_settings_rightmost(self) -> None:
         self.window.show()
@@ -976,6 +1267,37 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(shown.endswith("..."))
         self.assertNotIn("…", shown)
         self.assertEqual(self.window.item_label.toolTip(), long_title)
+
+    def test_metrics_strip_keeps_progress_speed_and_eta_fully_visible(self) -> None:
+        self.window.show()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        self.window._on_progress_update(
+            {
+                "status": "downloading",
+                "percent": 37.1,
+                "speed": "71.37 MiB/s",
+                "eta": "0:00",
+            }
+        )
+        self.window._set_current_item_display(
+            progress="-",
+            title="How did this get so long that it must truncate",
+        )
+        QApplication.processEvents()
+
+        for label in (
+            self.window.progress_label,
+            self.window.speed_label,
+            self.window.eta_label,
+        ):
+            self.assertGreaterEqual(
+                label.width(),
+                label.sizeHint().width(),
+                f"{label.text()} is horizontally clipped",
+            )
+        self.assertTrue(self.window.item_label.text().endswith("..."))
 
     def test_attention_log_shows_logs_alert_icon(self) -> None:
         self.assertFalse(self.window._logs_alert_active)
