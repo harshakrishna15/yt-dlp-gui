@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..app_meta import APP_VERSION
-from .widgets import _NativeComboBox
+from .widgets import QueueListWidget, _NativeComboBox
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class QueuePanelRefs:
     queue_stack: QStackedWidget
     queue_empty_index: int
     queue_content_index: int
-    queue_list: QListWidget
+    queue_list: QueueListWidget
     queue_remove_button: QPushButton
     queue_move_up_button: QPushButton
     queue_move_down_button: QPushButton
@@ -149,33 +149,37 @@ def _build_empty_state(
 
     badge_label = QLabel(badge, card)
     badge_label.setObjectName("panelEmptyBadge")
-    badge_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-    badge_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    badge_label.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     title_label = QLabel(title, card)
     title_label.setObjectName("panelEmptyTitle")
     title_label.setWordWrap(True)
-    title_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
     title_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
     description_label = QLabel(description, card)
     description_label.setObjectName("panelEmptyDescription")
     description_label.setWordWrap(True)
-    description_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    description_label.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+    )
     description_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
     hint_label = QLabel(hint, card)
     hint_label.setObjectName("panelEmptyHint")
     hint_label.setWordWrap(True)
-    hint_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    hint_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
     hint_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
-    card_layout.addWidget(badge_label)
+    card_layout.addWidget(badge_label, alignment=Qt.AlignmentFlag.AlignLeft)
     card_layout.addWidget(title_label)
     card_layout.addWidget(description_label)
     card_layout.addWidget(hint_label)
 
-    layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignHCenter)
+    layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignLeft)
     layout.addStretch(1)
     return _EmptyStateRefs(
         page=page,
@@ -292,7 +296,7 @@ def build_queue_panel(
     content_layout = QVBoxLayout(content)
     content_layout.setContentsMargins(0, 0, 0, 0)
     content_layout.setSpacing(10)
-    queue_list = QListWidget(content)
+    queue_list = QueueListWidget(content)
     queue_list.setObjectName("panelList")
     queue_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
     content_layout.addWidget(queue_list, stretch=1)

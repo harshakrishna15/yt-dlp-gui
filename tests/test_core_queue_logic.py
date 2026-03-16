@@ -129,6 +129,16 @@ class TestCoreQueueLogic(unittest.TestCase):
         self.assertTrue(moved)
         self.assertEqual([item.get("url") for item in updated], ["a", "d", "b", "c"])
 
+    def test_reorder_queue_items(self) -> None:
+        items = [
+            {"url": "a"},
+            {"url": "b"},
+            {"url": "c"},
+        ]
+        updated, moved = queue_logic.reorder_queue_items(items, [2, 0, 1])
+        self.assertTrue(moved)
+        self.assertEqual([item.get("url") for item in updated], ["c", "a", "b"])
+
     def test_clear_queue_items(self) -> None:
         updated, cleared = queue_logic.clear_queue_items([{"url": "a"}])
         self.assertTrue(cleared)

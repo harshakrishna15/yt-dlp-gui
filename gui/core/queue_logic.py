@@ -160,6 +160,28 @@ def move_selected_queue_items_down(
     return items, moved
 
 
+def reorder_queue_items(
+    queue_items: Sequence[QueueItem | Mapping[str, Any]],
+    item_order: Sequence[int],
+) -> tuple[list[QueueItem], bool]:
+    items: list[QueueItem] = [dict(item or {}) for item in queue_items]
+    if len(item_order) != len(items):
+        return items, False
+
+    normalized: list[int] = []
+    seen: set[int] = set()
+    for raw_index in item_order:
+        index = int(raw_index)
+        if index in seen or index < 0 or index >= len(items):
+            return items, False
+        seen.add(index)
+        normalized.append(index)
+
+    if normalized == list(range(len(items))):
+        return items, False
+    return [items[index] for index in normalized], True
+
+
 def clear_queue_items(
     queue_items: Sequence[QueueItem | Mapping[str, Any]],
 ) -> tuple[list[QueueItem], bool]:

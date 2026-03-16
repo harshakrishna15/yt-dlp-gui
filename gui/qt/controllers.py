@@ -33,6 +33,13 @@ def _emit_window_signal(window: object, signal_name: str, *args: object) -> bool
     return True
 
 
+def _set_window_label_text(window: object, attr_name: str, text: str) -> None:
+    label = getattr(window, attr_name, None)
+    setter = getattr(label, "setText", None)
+    if callable(setter):
+        setter(str(text))
+
+
 @dataclass
 class SourceState:
     fetch_request_seq: int = 0
@@ -344,6 +351,8 @@ class RunQueueController:
         s.show_progress_item = True
         w._clear_logs()
         w._reset_progress_summary()
+        _set_window_label_text(w, "session_completed_value", "0")
+        _set_window_label_text(w, "session_failed_value", "0")
         w._clear_last_output_path()
         w._set_metrics_visible(True)
         w._set_status("Downloading...")
@@ -402,6 +411,8 @@ class RunQueueController:
         s.show_progress_item = False
         w._reset_progress_summary()
         if result == download.DOWNLOAD_SUCCESS:
+            _set_window_label_text(w, "session_completed_value", "1")
+            _set_window_label_text(w, "session_failed_value", "0")
             w._set_status("Download complete")
             w._set_source_feedback(
                 "Download complete. You can paste another URL anytime.",
@@ -409,6 +420,8 @@ class RunQueueController:
             )
             w._maybe_open_output_folder()
         elif result == download.DOWNLOAD_CANCELLED:
+            _set_window_label_text(w, "session_completed_value", "0")
+            _set_window_label_text(w, "session_failed_value", "0")
             w._set_status("Cancelled")
             w._set_source_feedback(
                 "Download cancelled. Update settings or URL and try again.",
@@ -416,6 +429,8 @@ class RunQueueController:
             )
             w._clear_last_output_path()
         else:
+            _set_window_label_text(w, "session_completed_value", "0")
+            _set_window_label_text(w, "session_failed_value", "1")
             failure = core_error_feedback.download_failed_feedback(w._last_error_log)
             w._set_status(failure.status)
             w._set_source_feedback(
@@ -487,6 +502,20 @@ class RunQueueController:
         updated, moved = core_queue_logic.move_selected_queue_items_down(
             s.queue_items,
             self._normalize_selected_indices(selected_indices),
+        )
+        if not moved:
+            return
+        s.queue_items = updated
+        w._refresh_queue_panel()
+
+    def on_queue_reorder(self, item_order: list[int]) -> None:
+        s = self.state
+        w = self.window
+        if s.queue_active:
+            return
+        updated, moved = core_queue_logic.reorder_queue_items(
+            s.queue_items,
+            item_order,
         )
         if not moved:
             return
@@ -567,6 +596,8 @@ class RunQueueController:
         s.cancel_event = self._ports.cancel_events.new_event()
         w._clear_logs()
         w._reset_progress_summary()
+        _set_window_label_text(w, "session_completed_value", "0")
+        _set_window_label_text(w, "session_failed_value", "0")
         w._clear_last_output_path()
         w._set_metrics_visible(True)
         w._set_status("Downloading queue...")
@@ -678,6 +709,13 @@ class RunQueueController:
         )
         s.queue_failed_items = progress.failed_items
         s.cancel_requested = progress.cancel_requested
+        processed_items = int(s.queue_index) + 1
+        _set_window_label_text(w, "session_failed_value", str(progress.failed_items))
+        _set_window_label_text(
+            w,
+            "session_completed_value",
+            str(max(0, processed_items - progress.failed_items)),
+        )
         if progress.should_finish:
             if progress.finish_cancelled:
                 w._append_log("[queue] cancelled")
@@ -698,6 +736,7 @@ class RunQueueController:
 
         failed_items = s.queue_failed_items
         queue_started_ts = s.queue_started_ts
+        queue_length = len(s.queue_items)
         s.run_state = RunState.IDLE
         s.queue_active = False
         s.queue_index = None
@@ -707,6 +746,20 @@ class RunQueueController:
         s.show_progress_item = False
         s.cancel_requested = False
         s.cancel_event = None
+        if cancelled:
+            _set_window_label_text(
+                w,
+                "session_completed_value",
+                str(max(0, queue_length - failed_items - 1)),
+            )
+            _set_window_label_text(w, "session_failed_value", str(failed_items))
+        else:
+            _set_window_label_text(
+                w,
+                "session_completed_value",
+                str(max(0, queue_length - failed_items)),
+            )
+            _set_window_label_text(w, "session_failed_value", str(failed_items))
 
         outcome = core_workflow.queue_finish_outcome(
             cancelled=cancelled,

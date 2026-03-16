@@ -27,9 +27,6 @@ class WindowFeedbackMixin:
 
     def _refresh_download_result_view(self: "QtYtDlpGui") -> None:
         show_latest_output = self._latest_output_path is not None
-        compact_mode = self.isVisible() and (
-            self.height() <= (MIN_WINDOW_HEIGHT - 40)
-        )
         card_state = "ready" if show_latest_output else "empty"
         if self.download_result_card.property("state") != card_state:
             self.download_result_card.setProperty("state", card_state)
@@ -53,7 +50,7 @@ class WindowFeedbackMixin:
             and bool(self._latest_output_path and self._latest_output_path.parent.exists())
         )
         self.copy_output_path_button.setEnabled(show_latest_output)
-        self.download_result_card.setVisible(show_latest_output or not compact_mode)
+        self.download_result_card.setVisible(show_latest_output)
 
     def _clear_last_output_path(self: "QtYtDlpGui") -> None:
         self._latest_output_path = None
@@ -298,11 +295,27 @@ class WindowFeedbackMixin:
 
     def _refresh_history_panel(self: "QtYtDlpGui") -> None:
         self.history_list.clear()
+        self.history_summary_list.clear()
         for item in self.download_history:
             timestamp = item.get("timestamp", "")
             name = item.get("name", "")
             self.history_list.addItem(f"{timestamp}  {name}")
+            path_text = str(item.get("path", "")).strip()
+            folder_name = Path(path_text).expanduser().parent.name if path_text else ""
+            meta_parts = [timestamp, folder_name]
+            self._append_workspace_summary_item(
+                self.history_summary_list,
+                badge_text="FILE",
+                title=name or "Downloaded item",
+                meta=" · ".join(part for part in meta_parts if part),
+                status_text="Saved",
+                tone="default",
+                tooltip=path_text or name,
+            )
         self._refresh_history_panel_state()
+        has_items = self.history_summary_list.count() > 0
+        self.history_summary_list.setVisible(has_items)
+        self.history_summary_empty.setVisible(not has_items)
 
     def _selected_history_item(self: "QtYtDlpGui") -> HistoryItem | None:
         row = self.history_list.currentRow()
@@ -376,6 +389,7 @@ class WindowFeedbackMixin:
         self._set_metric_label_text(self.speed_label, "Speed: -")
         self._set_metric_label_text(self.eta_label, "ETA: -")
         self._set_current_item_display(progress="-", title="-")
+        self.session_speed_value.setText("0 KB/s")
         self._set_metrics_visible(False)
 
     def _on_progress_update(self: "QtYtDlpGui", payload: object) -> None:
@@ -395,6 +409,7 @@ class WindowFeedbackMixin:
                 )
             if isinstance(speed, str):
                 self._set_metric_label_text(self.speed_label, f"Speed: {speed or '-'}")
+                self.session_speed_value.setText(speed or "0 KB/s")
             eta_text = str(eta).strip() if isinstance(eta, str) else ""
             if playlist_eta:
                 self._set_metric_label_text(

@@ -563,6 +563,8 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual([item.get("url") for item in state.queue_items], ["b", "c", "a"])
         controller.on_queue_remove_selected([1])
         self.assertEqual([item.get("url") for item in state.queue_items], ["b", "a"])
+        controller.on_queue_reorder([1, 0])
+        self.assertEqual([item.get("url") for item in state.queue_items], ["a", "b"])
         controller.on_queue_clear()
         self.assertEqual(state.queue_items, [])
         self.assertGreaterEqual(window.queue_refreshes, 3)

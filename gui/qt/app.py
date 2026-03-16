@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import signal
 import re
+from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QCloseEvent,
     QColor,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QLineEdit,
+    QListWidgetItem,
     QListView,
     QMainWindow,
     QGraphicsOpacityEffect,
@@ -76,7 +78,7 @@ from ..core import urls as core_urls
 from ..core import ui_state as core_ui_state
 from ..services import app_service
 from .state import PREVIEW_TITLE_TOOLTIP_DEFAULT
-from .widgets import _NativeComboBox, _QtSignals
+from .widgets import QUEUE_SOURCE_INDEX_ROLE, WorkspaceSummaryWidget, _NativeComboBox, _QtSignals
 from ..common.types import DownloadOptions, DownloadRequest, HistoryItem, QueueItem, QueueSettings
 
 
@@ -90,6 +92,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._active_animations: list[QPropertyAnimation] = []
         self._shortcuts: list[QShortcut] = []
         self._progress_anim: QPropertyAnimation | None = None
+        self._source_feedback_toast_token = 0
         self._logs_alert_active = False
         self._header_icons_enabled = True
         self._legacy_log_alert_icon = self._build_alert_dot_icon()
@@ -120,6 +123,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._fetch_timer.setInterval(FETCH_DEBOUNCE_MS)
         self._fetch_timer.setSingleShot(True)
         self._fetch_timer.timeout.connect(self._start_fetch_formats)
+        self._source_feedback_toast_timer = QTimer(self)
+        self._source_feedback_toast_timer.setSingleShot(True)
+        self._source_feedback_toast_timer.timeout.connect(
+            self._hide_source_feedback_toast
+        )
 
         self.download_history: list[HistoryItem] = []
         self._history_seen_paths: set[str] = set()
@@ -129,6 +137,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._last_source_feedback_log: tuple[str, str] | None = None
         self._status_presenter = StatusPresenter()
         self._active_panel_name: str | None = None
+        self._active_workspace_name = "current"
         self._applying_user_settings = False
         self._latest_output_path: Path | None = None
         self._current_item_progress = "-"
@@ -388,16 +397,29 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         }
         self._configure_top_action_icons()
 
-        self.downloads_button.clicked.connect(lambda _checked: self._close_panel())
+        self.current_view_button.clicked.connect(
+            lambda _checked: self._show_main_workspace("current")
+        )
+        self.queue_view_button.clicked.connect(
+            lambda _checked: self._show_main_workspace("queue")
+        )
+        self.history_view_button.clicked.connect(
+            lambda _checked: self._show_main_workspace("history")
+        )
+        self.downloads_button.clicked.connect(
+            lambda _checked: self._show_main_workspace("current")
+        )
         self.settings_button.clicked.connect(
             lambda _checked: self._toggle_panel("settings")
         )
-        self.queue_button.clicked.connect(lambda _checked: self._toggle_panel("queue"))
+        self.queue_button.clicked.connect(
+            lambda _checked: self._show_main_workspace("queue")
+        )
         self.history_button.clicked.connect(
-            lambda _checked: self._toggle_panel("history")
+            lambda _checked: self._show_main_workspace("history")
         )
         self.logs_button.clicked.connect(lambda _checked: self._toggle_panel("logs"))
-        self.downloads_button.setChecked(True)
+        self._select_workspace_view("current")
 
         combo_arrow_path = (
             Path(__file__).resolve().parent / "assets" / "combo-down-arrow.svg"
@@ -438,9 +460,26 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.use_single_video_url_button = mixed.use_single_video_url_button
         self.use_playlist_url_button = mixed.use_playlist_url_button
 
+        source_toast = ui.source_toast
+        self.source_feedback_toast = source_toast.card
+        self.source_feedback_toast_title = source_toast.title_label
+        self.source_feedback_toast_message = source_toast.message_label
+
         downloads = ui.downloads
         self.main_page = downloads.main_page
         self._main_page_index = downloads.main_page_index
+        self.workspace_layout = downloads.workspace_layout
+        self.source_view_stack = downloads.source_view_stack
+        self._current_view_index = downloads.current_view_index
+        self._queue_view_index = downloads.queue_view_index
+        self._history_view_index = downloads.history_view_index
+        self.current_view_button = downloads.current_view_button
+        self.queue_view_button = downloads.queue_view_button
+        self.history_view_button = downloads.history_view_button
+        self.queue_summary_list = downloads.queue_summary_list
+        self.queue_summary_empty = downloads.queue_summary_empty
+        self.history_summary_list = downloads.history_summary_list
+        self.history_summary_empty = downloads.history_summary_empty
         self.source_row = downloads.source_row
         self.url_edit = downloads.url_edit
         self.paste_button = downloads.paste_button
@@ -491,7 +530,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         run = downloads.run
         self.run_section = run.section
+        self.run_activity_card = run.activity_card
+        self.run_actions_card = run.actions_card
         self.run_stage_hint_label = run.stage_hint_label
+        self.session_title_label = run.session_title_label
         self.status_value = run.status_value
         self.progress_bar = run.progress_bar
         self.start_button = run.start_button
@@ -508,8 +550,16 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.download_result_card = run.download_result_card
         self.download_result_title = run.download_result_title
         self.download_result_path = run.download_result_path
+        self.session_completed_value = run.session_completed_value
+        self.session_failed_value = run.session_failed_value
+        self.session_speed_value = run.session_speed_value
+        self.session_downloaded_value = run.session_downloaded_value
         self.open_last_output_folder_button = run.open_last_output_folder_button
         self.copy_output_path_button = run.copy_output_path_button
+
+        for widget in (self.queue_summary_list, self.history_summary_list):
+            widget.setSelectionMode(widget.SelectionMode.NoSelection)
+            widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _register_native_combo(self, combo: _NativeComboBox) -> None:
         combo.setMinimumHeight(27)
@@ -595,12 +645,17 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         labels = [label for label in getattr(self, "_output_form_labels", []) if label is not None]
         if not labels:
             return
+        stacked_mode = self._output_layout_mode == "stacked"
+        if stacked_mode:
+            for label in labels:
+                label.setMinimumWidth(0)
+                label.setMaximumWidth(16777215)
+                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            return
         width = max(min_width, max(label.sizeHint().width() for label in labels))
         for label in labels:
             label.setFixedWidth(width)
-            label.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
     def _set_uniform_button_width(
         self, buttons: list[QPushButton], *, extra_px: int = 28
@@ -625,11 +680,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         metrics = QFontMetrics(self.font())
         compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
         if compact_height:
-            control_height = max(27, metrics.height() + 7)
-            toggle_height = max(18, control_height - 8)
+            control_height = max(31, metrics.height() + 9)
+            toggle_height = max(21, control_height - 9)
         else:
-            control_height = max(29, metrics.height() + 9)
-            toggle_height = max(20, control_height - 7)
+            control_height = max(34, metrics.height() + 11)
+            toggle_height = max(23, control_height - 9)
         for edit in (
             self.url_edit,
             self.playlist_items_edit,
@@ -729,10 +784,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.use_single_video_url_button,
                 self.use_playlist_url_button,
             ],
-            extra_px=18,
+            extra_px=24,
         )
 
-        self._set_output_form_label_width(min_width=112)
+        self._set_output_form_label_width(min_width=104)
         self._normalize_input_widths()
         self._stabilize_source_preview_card_sizing()
 
@@ -818,7 +873,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return
         row_margins = self.source_row.layout().contentsMargins() if self.source_row.layout() else None
         if row_margins is not None:
-            self.source_row.setFixedHeight(target + row_margins.top() + row_margins.bottom())
+            self.source_row.setFixedHeight(
+                target + row_margins.top() + row_margins.bottom() + 2
+            )
         for widget in (
             self.url_edit,
             self.paste_button,
@@ -849,53 +906,49 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _normalize_input_widths(self) -> None:
         width = max(1, self.width())
+        stacked_mode = self._output_layout_mode == "stacked"
         compact = width < 1240
         field_ratio = 0.26 if compact else 0.22
-        field_width = max(160, min(360, int(width * field_ratio)))
-        folder_field_width = max(220, min(420, int(width * 0.28)))
-        dropdown_width = max(128, min(250, int(width * 0.15)))
+        field_width = max(210, min(380, int(width * field_ratio)))
+        dropdown_width = max(180, min(340, int(width * 0.19)))
 
         self._constrain_source_row_widths(preferred_url_width=field_width)
         self.playlist_items_edit.setMinimumWidth(field_width)
         self.filename_edit.setMinimumWidth(field_width)
-        self.output_dir_edit.setMinimumWidth(folder_field_width)
+        self.output_dir_edit.setMinimumWidth(0)
 
         self.container_combo.setMinimumWidth(dropdown_width)
         self.codec_combo.setMinimumWidth(dropdown_width)
         self.format_combo.setMinimumWidth(dropdown_width)
-
-        save_card_width = max(380, min(620, int(width * 0.44)))
-        self.save_card.setMinimumWidth(save_card_width)
-        self.save_card.setMaximumWidth(16777215)
+        if stacked_mode:
+            self.output_section.setMinimumWidth(0)
+            self.output_section.setMaximumWidth(16777215)
+        else:
+            inspector_width = max(440, min(560, int(width * 0.42)))
+            self.output_section.setMinimumWidth(inspector_width)
+            self.output_section.setMaximumWidth(inspector_width + 40)
 
     def _set_output_layout_mode(self, mode: str) -> None:
-        balanced_mode = mode == "balanced"
-        self.output_layout.addWidget(self.format_card, 0, 0)
-        self.output_layout.addWidget(self.save_card, 0, 1)
-        self.output_layout.setColumnStretch(0, 11 if balanced_mode else 5)
-        self.output_layout.setColumnStretch(1, 10 if balanced_mode else 4)
-        self.output_layout.setHorizontalSpacing(16 if balanced_mode else 22)
-        self.output_layout.setVerticalSpacing(8)
-        self.format_layout.setSpacing(7 if balanced_mode else 8)
-        self.save_layout.setSpacing(7 if balanced_mode else 8)
-        self._set_output_form_label_width(min_width=100 if balanced_mode else 112)
-        self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.folder_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.folder_row_layout.setSpacing(6)
-        self.folder_row_layout.setStretch(0, 1)
-        self.folder_row_layout.setAlignment(
-            self.browse_button,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        stacked_mode = mode == "stacked"
+        self._output_layout_mode = mode
+        self.workspace_layout.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if stacked_mode
+            else QBoxLayout.Direction.LeftToRight
         )
+        self.workspace_layout.setSpacing(14 if stacked_mode else 18)
+        self.output_layout.setSpacing(12 if stacked_mode else 14)
+        self.format_layout.setSpacing(12 if stacked_mode else 10)
+        self.save_layout.setSpacing(12 if stacked_mode else 10)
+        self._set_output_form_label_width()
+        self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        self.mode_row_layout.setSpacing(12 if stacked_mode else 14)
+        self.folder_row_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+        self.folder_row_layout.setSpacing(10)
 
     def _apply_responsive_layout(self) -> None:
-        desired_mode = (
-            "balanced"
-            if max(self.width(), self.output_section.width()) < 1120
-            else "wide"
-        )
+        desired_mode = "stacked" if self.width() < 860 else "split"
         self._set_output_layout_mode(desired_mode)
-        self._output_layout_mode = desired_mode
 
         compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
         self.source_preview_subtitle.setVisible(not compact_height)
@@ -905,11 +958,14 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._sync_source_details_height()
 
     def _install_tooltips(self) -> None:
-        self.downloads_button.setToolTip("Open the main downloads view.")
+        self.downloads_button.setToolTip("Show the current source workspace.")
         self.settings_button.setToolTip("Open settings view.")
-        self.queue_button.setToolTip("Open queue manager view.")
-        self.history_button.setToolTip("Open download history view.")
+        self.queue_button.setToolTip("Show queued downloads in the workspace.")
+        self.history_button.setToolTip("Show download history in the workspace.")
         self.logs_button.setToolTip("Open logs view.")
+        self.current_view_button.setToolTip("Show the current source summary.")
+        self.queue_view_button.setToolTip("Show queued downloads.")
+        self.history_view_button.setToolTip("Show download history.")
 
         self.url_edit.setToolTip("Paste a video or playlist URL.")
         self.paste_button.setToolTip("Paste URL from clipboard.")
@@ -956,7 +1012,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.cancel_button.setToolTip("Cancel the current download.")
         self.status_value.setToolTip("Current run status.")
 
-        self.queue_list.setToolTip("Queued downloads.")
+        self.queue_list.setToolTip(
+            "Queued downloads. Drag to reorder and click X to remove."
+        )
         self.queue_remove_button.setToolTip("Remove selected queue items.")
         self.queue_move_up_button.setToolTip("Move selected queue items up.")
         self.queue_move_down_button.setToolTip("Move selected queue items down.")
@@ -1013,14 +1071,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             if widget is not None:
                 self._set_widget_property(widget, "stage", download_state)
 
-        if is_fetching:
-            output_hint = "Loading formats and source details for this URL..."
-        elif has_formats_data:
-            output_hint = ""
-        elif url_present:
-            output_hint = "Analyze this URL to unlock container, codec, and quality controls."
-        else:
-            output_hint = "Paste a video or playlist URL to unlock export settings."
+        output_hint = ""
         run_hint = ""
 
         self.output_stage_hint_label.setText(output_hint)
@@ -1042,17 +1093,26 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.analyze_button.setText("Refresh formats")
         else:
             self.analyze_button.setText("Analyze URL")
+        self._set_uniform_button_width(
+            [
+                self.paste_button,
+                self.analyze_button,
+            ],
+            extra_px=22,
+        )
 
     def _refresh_queue_panel_state(self) -> None:
         has_items = self.queue_list.count() > 0
         has_selection = bool(self.queue_list.selectedIndexes())
+        editable = not self.queue_active
         self.queue_stack.setCurrentIndex(
             self._queue_content_index if has_items else self._queue_empty_index
         )
-        self.queue_remove_button.setEnabled(has_selection)
-        self.queue_move_up_button.setEnabled(has_selection)
-        self.queue_move_down_button.setEnabled(has_selection)
-        self.queue_clear_button.setEnabled(has_items)
+        self.queue_list.set_queue_editable(editable)
+        self.queue_remove_button.setEnabled(editable and has_selection)
+        self.queue_move_up_button.setEnabled(editable and has_selection)
+        self.queue_move_down_button.setEnabled(editable and has_selection)
+        self.queue_clear_button.setEnabled(editable and has_items)
 
     def _refresh_history_panel_state(self) -> None:
         has_items = self.history_list.count() > 0
@@ -1087,8 +1147,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _sync_source_feedback_visibility(self) -> None:
         tone = str(self.source_feedback_label.property("tone") or "neutral")
-        show_source_feedback = tone not in {"", "neutral", "hidden"}
+        message = self.source_feedback_label.text().strip()
+        show_source_feedback = tone not in {"", "neutral", "hidden"} and bool(message)
+        visibility_changed = self.source_feedback_label.isVisible() != show_source_feedback
         self.source_feedback_label.setVisible(show_source_feedback)
+        self._hide_source_feedback_toast(animated=False)
+        if visibility_changed:
+            self._refresh_downloads_page_geometry()
 
     def _set_metrics_visible(self, visible: bool) -> None:
         self.metrics_card.setVisible(True)
@@ -1214,8 +1279,46 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if visibility_changed:
             self._refresh_downloads_page_geometry()
 
+    def _workspace_view_index(self, name: str) -> int:
+        mapping = {
+            "current": self._current_view_index,
+            "queue": self._queue_view_index,
+            "history": self._history_view_index,
+        }
+        return mapping.get(name, self._current_view_index)
+
+    def _select_workspace_view(self, name: str) -> None:
+        target = name if name in {"current", "queue", "history"} else "current"
+        self._active_workspace_name = target
+        self.source_view_stack.setCurrentIndex(self._workspace_view_index(target))
+        self.current_view_button.setChecked(target == "current")
+        self.queue_view_button.setChecked(target == "queue")
+        self.history_view_button.setChecked(target == "history")
+        if self._active_panel_name is None:
+            self.downloads_button.setChecked(target == "current")
+            self.queue_button.setChecked(target == "queue")
+            self.history_button.setChecked(target == "history")
+            self.settings_button.setChecked(False)
+            self.logs_button.setChecked(False)
+        self._refresh_top_action_icons()
+
+    def _show_main_workspace(self, name: str = "current") -> None:
+        target = name if name in {"current", "queue", "history"} else "current"
+        window_size = self.size()
+        if self.panel_stack.currentIndex() != self._main_page_index:
+            self.panel_stack.setCurrentIndex(self._main_page_index)
+            self._sync_current_panel_geometry()
+            self._animate_widget_fade_in(self.panel_stack.currentWidget())
+        self._active_panel_name = None
+        self._select_workspace_view(target)
+        self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
+        if self.isVisible() and self.size() != window_size:
+            self.resize(window_size)
+
     def _apply_header_layout(self) -> None:
         self.classic_actions.setVisible(True)
+        self.queue_button.setVisible(False)
+        self.history_button.setVisible(False)
         self._refresh_top_action_icons()
 
     def _toggle_panel(self, name: str) -> None:
@@ -1346,14 +1449,21 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ("history", self.history_button),
             ("logs", self.logs_button),
         ):
+            if self._active_panel_name in {"settings", "logs"}:
+                is_checked = self._active_panel_name == name
+            else:
+                is_checked = {
+                    "downloads": self._active_workspace_name == "current",
+                    "queue": self._active_workspace_name == "queue",
+                    "history": self._active_workspace_name == "history",
+                    "settings": False,
+                    "logs": False,
+                }.get(name, False)
             icon = QIcon()
             if self._header_icons_enabled:
                 icon = self._panel_icon(
                     name,
-                    checked=(
-                        name == "downloads" and self._active_panel_name is None
-                    )
-                    or self._active_panel_name == name,
+                    checked=is_checked,
                     alert=(
                         name == "logs"
                         and self._logs_alert_active
@@ -1470,9 +1580,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._active_panel_name is None
             and self.panel_stack.currentIndex() == self._main_page_index
         ):
-            for panel_name, button in self._panel_buttons.items():
-                button.setChecked(panel_name == "downloads")
-            self._refresh_top_action_icons()
+            self._select_workspace_view(self._active_workspace_name)
             self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
             return
         window_size = self.size()
@@ -1480,9 +1588,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._sync_current_panel_geometry()
         self._animate_widget_fade_in(self.panel_stack.currentWidget())
         self._active_panel_name = None
-        for panel_name, button in self._panel_buttons.items():
-            button.setChecked(panel_name == "downloads")
-        self._refresh_top_action_icons()
+        self._select_workspace_view(self._active_workspace_name)
         self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
@@ -1495,6 +1601,105 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.mixed_url_overlay.setVisible(should_show)
         if should_show:
             self.mixed_url_overlay.raise_()
+
+    def _source_feedback_toast_timeout_ms(self, tone: str) -> int:
+        if tone == "success":
+            return 3400
+        if tone == "warning":
+            return 4600
+        if tone == "error":
+            return 5200
+        return 0
+
+    def _source_feedback_toast_target_rect(self) -> QRect:
+        panel_rect = self.panel_stack.geometry()
+        max_width = max(300, min(380, panel_rect.width() - 36))
+        self.source_feedback_toast.setMaximumWidth(max_width)
+        layout = self.source_feedback_toast.layout()
+        if layout is not None:
+            layout.activate()
+        self.source_feedback_toast.adjustSize()
+        hint = self.source_feedback_toast.sizeHint()
+        width = min(max_width, hint.width())
+        height = hint.height()
+        x = panel_rect.right() - width - 18
+        y = panel_rect.top() + 18
+        return QRect(x, y, width, height)
+
+    def _source_feedback_toast_hidden_rect(self, target: QRect) -> QRect:
+        panel_rect = self.panel_stack.geometry()
+        return QRect(
+            panel_rect.right() + 24,
+            target.y(),
+            target.width(),
+            target.height(),
+        )
+
+    def _layout_source_feedback_toast(self) -> None:
+        if not self.source_feedback_toast.isVisible():
+            return
+        target = self._source_feedback_toast_target_rect()
+        self.source_feedback_toast.setGeometry(target)
+
+    def _show_source_feedback_toast(self, text: str, *, tone: str) -> None:
+        clean = str(text or "").strip()
+        if not clean:
+            self._hide_source_feedback_toast()
+            return
+        self._source_feedback_toast_timer.stop()
+        self.source_feedback_toast_message.setText(clean)
+        self._set_widget_property(self.source_feedback_toast, "tone", str(tone or "success"))
+        target = self._source_feedback_toast_target_rect()
+        hidden = self._source_feedback_toast_hidden_rect(target)
+        current = self.source_feedback_toast.geometry()
+        if not self.source_feedback_toast.isVisible():
+            current = hidden
+        self.source_feedback_toast.setGeometry(current)
+        self.source_feedback_toast.show()
+        self.source_feedback_toast.raise_()
+        self._source_feedback_toast_token += 1
+        token = self._source_feedback_toast_token
+        anim = QPropertyAnimation(self.source_feedback_toast, b"geometry", self)
+        anim.setDuration(280)
+        anim.setStartValue(current)
+        anim.setEndValue(target)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._track_animation(anim)
+        anim.start()
+        timeout_ms = self._source_feedback_toast_timeout_ms(tone)
+        if timeout_ms > 0:
+            self._source_feedback_toast_timer.start(timeout_ms)
+        else:
+            self._source_feedback_toast_token = token
+
+    def _hide_source_feedback_toast(self, *, animated: bool = True) -> None:
+        self._source_feedback_toast_timer.stop()
+        if not self.source_feedback_toast.isVisible():
+            return
+        target = self._source_feedback_toast_target_rect()
+        hidden = self._source_feedback_toast_hidden_rect(target)
+        if not animated:
+            self.source_feedback_toast.hide()
+            self.source_feedback_toast.setGeometry(hidden)
+            return
+        self._source_feedback_toast_token += 1
+        token = self._source_feedback_toast_token
+        start_rect = self.source_feedback_toast.geometry()
+        anim = QPropertyAnimation(self.source_feedback_toast, b"geometry", self)
+        anim.setDuration(220)
+        anim.setStartValue(start_rect)
+        anim.setEndValue(hidden)
+        anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        anim.finished.connect(
+            lambda token=token: self._complete_source_feedback_toast_hide(token)
+        )
+        self._track_animation(anim)
+        anim.start()
+
+    def _complete_source_feedback_toast_hide(self, token: int) -> None:
+        if token != self._source_feedback_toast_token:
+            return
+        self.source_feedback_toast.hide()
 
     def _show_feedback_popup(self, *, title: str, message: str, critical: bool = False) -> None:
         clean_message = str(message or "").strip() or "Something went wrong."
@@ -1714,9 +1919,20 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if current and current in self._filtered_labels:
             self.format_combo.setCurrentText(current)
         self.format_combo.blockSignals(False)
+        self._sync_format_combo_visibility()
 
     def _selected_format_label(self) -> str:
         return self.format_combo.currentText().strip()
+
+    def _sync_format_combo_visibility(self) -> None:
+        show_quality_combo = self.format_combo.count() > 0
+        label_text = "Codec & quality" if show_quality_combo else "Codec"
+        visibility_changed = self.format_combo.isVisible() != show_quality_combo
+        label_changed = self.codec_label.text() != label_text
+        self.format_combo.setVisible(show_quality_combo)
+        self.codec_label.setText(label_text)
+        if visibility_changed or label_changed:
+            self._refresh_downloads_page_geometry()
 
     def _selected_format_info(self) -> dict | None:
         label = self._selected_format_label()
@@ -1812,17 +2028,106 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _queue_remove_selected(self) -> None:
         self._run_queue_controller.on_queue_remove_selected(self._queue_selection_rows())
 
+    def _queue_remove_row(self, row: int) -> None:
+        self._run_queue_controller.on_queue_remove_selected([int(row)])
+
     def _queue_move_up(self) -> None:
         self._run_queue_controller.on_queue_move_up(self._queue_selection_rows())
 
     def _queue_move_down(self) -> None:
         self._run_queue_controller.on_queue_move_down(self._queue_selection_rows())
 
+    def _queue_reorder_items(self, item_order: list[int]) -> None:
+        self._run_queue_controller.on_queue_reorder([int(row) for row in item_order])
+
     def _queue_clear(self) -> None:
         self._run_queue_controller.on_queue_clear()
 
+    def _summary_badge_for_queue_mode(self, mode: str) -> str:
+        normalized = str(mode or "").strip().lower()
+        if normalized == "audio":
+            return "AUD"
+        if normalized == "video":
+            return "VID"
+        return "URL"
+
+    def _summary_title_from_url(self, url: str) -> str:
+        clean = str(url or "").strip()
+        if not clean:
+            return "Queued item"
+        parsed = urlparse(clean)
+        query = parse_qs(parsed.query)
+        if "v" in query and query["v"]:
+            host = parsed.netloc.replace("www.", "") or "youtube"
+            return f"{host} · {query['v'][0]}"
+        path = parsed.path.strip("/") or parsed.netloc or clean
+        path = re.sub(r"\s+", " ", path)
+        if len(path) > 48:
+            return f"{path[:45].rstrip()}..."
+        return path
+
+    def _queue_summary_title(self, item: QueueItem | dict[str, object]) -> str:
+        settings = item.get("settings") or {}
+        custom_filename = str(settings.get("custom_filename") or "").strip()
+        if custom_filename:
+            return custom_filename
+        item_url = str(item.get("url") or "").strip()
+        current_url = self.url_edit.text().strip()
+        preview_title = self.preview_value.toolTip().strip()
+        if item_url and current_url and item_url == current_url and preview_title:
+            return preview_title
+        format_label = str(settings.get("format_label") or "").strip()
+        if format_label and format_label != "-":
+            return format_label
+        return self._summary_title_from_url(item_url)
+
+    def _queue_summary_meta(
+        self, item: QueueItem | dict[str, object], *, idx: int
+    ) -> str:
+        settings = item.get("settings") or {}
+        mode = str(settings.get("mode") or "").strip().lower()
+        mode_text = "Audio only" if mode == "audio" else "Video & audio"
+        format_label = str(settings.get("format_label") or "").strip()
+        output_dir = str(settings.get("output_dir") or "").strip()
+        folder_name = Path(output_dir).expanduser().name if output_dir else ""
+        parts = [mode_text]
+        if format_label and format_label != "-":
+            parts.append(format_label)
+        if folder_name:
+            parts.append(folder_name)
+        return " · ".join(part for part in parts if part) or f"Queue item {idx}"
+
+    def _append_workspace_summary_item(
+        self,
+        list_widget,
+        *,
+        badge_text: str,
+        title: str,
+        meta: str,
+        status_text: str = "",
+        progress_percent: float | None = None,
+        tone: str = "default",
+        tooltip: str = "",
+    ) -> None:
+        widget = WorkspaceSummaryWidget(
+            badge_text=badge_text,
+            title=title,
+            meta=meta,
+            status_text=status_text,
+            progress_percent=progress_percent,
+            tone=tone,
+        )
+        item = QListWidgetItem(list_widget)
+        item.setSizeHint(widget.sizeHint())
+        if tooltip:
+            item.setToolTip(tooltip)
+            widget.setToolTip(tooltip)
+        list_widget.addItem(item)
+        list_widget.setItemWidget(item, widget)
+
     def _refresh_queue_panel(self) -> None:
         self.queue_list.clear()
+        self.queue_summary_list.clear()
         for idx, item in enumerate(self.queue_items, start=1):
             settings = item.get("settings") or {}
             mode = settings.get("mode") or "-"
@@ -1837,8 +2142,31 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ):
                 prefix = "> "
             text = f"{prefix}{idx}. {item.get('url', '')} [{mode}/{container}/{codec}] {label}"
-            self.queue_list.addItem(text)
+            list_item = QListWidgetItem(text)
+            list_item.setData(QUEUE_SOURCE_INDEX_ROLE, idx - 1)
+            list_item.setToolTip(text)
+            self.queue_list.addItem(list_item)
+            is_active = (
+                self.queue_active
+                and self.queue_index is not None
+                and (idx - 1) == self.queue_index
+            )
+            summary_title = self._queue_summary_title(item)
+            summary_meta = self._queue_summary_meta(item, idx=idx)
+            self._append_workspace_summary_item(
+                self.queue_summary_list,
+                badge_text=self._summary_badge_for_queue_mode(str(mode)),
+                title=summary_title,
+                meta=summary_meta,
+                status_text="Downloading" if is_active else "Queued",
+                progress_percent=(self.progress_bar.value() / 10.0) if is_active else None,
+                tone="active" if is_active else "default",
+                tooltip=text,
+            )
         self._refresh_queue_panel_state()
+        has_items = self.queue_summary_list.count() > 0
+        self.queue_summary_list.setVisible(has_items)
+        self.queue_summary_empty.setVisible(not has_items)
 
     def _on_record_output(self, output_path_raw: str, source_url: str) -> None:
         self._record_download_output(Path(output_path_raw), source_url)
@@ -1878,6 +2206,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             state,
             pending_mixed_url=self._pending_mixed_url,
         )
+        self._sync_format_combo_visibility()
         self._refresh_download_sections_state(
             url_present=url_present,
             has_formats_data=has_formats_data,
@@ -1905,6 +2234,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._apply_responsive_layout()
         self._sync_current_panel_geometry()
         self._layout_mixed_url_overlay()
+        self._layout_source_feedback_toast()
         self._refresh_current_item_text()
         if self._is_downloading:
             self._set_metrics_visible(True)

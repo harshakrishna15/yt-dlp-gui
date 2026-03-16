@@ -2,66 +2,62 @@ from __future__ import annotations
 
 
 _PALETTE = {
-    "page_bg_top": "#f5f7fb",
-    "page_bg_bottom": "#dde7ef",
-    "surface_glass": "rgba(255, 255, 255, 236)",
-    "surface_glass_strong": "rgba(255, 255, 255, 246)",
-    "surface_soft_glass": "rgba(245, 248, 251, 224)",
-    "surface_soft_glass_strong": "rgba(245, 248, 251, 240)",
-    "accent_wash": "rgba(220, 238, 233, 226)",
-    "accent_wash_strong": "rgba(220, 238, 233, 240)",
-    "scroll_handle": "#9fb0bf",
-    "scroll_handle_hover": "#7890a3",
-    "text_primary": "#14212d",
-    "text_muted": "#5d7082",
-    "text_label": "#526575",
-    "text_secondary": "#2a4153",
-    "text_inverse": "#ffffff",
-    "surface": "#ffffff",
-    "surface_soft": "#f4f7fa",
-    "surface_soft_alt": "#ecf2f7",
-    "surface_disabled": "#eef3f6",
-    "surface_selected": "#ddece8",
-    "surface_selected_strong": "#cfe3dd",
-    "border": "#cad6e1",
-    "border_strong": "#b5c4d1",
-    "border_soft": "#d9e3eb",
-    "border_hover": "#7f97aa",
-    "accent": "#13695f",
-    "accent_hover": "#10594f",
-    "accent_pressed": "#0c4740",
-    "accent_soft": "#dcefe9",
-    "accent_soft_hover": "#d0e5de",
-    "accent_border": "#8cb8af",
-    "accent_text": "#12544c",
-    "field_text": "#223340",
-    "field_readonly_text": "#324c5f",
-    "field_border": "#c2d0dc",
-    "field_disabled_border": "#d6e0e7",
-    "field_disabled_text": "#82929f",
-    "tab_text": "#5a6c7d",
-    "nav_text": "#415767",
-    "nav_disabled": "#93a2af",
-    "button_text": "#2c4253",
-    "button_hover_text": "#213847",
-    "button_disabled_text": "#81909c",
-    "warning_bg": "#fff4df",
-    "warning_border": "#e6cd94",
-    "warning_text": "#865f18",
-    "error_bg": "#feeceb",
-    "error_border": "#ebbbb7",
-    "error_text": "#9a3c37",
+    "page_bg_top": "#1b1b18",
+    "page_bg_bottom": "#111210",
+    "surface_glass": "rgba(48, 48, 43, 236)",
+    "surface_glass_strong": "rgba(50, 50, 45, 248)",
+    "surface_soft_glass": "rgba(38, 38, 35, 224)",
+    "surface_soft_glass_strong": "rgba(38, 38, 35, 240)",
+    "accent_wash": "rgba(36, 126, 97, 92)",
+    "accent_wash_strong": "rgba(39, 147, 112, 146)",
+    "scroll_handle": "#62625c",
+    "scroll_handle_hover": "#7d7d75",
+    "text_primary": "#f1eee7",
+    "text_muted": "#b6b1a6",
+    "text_label": "#c0baaf",
+    "text_secondary": "#ded9cf",
+    "text_inverse": "#f6f2ea",
+    "surface": "#272724",
+    "surface_soft": "#20201d",
+    "surface_soft_alt": "#30302c",
+    "surface_disabled": "#232320",
+    "surface_selected": "#33332f",
+    "surface_selected_strong": "#314d45",
+    "border": "#505049",
+    "border_strong": "#65655d",
+    "border_soft": "#42423d",
+    "border_hover": "#6d6d64",
+    "accent": "#258161",
+    "accent_hover": "#2d9571",
+    "accent_pressed": "#1d6b51",
+    "accent_soft": "#223a34",
+    "accent_soft_hover": "#29463f",
+    "accent_border": "#347c66",
+    "accent_text": "#86d7b7",
+    "field_text": "#f2ede5",
+    "field_readonly_text": "#ddd7ca",
+    "field_border": "#494943",
+    "field_disabled_border": "#393934",
+    "field_disabled_text": "#8c877f",
+    "tab_text": "#b0aaa0",
+    "nav_text": "#d8d2c8",
+    "nav_disabled": "#6d6a62",
+    "button_text": "#ece7de",
+    "button_hover_text": "#ffffff",
+    "button_disabled_text": "#7d7a72",
+    "warning_bg": "#4a3c22",
+    "warning_border": "#80663a",
+    "warning_text": "#f3d08a",
+    "error_bg": "#442421",
+    "error_border": "#9f4b43",
+    "error_text": "#ff7f72",
 }
 
 
 def build_stylesheet(combo_arrow_path: str) -> str:
     style_sheet = """
         QMainWindow, QWidget#appRoot {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 1, y2: 1,
-                stop: 0 __page_bg_top__,
-                stop: 1 __page_bg_bottom__
-            );
+            background: __page_bg_bottom__;
         }
         QWidget#downloadsPage, QWidget#panelPage {
             background: transparent;
@@ -70,16 +66,15 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QWidget#topBarShell {
             background: __surface_glass_strong__;
             border: 1px solid __border_soft__;
-            border-radius: 24px;
+            border-radius: 0px;
+            border-left: none;
+            border-right: none;
+            border-top: none;
+            padding: 0px;
         }
         QWidget#topBarBrand {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 1, y2: 1,
-                stop: 0 __accent_soft__,
-                stop: 1 __surface_glass_strong__
-            );
-            border: 1px solid __accent_border__;
-            border-radius: 20px;
+            background: transparent;
+            border-radius: 0px;
         }
         QWidget#topNavRail {
             background: transparent;
@@ -107,7 +102,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QWidget {
             color: __text_primary__;
-            font-size: 13px;
+            font-size: 14px;
             font-family: "Avenir Next";
         }
         QLabel, QCheckBox, QRadioButton {
@@ -124,13 +119,14 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             min-width: 96px;
         }
         #titleLabel {
-            font-size: 30px;
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
+            font-size: 28px;
             font-weight: 800;
             color: __text_primary__;
         }
         #subtleLabel {
-            color: __accent_text__;
-            font-size: 12px;
+            color: __text_muted__;
+            font-size: 11px;
             font-weight: 600;
         }
         QLabel#sectionFormLabel {
@@ -161,6 +157,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
         }
         QLabel#sectionHeaderTitle {
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
             color: __text_primary__;
             font-size: 18px;
             font-weight: 800;
@@ -174,6 +171,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             padding: 0px;
         }
         QLabel#panelHeaderTitle {
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
             color: __text_primary__;
             font-size: 20px;
             font-weight: 800;
@@ -183,9 +181,11 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 12px;
         }
         QLabel#cardHeaderTitle {
-            color: __text_secondary__;
-            font-size: 13px;
-            font-weight: 700;
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
+            color: __text_label__;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
         }
         QGroupBox {
             border: none;
@@ -206,114 +206,181 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __text_primary__;
             background: transparent;
         }
-        QGroupBox#sourceSection, QGroupBox#outputSection, QGroupBox#runSection {
+        QGroupBox#sourceSection {
+            background: transparent;
+            border: none;
+            padding: 0px;
+        }
+        QGroupBox#outputSection {
             margin-top: 0px;
-            padding: 18px 18px 16px 18px;
-            background: __surface_glass__;
+            padding: 0px;
+            background: __surface_glass_strong__;
             border: 1px solid __border_soft__;
             border-radius: 24px;
         }
-        QGroupBox#sourceSection {
+        QGroupBox#runSection {
+            margin-top: 0px;
+            padding: 0px;
+            background: transparent;
+            border: none;
+        }
+        QGroupBox#outputSection[stage="staged"] {
             background: __surface_glass_strong__;
         }
-        QGroupBox#outputSection[stage="staged"], QGroupBox#runSection[stage="staged"] {
-            background: __accent_wash__;
-        }
-        QGroupBox#outputSection[stage="loading"], QGroupBox#runSection[stage="loading"] {
-            background: __accent_wash_strong__;
+        QGroupBox#outputSection[stage="loading"] {
+            background: __surface_glass_strong__;
         }
         QGroupBox#formatSection, QGroupBox#saveSection {
             margin-top: 0px;
-            padding: 4px 0px 4px 0px;
-            background: transparent;
-            border: none;
-            border-radius: 0px;
+            padding: 0px;
+            background: __surface__;
+            border: 1px solid __border_soft__;
+            border-radius: 20px;
         }
         QGroupBox#outputSection[stage="ready"] QGroupBox#formatSection,
         QGroupBox#outputSection[stage="ready"] QGroupBox#saveSection {
-            background: transparent;
+            background: __surface__;
         }
         QGroupBox#formatSection[stage="staged"], QGroupBox#saveSection[stage="staged"] {
-            background: transparent;
+            background: __surface__;
         }
         QGroupBox#formatSection[stage="loading"], QGroupBox#saveSection[stage="loading"] {
-            background: transparent;
+            background: __surface__;
         }
-        QWidget#sourceHeroRow {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 1, y2: 0,
-                stop: 0 __accent_wash__,
-                stop: 1 __surface_soft_glass_strong__
-            );
-            border: 1px solid __accent_border__;
+        QWidget#commandBar {
+            background: transparent;
+            border: none;
+            border-radius: 0px;
+        }
+        QWidget#commandBar QLineEdit {
+            background: __surface__;
+            border: 1px solid __field_border__;
             border-radius: 18px;
+            padding: 8px 14px;
+            color: __field_text__;
+            font-size: 16px;
         }
-        QWidget#sourceHeroRow QLineEdit {
-            background: transparent;
-            border: none;
-            padding: 5px 2px;
+        QWidget#commandBar QLineEdit:hover,
+        QWidget#commandBar QLineEdit:focus {
+            background: __surface__;
         }
-        QWidget#sourceHeroRow QLineEdit:hover,
-        QWidget#sourceHeroRow QLineEdit:focus {
-            background: transparent;
-            border: none;
-        }
-        QWidget#sourceHeroRow QPushButton {
-            background: __surface_glass_strong__;
+        QWidget#commandBar QPushButton {
+            background: __surface__;
             border: 1px solid __border_soft__;
+            border-radius: 18px;
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
+            font-size: 14px;
+            font-weight: 700;
+            padding: 8px 18px;
         }
-        QWidget#sourceHeroRow QPushButton:hover {
+        QWidget#commandBar QPushButton:hover {
             background: __surface__;
             border: 1px solid __border_hover__;
         }
-        QWidget#sourceHeroRow QPushButton:pressed {
+        QWidget#commandBar QPushButton:pressed {
             background: __surface_selected__;
             border: 1px solid __accent_border__;
         }
-        QWidget#sourceHeroRow QPushButton#analyzeUrlButton {
+        QWidget#commandBar QPushButton#analyzeUrlButton {
+            background: __accent__;
+            color: __text_inverse__;
             border: 1px solid __accent__;
+            font-weight: 700;
         }
-        QWidget#sourceHeroRow QPushButton#analyzeUrlButton[mode="ready"] {
+        QWidget#commandBar QPushButton#analyzeUrlButton:hover {
+            background: __accent_hover__;
+            border: 1px solid __accent_hover__;
+        }
+        QWidget#commandBar QPushButton#analyzeUrlButton:pressed {
+            background: __accent_pressed__;
+            border: 1px solid __accent_pressed__;
+        }
+        QWidget#commandBar QPushButton#analyzeUrlButton[mode="ready"] {
             background: __surface_glass_strong__;
             color: __accent_text__;
             border: 1px solid __accent_border__;
         }
-        QWidget#sourceHeroRow QPushButton#analyzeUrlButton[mode="ready"]:hover {
+        QWidget#commandBar QPushButton#analyzeUrlButton[mode="ready"]:hover {
             background: __surface__;
             border: 1px solid __accent__;
         }
-        QWidget#sourceHeroRow QPushButton#analyzeUrlButton[mode="loading"] {
+        QWidget#commandBar QPushButton#analyzeUrlButton[mode="loading"] {
             background: __accent_soft__;
             color: __accent_text__;
             border: 1px solid __accent_border__;
         }
-        QFrame#sourcePreviewCard {
-            background: transparent;
-            border-top: 1px solid __border_soft__;
-            border-right: none;
-            border-bottom: none;
-            border-left: none;
+        QWidget#commandBar QPushButton#analyzeUrlButton:disabled {
+            background: __surface_disabled__;
+            color: __button_disabled_text__;
+            border: 1px solid __field_disabled_border__;
+        }
+        QFrame#sourceContentPanel {
+            background: __surface_glass_strong__;
+            border: 1px solid __border_soft__;
+            border-radius: 24px;
+        }
+        QFrame#sectionDivider {
+            background: __border_soft__;
+            border: none;
             border-radius: 0px;
         }
-        QFrame#sourcePreviewCard[stage="loading"] {
+        QWidget#workspaceTabBar {
             background: transparent;
+            border: none;
+        }
+        QPushButton#workspaceTabButton {
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            border-radius: 0px;
+            color: __text_muted__;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 3px 0px 8px 0px;
+        }
+        QPushButton#workspaceTabButton:hover {
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid __border_soft__;
+            color: __text_secondary__;
+        }
+        QPushButton#workspaceTabButton:checked {
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid __accent__;
+            color: __accent__;
+        }
+        QLabel#workspaceEmptyLabel {
+            color: __text_muted__;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 2px 0px 2px 0px;
+        }
+        QFrame#sourcePreviewCard {
+            background: __surface__;
+            border: 1px solid __border_soft__;
+            border-radius: 18px;
+        }
+        QFrame#sourcePreviewCard[stage="loading"] {
+            background: __surface__;
         }
         QLabel#sourcePreviewBadge {
             background: __accent_soft__;
-            color: __accent_text__;
+            color: __text_inverse__;
             border: none;
-            border-radius: 13px;
-            font-size: 10px;
+            border-radius: 16px;
+            font-size: 12px;
             font-weight: 800;
         }
         QLabel#sourcePreviewEyebrow {
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
             color: __accent_text__;
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 800;
         }
         QLabel#sourcePreviewTitle {
             color: __text_primary__;
-            font-size: 19px;
+            font-size: 18px;
             font-weight: 800;
         }
         QLabel#sourcePreviewTitle[state="empty"] {
@@ -321,30 +388,30 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QLabel#sourcePreviewPlaceholder {
             color: __text_secondary__;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
         }
         QLabel#sourcePreviewSubtitle {
             color: __text_muted__;
-            font-size: 12px;
+            font-size: 13px;
         }
         QLabel#sourcePreviewDetailChip {
             background: transparent;
             border: none;
             border-radius: 0px;
             color: __text_secondary__;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
             padding: 0px 7px 0px 0px;
         }
         QLabel#sourceFeedbackLabel {
-            border-radius: 12px;
-            padding: 9px 11px;
-            font-size: 12px;
-            font-weight: 600;
-            color: __text_secondary__;
-            background: __surface_soft_glass_strong__;
-            border: 1px solid __border_soft__;
+            border-radius: 18px;
+            padding: 11px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            color: __text_muted__;
+            background: transparent;
+            border: none;
         }
         QLabel#sourceFeedbackLabel[tone="loading"],
         QLabel#sourceFeedbackLabel[tone="success"] {
@@ -375,6 +442,45 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __text_primary__;
             font-weight: 700;
             background: transparent;
+        }
+        QFrame#sourceToastCard {
+            background: __surface_glass_strong__;
+            border: 1px solid __border_soft__;
+            border-radius: 18px;
+        }
+        QFrame#sourceToastCard[tone="success"] {
+            background: __accent_wash_strong__;
+            border: 1px solid __accent_border__;
+        }
+        QFrame#sourceToastCard[tone="warning"] {
+            background: __warning_bg__;
+            border: 1px solid __warning_border__;
+        }
+        QFrame#sourceToastCard[tone="error"] {
+            background: __error_bg__;
+            border: 1px solid __error_border__;
+        }
+        QLabel#sourceToastTitle {
+            color: __text_muted__;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        QLabel#sourceToastMessage {
+            color: __text_primary__;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        QFrame#sourceToastCard[tone="success"] QLabel#sourceToastTitle,
+        QFrame#sourceToastCard[tone="success"] QLabel#sourceToastMessage {
+            color: __accent_text__;
+        }
+        QFrame#sourceToastCard[tone="warning"] QLabel#sourceToastTitle,
+        QFrame#sourceToastCard[tone="warning"] QLabel#sourceToastMessage {
+            color: __warning_text__;
+        }
+        QFrame#sourceToastCard[tone="error"] QLabel#sourceToastTitle,
+        QFrame#sourceToastCard[tone="error"] QLabel#sourceToastMessage {
+            color: __error_text__;
         }
         QFrame#panelCard {
             background: transparent;
@@ -425,12 +531,18 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-weight: 600;
         }
         QLabel#readySummaryLine {
-            color: __text_muted__;
-            font-size: 11px;
-            font-weight: 600;
+            color: __text_secondary__;
+            font-size: 14px;
+            font-weight: 700;
             padding: 1px 0px 0px 0px;
             background: transparent;
             border: none;
+        }
+        QLabel#runSectionLabel {
+            color: __text_label__;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 0.9px;
         }
         QFrame#metricsStrip {
             background: transparent;
@@ -446,6 +558,27 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QFrame#progressCard[state="active"] {
             background: transparent;
         }
+        QFrame#runActivityCard, QFrame#runActionCard {
+            background: __surface_glass_strong__;
+            border: 1px solid __border_soft__;
+            border-radius: 24px;
+        }
+        QFrame#sessionMetricCard {
+            background: __surface__;
+            border: 1px solid __border_soft__;
+            border-radius: 16px;
+        }
+        QLabel#sessionMetricValue {
+            color: __text_primary__;
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
+            font-size: 24px;
+            font-weight: 800;
+        }
+        QLabel#sessionMetricLabel {
+            color: __text_muted__;
+            font-size: 13px;
+            font-weight: 700;
+        }
         QLabel#metricInline, QLabel#metricInlineItem {
             background: transparent;
             border: none;
@@ -455,14 +588,14 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             padding: 0px;
         }
         QFrame#downloadResultCard[state="empty"] {
-            background: transparent;
-            border: none;
-            border-radius: 0px;
+            background: __surface_soft_glass_strong__;
+            border: 1px solid __border_soft__;
+            border-radius: 16px;
         }
         QFrame#downloadResultCard[state="ready"] {
             background: __accent_wash__;
-            border: none;
-            border-radius: 12px;
+            border: 1px solid __accent_border__;
+            border-radius: 16px;
         }
         QLabel#downloadResultTitle {
             color: __text_primary__;
@@ -481,26 +614,36 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QProgressBar {
             background: __surface_soft_alt__;
             border: 1px solid __border_soft__;
-            border-radius: 7px;
+            border-radius: 5px;
             padding: 0px;
-            min-height: 13px;
-            max-height: 13px;
+            min-height: 10px;
+            max-height: 10px;
         }
         QProgressBar::chunk {
-            border-radius: 7px;
+            border-radius: 5px;
             margin: 0px;
             background: __accent__;
+        }
+        QProgressBar#workspaceSummaryProgress {
+            background: __surface_soft_alt__;
+            border: none;
+            min-height: 4px;
+            max-height: 4px;
+            border-radius: 2px;
+        }
+        QProgressBar#workspaceSummaryProgress::chunk {
+            border-radius: 2px;
         }
         QLineEdit, QPlainTextEdit, QListWidget, QComboBox {
             background: __surface__;
             border: 1px solid __field_border__;
-            border-radius: 13px;
-            padding: 6px 10px;
+            border-radius: 16px;
+            padding: 8px 12px;
             color: __field_text__;
-            min-height: 28px;
+            min-height: 34px;
         }
         QComboBox {
-            padding: 6px 10px;
+            padding: 7px 12px;
             padding-right: 9px;
             selection-background-color: __surface_selected_strong__;
             selection-color: __field_text__;
@@ -534,6 +677,67 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: __surface_glass_strong__;
             border: none;
             border-radius: 16px;
+        }
+        QListWidget#workspaceList {
+            background: transparent;
+            border: none;
+            border-radius: 0px;
+            padding: 0px;
+        }
+        QListWidget#workspaceList::item {
+            min-height: 82px;
+            padding: 0px;
+            border: none;
+            background: transparent;
+        }
+        QListWidget#workspaceList::item:selected {
+            background: transparent;
+            color: __text_primary__;
+            border-radius: 0px;
+        }
+        QFrame#workspaceSummaryCard {
+            background: __surface__;
+            border: 1px solid __border_soft__;
+            border-radius: 18px;
+        }
+        QFrame#workspaceSummaryCard[tone="active"] {
+            background: __surface_selected__;
+            border-color: __accent_border__;
+        }
+        QLabel#workspaceSummaryBadge {
+            background: __surface_soft_alt__;
+            color: __text_primary__;
+            border-radius: 14px;
+            font-size: 12px;
+            font-weight: 800;
+        }
+        QFrame#workspaceSummaryCard[tone="active"] QLabel#workspaceSummaryBadge {
+            background: __accent_wash_strong__;
+            color: __text_inverse__;
+        }
+        QLabel#workspaceSummaryTitle {
+            color: __text_primary__;
+            font-size: 17px;
+            font-weight: 800;
+        }
+        QLabel#workspaceSummaryMeta {
+            color: __text_muted__;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QLabel#workspaceSummaryStatus {
+            background: __surface_soft_alt__;
+            border: 1px solid __border_soft__;
+            border-radius: 13px;
+            color: __text_secondary__;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 6px 12px;
+        }
+        QFrame#workspaceSummaryCard[tone="active"] QLabel#workspaceSummaryStatus {
+            background: __accent_wash__;
+            border-color: __accent_border__;
+            color: __accent_text__;
         }
         QComboBox::drop-down {
             width: 0px;
@@ -606,11 +810,11 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QPushButton {
             background: __surface__;
             color: __button_text__;
-            border-radius: 12px;
-            padding: 5px 12px;
+            border-radius: 16px;
+            padding: 7px 14px;
             border: 1px solid __border_soft__;
-            min-height: 28px;
-            font-weight: 650;
+            min-height: 34px;
+            font-weight: 700;
         }
         QPushButton:hover {
             background: __surface_glass_strong__;
@@ -635,34 +839,41 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QPushButton#topNavButton {
             background: transparent;
             color: __nav_text__;
-            border: 1px solid transparent;
-            font-weight: 650;
-            padding: 6px 12px;
+            border: none;
+            border-bottom: 3px solid transparent;
+            border-radius: 0px;
+            font-weight: 700;
+            padding: 6px 12px 10px 12px;
         }
         QPushButton#topNavButton:hover {
-            background: __surface_glass_strong__;
+            background: transparent;
             color: __button_hover_text__;
-            border: 1px solid __border_soft__;
+            border: none;
+            border-bottom: 3px solid __border_soft__;
         }
         QPushButton#topNavButton:checked {
-            background: __accent_soft__;
-            color: __accent_text__;
-            border: 1px solid __accent_border__;
-            font-weight: 650;
+            background: transparent;
+            color: __accent__;
+            border: none;
+            border-bottom: 3px solid __accent__;
+            font-weight: 700;
         }
         QPushButton#topNavButton:disabled {
             background: transparent;
             color: __nav_disabled__;
-            border: 1px solid transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
         }
         QPushButton#primaryActionButton,
         QPushButton#analyzeUrlButton {
             background: __accent__;
             border: 1px solid __accent__;
             color: __text_inverse__;
+            font-family: "Arial Rounded MT Bold", "Avenir Next";
+            font-size: 15px;
             font-weight: 700;
-            padding: 5px 14px;
-            min-height: 32px;
+            padding: 10px 18px;
+            min-height: 42px;
         }
         QPushButton#primaryActionButton:hover,
         QPushButton#analyzeUrlButton:hover {
@@ -675,9 +886,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __accent_pressed__;
         }
         QPushButton#primaryActionButton:disabled {
-            background: #b4cbc6;
-            color: #eff5f4;
-            border: 1px solid #b4cbc6;
+            background: #2e5348;
+            color: #88a79f;
+            border: 1px solid #2e5348;
         }
         QPushButton#analyzeUrlButton[mode="ready"] {
             background: __surface_glass_strong__;
@@ -701,10 +912,10 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QPushButton#ghostButton {
             background: transparent;
             border: 1px solid __border_soft__;
-            border-radius: 12px;
+            border-radius: 16px;
             color: __button_text__;
-            padding: 4px 10px;
-            min-height: 28px;
+            padding: 6px 12px;
+            min-height: 30px;
         }
         QPushButton#ghostButton:hover {
             background: __surface_glass_strong__;
@@ -720,16 +931,78 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __button_disabled_text__;
             border: 1px solid __field_disabled_border__;
         }
+        QPushButton#secondaryActionButton {
+            background: __surface_glass_strong__;
+            border: 1px solid __border_soft__;
+            color: __text_secondary__;
+            font-size: 15px;
+            font-weight: 700;
+            min-height: 40px;
+        }
+        QPushButton#secondaryActionButton:hover {
+            background: __surface_selected__;
+        }
+        QPushButton#dangerActionButton {
+            background: transparent;
+            border: 1px solid __error_border__;
+            color: __error_text__;
+            font-size: 15px;
+            font-weight: 700;
+            min-height: 40px;
+        }
+        QPushButton#dangerActionButton:hover {
+            background: rgba(159, 75, 67, 28);
+            border: 1px solid __error_border__;
+            color: __error_text__;
+        }
         QPushButton#compactButton {
             padding: 5px 10px;
         }
         QCheckBox {
             color: __button_text__;
-            spacing: 8px;
+            spacing: 10px;
         }
         QRadioButton {
             color: __button_hover_text__;
-            spacing: 8px;
+            spacing: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        QWidget#contentModeSegment {
+            background: __surface_soft__;
+            border: 1px solid __border_soft__;
+            border-radius: 18px;
+            padding: 4px;
+        }
+        QRadioButton#contentModeButton {
+            background: transparent;
+            border: none;
+            border-radius: 14px;
+            color: __text_muted__;
+            font-size: 15px;
+            font-weight: 700;
+            spacing: 0px;
+            padding: 8px 14px;
+        }
+        QRadioButton#contentModeButton::indicator {
+            width: 0px;
+            height: 0px;
+            border: none;
+            background: transparent;
+        }
+        QRadioButton#contentModeButton:hover {
+            color: __text_secondary__;
+        }
+        QRadioButton#contentModeButton:checked {
+            background: __accent__;
+            color: __text_inverse__;
+        }
+        QRadioButton#contentModeButton:disabled {
+            color: __field_disabled_text__;
+        }
+        QRadioButton#contentModeButton:checked:disabled {
+            background: #2e5348;
+            color: #88a79f;
         }
         QCheckBox:hover, QRadioButton:hover {
             color: __accent_text__;
@@ -738,8 +1011,8 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __field_disabled_text__;
         }
         QCheckBox::indicator, QRadioButton::indicator {
-            width: 16px;
-            height: 16px;
+            width: 18px;
+            height: 18px;
             background: __surface__;
             border: 1px solid __field_border__;
         }

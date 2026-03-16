@@ -59,6 +59,8 @@ class WindowSettingsMixin:
         self.queue_move_down_button = refs.queue_move_down_button
         self.queue_clear_button = refs.queue_clear_button
         self.queue_list.itemSelectionChanged.connect(self._refresh_queue_panel_state)
+        self.queue_list.remove_requested.connect(self._queue_remove_row)
+        self.queue_list.items_reordered.connect(self._queue_reorder_items)
         self._set_uniform_button_width(
             [
                 self.queue_remove_button,
