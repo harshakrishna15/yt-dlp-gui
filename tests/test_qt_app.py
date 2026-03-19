@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,7 +37,8 @@ try:
         SOURCE_DETAILS_PLAYLIST_INDEX,
         QtYtDlpGui,
     )
-    from gui.qt.constants import PANEL_SWITCH_FADE_MS
+    from gui.qt.constants import MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, PANEL_SWITCH_FADE_MS
+    from gui.qt import style as qt_style
 
     HAS_QT = True
 except ModuleNotFoundError:
@@ -50,6 +52,15 @@ class TestQtApp(unittest.TestCase):
         cls._app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
+        self._load_settings_patch = patch(
+            "gui.qt.app.settings_store.load_settings",
+            return_value={
+                "output_dir": str(Path.home() / "Downloads"),
+                "edit_friendly_encoder": "auto",
+                "open_folder_after_download": False,
+            },
+        )
+        self._load_settings_patch.start()
         self.window = QtYtDlpGui()
 
     def tearDown(self) -> None:
@@ -57,6 +68,94 @@ class TestQtApp(unittest.TestCase):
         self.window._close_after_cancel = False
         self.window.close()
         self.window.deleteLater()
+        self._load_settings_patch.stop()
+
+    def _assert_visible_text_widgets_fit(
+        self,
+        root: QWidget,
+        *,
+        label: str,
+    ) -> None:
+        scan_types = (QLabel, QPushButton, QCheckBox, QRadioButton, QComboBox, QLineEdit)
+        scanned = 0
+        for widget_type in scan_types:
+            for widget in root.findChildren(widget_type):
+                if not widget.isVisibleTo(root):
+                    continue
+                scanned += 1
+                with self.subTest(surface=label, widget=widget.objectName() or type(widget).__name__):
+                    self.assertGreaterEqual(
+                        widget.geometry().height(),
+                        widget.minimumSizeHint().height(),
+                        f"{label}: {widget.objectName() or type(widget).__name__} is vertically clipped",
+                    )
+                    if isinstance(widget, (QPushButton, QCheckBox, QRadioButton)):
+                        self.assertGreaterEqual(
+                            widget.geometry().width(),
+                            widget.minimumSizeHint().width(),
+                            f"{label}: {widget.objectName() or widget.text()} is horizontally clipped",
+                        )
+        self.assertGreater(scanned, 0, f"No visible text widgets were scanned for {label}")
+
+    def _load_ready_preview_with_formats(self, *, queue_ready: bool = False) -> str:
+        url = "https://www.youtube.com/watch?v=abc123"
+        self.window.url_edit.setText(url)
+        self.window.video_radio.setChecked(True)
+        self.window._active_fetch_request_id = 15
+        self.window._is_fetching = True
+        payload = {
+            "collections": {
+                "video_labels": ["1080p mp4 (avc1)"],
+                "video_lookup": {
+                    "1080p mp4 (avc1)": {
+                        "format_id": "137",
+                        "ext": "mp4",
+                        "vcodec": "avc1.640028",
+                        "acodec": "none",
+                    }
+                },
+                "audio_labels": ["Best audio only"],
+                "audio_lookup": {
+                    "Best audio only": {
+                        "custom_format": "bestaudio/best",
+                        "is_audio_only": True,
+                        "acodec": "opus",
+                    }
+                },
+                "audio_languages": [],
+            },
+            "preview_title": "Sample",
+            "source_summary": {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "Example Channel",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 42s",
+                "detail_three_text": "1 video format",
+            },
+        }
+        self.window._on_formats_loaded(
+            request_id=15,
+            url=url,
+            payload=payload,
+            error=False,
+            is_playlist=False,
+        )
+        if queue_ready:
+            self.window.queue_items = [
+                {
+                    "url": url,
+                    "settings": {
+                        "mode": "video",
+                        "format_filter": "mp4",
+                        "codec_filter": "avc1",
+                        "format_label": "1080p mp4 (avc1)",
+                    },
+                }
+            ]
+            self.window._refresh_queue_panel()
+        QApplication.processEvents()
+        return url
 
     def test_mixed_url_helpers(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
@@ -69,6 +168,12 @@ class TestQtApp(unittest.TestCase):
             core_urls.to_playlist_url(mixed),
             "https://www.youtube.com/playlist?list=PLXYZ",
         )
+
+    def test_initial_window_size_matches_minimum(self) -> None:
+        self.assertEqual(self.window.width(), MIN_WINDOW_WIDTH)
+        self.assertEqual(self.window.height(), MIN_WINDOW_HEIGHT)
+        self.assertEqual(self.window.minimumWidth(), MIN_WINDOW_WIDTH)
+        self.assertEqual(self.window.minimumHeight(), MIN_WINDOW_HEIGHT)
 
     def test_source_defaults_hide_playlist_items_and_prompt(self) -> None:
         self.assertEqual(
@@ -88,14 +193,143 @@ class TestQtApp(unittest.TestCase):
             "Paste a video or playlist URL to load available formats.",
         )
 
+    def test_title_shells_use_rounded_containers(self) -> None:
+        stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
+        self.assertRegex(
+            stylesheet,
+            r"QWidget#topBarShell\s*\{[^}]*border-radius:\s*24px;",
+        )
+        self.assertRegex(
+            stylesheet,
+            r"QFrame#panelCard\s*\{[^}]*border-radius:\s*24px;",
+        )
+
+    def test_stylesheet_gives_fields_inset_surfaces_and_combo_arrows(self) -> None:
+        stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
+        self.assertRegex(
+            stylesheet,
+            r"QLineEdit, QComboBox\s*\{[^}]*qlineargradient",
+        )
+        self.assertRegex(
+            stylesheet,
+            r'QComboBox::down-arrow\s*\{[^}]*image:\s*url\("/tmp/combo-down-arrow\.svg"\);',
+        )
+        self.assertRegex(
+            stylesheet,
+            r"QComboBox::drop-down\s*\{[^}]*width:\s*32px;",
+        )
+
     def test_source_preview_defaults_to_placeholder_copy(self) -> None:
-        self.assertEqual(self.window.source_preview_badge.text(), "URL")
-        self.assertEqual(self.window.preview_title_label.text(), "Source preview")
+        self.assertEqual(self.window.source_preview_badge.text(), "PLAN")
+        self.assertEqual(self.window.preview_title_label.text(), "Download plan")
         self.assertEqual(
             self.window.source_preview_placeholder.text(),
-            "Analyze a URL to load source details.",
+            "Paste a URL to build the next queue item.",
         )
-        self.assertEqual(self.window.source_preview_detail_one.text(), "")
+        self.assertEqual(self.window.source_preview_detail_one.text(), "Choose mode")
+        self.assertEqual(
+            self.window.source_preview_detail_two.text(),
+            "Downloads folder",
+        )
+        self.assertEqual(self.window.source_preview_detail_three.text(), "Queue empty")
+
+    def test_queue_empty_state_defaults_to_centered_placeholder(self) -> None:
+        self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
+        self.assertEqual(self.window.queue_empty_state.placeholder_title.text(), "Queue is empty")
+        self.assertEqual(
+            self.window.queue_empty_state.placeholder_description.text(),
+            "Paste a URL above to get started",
+        )
+        self.assertEqual(
+            len(self.window.queue_empty_state.findChildren(QPushButton, "historyAgainButton")),
+            0,
+        )
+
+    def test_queue_empty_state_shows_recent_downloads_and_requeues_item(self) -> None:
+        self.window._effects.clock.now = lambda: datetime(2026, 3, 15, 12, 0, 0)
+        self.window.download_history = [
+            {
+                "timestamp": "2026-03-14 10:00:00",
+                "path": "/tmp/video-a.mp4",
+                "name": "video-a.mp4",
+                "title": "Example video A",
+                "format_label": "1080p",
+                "file_size_bytes": 78_900_000,
+                "source_url": "https://example.com/watch?v=a",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "h264",
+                    "format_label": "1080p",
+                },
+            },
+            {
+                "timestamp": "2026-03-13 10:00:00",
+                "path": "/tmp/video-b.mp4",
+                "name": "video-b.mp4",
+                "title": "Example video B",
+                "format_label": "720p",
+                "file_size_bytes": 48_100_000,
+                "source_url": "https://example.com/watch?v=b",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "h264",
+                    "format_label": "720p",
+                },
+            },
+            {
+                "timestamp": "2026-03-12 10:00:00",
+                "path": "/tmp/audio-c.mp3",
+                "name": "audio-c.mp3",
+                "title": "Example audio C",
+                "format_label": "Audio only",
+                "file_size_bytes": 22_400_000,
+                "source_url": "https://example.com/watch?v=c",
+                "queue_settings": {
+                    "mode": "audio",
+                    "format_filter": "mp3",
+                    "format_label": "Audio only",
+                },
+            },
+            {
+                "timestamp": "2026-03-11 10:00:00",
+                "path": "/tmp/video-d.mp4",
+                "name": "video-d.mp4",
+                "title": "Example video D",
+                "format_label": "480p",
+                "file_size_bytes": 10_000_000,
+                "source_url": "https://example.com/watch?v=d",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "format_label": "480p",
+                },
+            },
+        ]
+
+        self.window._refresh_queue_empty_state()
+        QApplication.processEvents()
+
+        buttons = self.window.queue_empty_state.findChildren(QPushButton, "historyAgainButton")
+        titles = self.window.queue_empty_state.findChildren(QLabel, "recentDownloadTitle")
+        meta = self.window.queue_empty_state.findChildren(QLabel, "recentDownloadMeta")
+        workspace_buttons = self.window.queue_summary_empty.findChildren(
+            QPushButton, "historyAgainButton"
+        )
+        self.assertEqual(len(buttons), 3)
+        self.assertEqual(len(workspace_buttons), 3)
+        self.assertEqual([label.text() for label in titles], ["Example video A", "Example video B", "Example audio C"])
+        self.assertIn("MP4", meta[0].text())
+        self.assertIn("yesterday", meta[0].text())
+
+        workspace_buttons[0].click()
+        QApplication.processEvents()
+
+        self.assertEqual(len(self.window.queue_items), 1)
+        self.assertEqual(self.window.queue_items[0]["url"], "https://example.com/watch?v=a")
+        self.assertEqual(self.window.queue_items[0]["settings"]["codec_filter"], "h264")
+        self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_content_index)
 
     def test_source_preview_copy_is_not_vertically_clipped(self) -> None:
         self.window.show()
@@ -112,6 +346,198 @@ class TestQtApp(unittest.TestCase):
                 f"{label.objectName()} is vertically clipped at the default window size",
             )
 
+    def test_source_preview_hides_badge_and_keeps_long_title_fully_visible(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.window._set_preview_title(
+            "How did they fit an entire PC in this?? - HP @ CES 2026"
+        )
+        self.window._set_source_summary(
+            {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "ShortCircuit",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 32s",
+                "detail_three_text": "13 video formats",
+            }
+        )
+        QApplication.processEvents()
+
+        self.assertFalse(self.window.source_preview_badge.isVisible())
+        self.assertGreaterEqual(
+            self.window.preview_value.width(),
+            self.window.preview_value.fontMetrics().horizontalAdvance(
+                self.window.preview_value.text()
+            ),
+            "source preview title is horizontally clipped at the default window size",
+        )
+
+    def test_source_row_buttons_are_not_vertically_clipped(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for button in (
+            self.window.paste_button,
+            self.window.analyze_button,
+        ):
+            self.assertGreaterEqual(
+                button.geometry().height(),
+                button.minimumSizeHint().height(),
+                f"{button.objectName() or button.text()} is vertically clipped",
+            )
+
+    def test_source_row_keeps_paste_action_narrower_than_analyze(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.assertLess(
+            self.window.paste_button.width(),
+            self.window.analyze_button.width(),
+        )
+
+    def test_visible_text_widgets_fit_across_download_views_and_overlay(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self._assert_visible_text_widgets_fit(
+            self.window.main_page,
+            label="downloads summary",
+        )
+
+        self.window.queue_workspace_stack.setCurrentIndex(
+            self.window._queue_workspace_preview_index
+        )
+        self.window._set_source_feedback(
+            "Formats are ready. Choose options and start the download.",
+            tone="success",
+        )
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.main_page,
+            label="downloads preview with feedback",
+        )
+
+        self.window._set_preview_title(
+            "How did they fit an entire PC in this?? - HP @ CES 2026"
+        )
+        self.window._set_source_summary(
+            {
+                "badge_text": "VID",
+                "eyebrow_text": "Video ready",
+                "subtitle_text": "ShortCircuit",
+                "detail_one_text": "Formats ready",
+                "detail_two_text": "5m 32s",
+                "detail_three_text": "13 video formats",
+            }
+        )
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.main_page,
+            label="downloads preview with metadata",
+        )
+
+        self.window._pending_mixed_url = (
+            "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
+        )
+        self.window._update_source_details_visibility()
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.mixed_url_overlay,
+            label="mixed url overlay",
+        )
+
+    def test_visible_text_widgets_fit_across_secondary_panels(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="settings panel",
+        )
+
+        self.window._open_panel("queue")
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="queue panel empty state",
+        )
+
+        self.window._effects.clock.now = lambda: datetime(2026, 3, 15, 12, 0, 0)
+        self.window.download_history = [
+            {
+                "timestamp": "2026-03-14 10:00:00",
+                "path": "/tmp/video-a.mp4",
+                "name": "video-a.mp4",
+                "title": "Example video A",
+                "format_label": "1080p",
+                "file_size_bytes": 78_900_000,
+                "source_url": "https://example.com/watch?v=a",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "h264",
+                    "format_label": "1080p",
+                },
+            }
+        ]
+        self.window._refresh_queue_empty_state()
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="queue panel recent downloads",
+        )
+
+        self.window._show_main_workspace("queue")
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.queue_summary_empty,
+            label="queue workspace recent downloads",
+        )
+
+        self.window._open_panel("history")
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="history panel empty state",
+        )
+
+        self.window._record_download_output(
+            Path("/tmp/example.mp4"),
+            "https://example.com/watch?v=a",
+            {
+                "title": "Some title",
+                "format_label": "1080p",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "format_label": "1080p",
+                },
+            },
+        )
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="history panel filled state",
+        )
+
+        self.window._open_panel("logs")
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="logs panel empty state",
+        )
+
+        self.window._append_log("[error] something happened")
+        QApplication.processEvents()
+        self._assert_visible_text_widgets_fit(
+            self.window.panel_stack.currentWidget(),
+            label="logs panel filled state",
+        )
+
     def test_ready_summary_stays_hidden_until_output_choices_exist(self) -> None:
         self.window.show()
         QApplication.processEvents()
@@ -125,19 +551,214 @@ class TestQtApp(unittest.TestCase):
 
         self.assertTrue(self.window.ready_summary_label.isVisible())
 
+    def test_switching_modes_does_not_refresh_preview_for_empty_intermediate_state(
+        self,
+    ) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._video_labels = ["1080p"]
+        self.window._audio_labels = ["128k"]
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.window.video_radio.click()
+        QApplication.processEvents()
+
+        refresh_modes: list[str] = []
+        original_refresh = self.window._refresh_queue_preview_card
+
+        def wrapped_refresh() -> None:
+            refresh_modes.append(self.window._current_mode())
+            original_refresh()
+
+        self.window._refresh_queue_preview_card = wrapped_refresh
+        try:
+            self.window.audio_radio.click()
+            QApplication.processEvents()
+        finally:
+            self.window._refresh_queue_preview_card = original_refresh
+
+        self.assertEqual(refresh_modes, ["audio"])
+
+    def test_switching_modes_avoids_full_geometry_refresh_when_preview_layout_is_stable(
+        self,
+    ) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._video_labels = ["1080p"]
+        self.window._audio_labels = ["128k"]
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.window.video_radio.click()
+        QApplication.processEvents()
+
+        geometry_refreshes = 0
+        original_refresh = self.window._refresh_downloads_page_geometry
+
+        def wrapped_refresh() -> None:
+            nonlocal geometry_refreshes
+            geometry_refreshes += 1
+            original_refresh()
+
+        self.window._refresh_downloads_page_geometry = wrapped_refresh
+        try:
+            self.window.audio_radio.click()
+            QApplication.processEvents()
+        finally:
+            self.window._refresh_downloads_page_geometry = original_refresh
+
+        self.assertEqual(geometry_refreshes, 0)
+
+    def test_switching_modes_keeps_loaded_preview_geometry_stable(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats(queue_ready=True)
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_preview_index,
+        )
+        before_preview_height = self.window.source_preview_card.height()
+        before_preview_top = self.window.source_preview_card.mapTo(
+            self.window.main_page,
+            self.window.source_preview_card.rect().topLeft(),
+        ).y()
+        before_output_height = self.window.output_section.height()
+
+        self.window.audio_radio.click()
+        QApplication.processEvents()
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_preview_index,
+        )
+        self.assertEqual(self.window.source_preview_card.height(), before_preview_height)
+        self.assertEqual(
+            self.window.source_preview_card.mapTo(
+                self.window.main_page,
+                self.window.source_preview_card.rect().topLeft(),
+            ).y(),
+            before_preview_top,
+        )
+        self.assertEqual(self.window.output_section.height(), before_output_height)
+        self.assertTrue(self.window.preview_value.isVisible())
+        self.assertTrue(self.window.source_preview_subtitle.isVisible())
+        self.assertTrue(self.window.source_preview_detail_one.isVisible())
+        self.assertTrue(self.window.source_preview_detail_two.isVisible())
+        self.assertTrue(self.window.source_preview_detail_three.isVisible())
+
+        self.window.video_radio.click()
+        QApplication.processEvents()
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_preview_index,
+        )
+        self.assertEqual(self.window.source_preview_card.height(), before_preview_height)
+        self.assertEqual(
+            self.window.source_preview_card.mapTo(
+                self.window.main_page,
+                self.window.source_preview_card.rect().topLeft(),
+            ).y(),
+            before_preview_top,
+        )
+
+    def test_switching_modes_does_not_reset_queue_workspace_stack_when_preview_stays_active(
+        self,
+    ) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats(queue_ready=True)
+
+        with patch.object(
+            self.window.queue_workspace_stack,
+            "setCurrentIndex",
+            wraps=self.window.queue_workspace_stack.setCurrentIndex,
+        ) as set_index_mock:
+            self.window.audio_radio.click()
+            QApplication.processEvents()
+            self.window.video_radio.click()
+            QApplication.processEvents()
+
+        self.assertEqual(set_index_mock.call_count, 0)
+
+    def test_switching_modes_with_loaded_preview_avoid_full_geometry_refresh(
+        self,
+    ) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats(queue_ready=True)
+
+        with patch.object(
+            self.window,
+            "_refresh_downloads_page_geometry",
+            wraps=self.window._refresh_downloads_page_geometry,
+        ) as geometry_refresh_mock:
+            self.window.audio_radio.click()
+            QApplication.processEvents()
+            self.window.video_radio.click()
+            QApplication.processEvents()
+
+        self.assertEqual(geometry_refresh_mock.call_count, 0)
+
     def test_workspace_tabs_switch_source_stack_and_toolbar_state(self) -> None:
         self.window.show()
         QApplication.processEvents()
 
-        self.window.queue_view_button.click()
-        QApplication.processEvents()
         self.assertEqual(
             self.window.source_view_stack.currentIndex(),
             self.window._queue_view_index,
         )
         self.assertEqual(self.window._active_workspace_name, "queue")
         self.assertTrue(self.window.queue_view_button.isChecked())
-        self.assertTrue(self.window.queue_button.isChecked())
+        self.assertTrue(self.window.downloads_button.isChecked())
+
+    def test_workspace_tab_underline_animates_between_tabs(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        underline = self.window.findChild(QWidget, "workspaceTabUnderline")
+        self.assertIsNotNone(underline)
+        assert underline is not None
+        self.assertTrue(underline.isVisible())
+
+        start_x = underline.geometry().center().x()
+        target_x = self.window.history_view_button.geometry().center().x()
+        self.assertLess(start_x, target_x)
+
+        self.window.history_view_button.click()
+        QTest.qWait(80)
+        QApplication.processEvents()
+
+        mid_x = underline.geometry().center().x()
+        self.assertGreater(mid_x, start_x)
+        self.assertLess(mid_x, target_x)
+
+        QTest.qWait(260)
+        QApplication.processEvents()
+
+        final_x = underline.geometry().center().x()
+        self.assertLess(abs(final_x - target_x), 4)
+        self.assertTrue(self.window.history_view_button.isChecked())
+
+    def test_workspace_switch_keeps_source_header_geometry_stable(self) -> None:
+        self.window.show()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        queue_tab_rect = self.window.queue_view_button.geometry()
+        history_tab_rect = self.window.history_view_button.geometry()
+        source_width = self.window.source_row.parentWidget().width()
+
+        self.window.history_view_button.click()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.queue_view_button.geometry(), queue_tab_rect)
+        self.assertEqual(self.window.history_view_button.geometry(), history_tab_rect)
+        self.assertEqual(self.window.source_row.parentWidget().width(), source_width)
 
         self.window.history_view_button.click()
         QApplication.processEvents()
@@ -147,17 +768,72 @@ class TestQtApp(unittest.TestCase):
         )
         self.assertEqual(self.window._active_workspace_name, "history")
         self.assertTrue(self.window.history_view_button.isChecked())
+        self.assertTrue(self.window.downloads_button.isChecked())
         self.assertTrue(self.window.history_button.isChecked())
 
         self.window.downloads_button.click()
         QApplication.processEvents()
         self.assertEqual(
             self.window.source_view_stack.currentIndex(),
-            self.window._current_view_index,
+            self.window._queue_view_index,
         )
-        self.assertEqual(self.window._active_workspace_name, "current")
-        self.assertTrue(self.window.current_view_button.isChecked())
+        self.assertEqual(self.window._active_workspace_name, "queue")
+        self.assertTrue(self.window.queue_view_button.isChecked())
         self.assertTrue(self.window.downloads_button.isChecked())
+
+    def test_queue_workspace_uses_summary_page_for_empty_and_filled_queue(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_summary_index,
+        )
+        self.assertTrue(self.window.queue_summary_empty.isVisible())
+
+        self.window.queue_items = [
+            {
+                "url": "https://www.youtube.com/watch?v=abc123",
+                "settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "h264",
+                    "format_label": "1080p",
+                },
+            }
+        ]
+        self.window._refresh_queue_panel()
+        QApplication.processEvents()
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_summary_index,
+        )
+        self.assertEqual(self.window.queue_summary_list.count(), 1)
+
+        self.window.queue_items = []
+        self.window._refresh_queue_panel()
+        QApplication.processEvents()
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_summary_index,
+        )
+        self.assertTrue(self.window.queue_summary_empty.isVisible())
+
+    def test_loaded_source_preview_keeps_empty_queue_workspace_visible(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self._load_ready_preview_with_formats()
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_summary_index,
+        )
+        self.assertTrue(self.window.queue_summary_empty.isVisible())
+        self.assertEqual(self.window.preview_title_label.text(), "Ready to queue")
+        self.assertEqual(self.window.preview_value.text(), "Sample")
 
     def test_source_preview_keeps_output_section_stable_when_metadata_arrives(self) -> None:
         self.window.show()
@@ -310,6 +986,45 @@ class TestQtApp(unittest.TestCase):
             "Source row action buttons overlap at the minimum window width",
         )
 
+    def test_refresh_state_keeps_source_row_controls_separated_at_min_width(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        self.window.url_edit.setText(
+            "https://www.youtube.com/watch?v="
+            "abc1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        )
+        self.window._video_labels = ["1080p mp4 (avc1)"]
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.analyze_button.text(), "Refresh formats")
+
+        source_rect = self.window.source_row.rect().adjusted(0, 0, -1, -1)
+        mapped: list[tuple[str, QRect]] = []
+        for name, widget in (
+            ("url", self.window.url_edit),
+            ("paste", self.window.paste_button),
+            ("analyze", self.window.analyze_button),
+        ):
+            top_left = widget.mapTo(self.window.source_row, widget.rect().topLeft())
+            bottom_right = widget.mapTo(
+                self.window.source_row, widget.rect().bottomRight()
+            )
+            rect = QRect(top_left, bottom_right).normalized()
+            mapped.append((name, rect))
+            self.assertTrue(
+                source_rect.contains(rect),
+                f"{name} control is clipped inside the source row",
+            )
+
+        for (left_name, left_rect), (right_name, right_rect) in zip(mapped, mapped[1:]):
+            overlap = left_rect.intersected(right_rect)
+            self.assertFalse(
+                overlap.width() > 2 and overlap.height() > 2,
+                f"{left_name} and {right_name} overlap in refresh state",
+            )
+
     def test_shortening_url_keeps_download_cards_full_width(self) -> None:
         self.window.show()
         QApplication.processEvents()
@@ -374,11 +1089,22 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.main_page.width(), self.window.panel_stack.width())
 
     def test_loaded_formats_shift_analyze_button_into_refresh_state(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
         self.window._video_labels = ["1080p"]
         self.window._update_controls_state()
+        QApplication.processEvents()
 
         self.assertEqual(self.window.analyze_button.text(), "Refresh formats")
+        self.assertGreaterEqual(
+            self.window.analyze_button.width(),
+            self.window.analyze_button.sizeHint().width(),
+        )
+        self.assertGreaterEqual(
+            self.window.analyze_button.height(),
+            self.window.analyze_button.sizeHint().height(),
+        )
 
     def test_secondary_panels_start_with_empty_states(self) -> None:
         self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
@@ -398,7 +1124,6 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
 
         for panel_name, stack in (
-            ("queue", self.window.queue_stack),
             ("history", self.window.history_stack),
             ("logs", self.window.logs_stack),
         ):
@@ -436,7 +1161,6 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
 
         for panel_name, stack in (
-            ("queue", self.window.queue_stack),
             ("history", self.window.history_stack),
             ("logs", self.window.logs_stack),
         ):
@@ -515,13 +1239,36 @@ class TestQtApp(unittest.TestCase):
         self.window.show()
         QApplication.processEvents()
 
+        loading_message = "Loading available formats..."
         self.window._set_source_feedback(
-            "Formats are ready. Choose options and start the download.",
+            loading_message,
+            tone="loading",
+        )
+        QApplication.processEvents()
+        QTest.qWait(350)
+        QApplication.processEvents()
+        self.assertFalse(self.window.source_feedback_label.isVisible())
+        self.assertTrue(self.window.source_feedback_toast.isVisible())
+        self.assertEqual(self.window.source_feedback_toast_message.text(), loading_message)
+        self.assertEqual(self.window.source_feedback_toast_title.text(), "Loading formats")
+        self.assertEqual(len(self.window._visible_source_feedback_toasts()), 1)
+
+        message = "Formats are ready. Choose options and start the download."
+        self.window._set_source_feedback(
+            message,
             tone="success",
         )
         QApplication.processEvents()
-        self.assertTrue(self.window.source_feedback_label.isVisible())
-        self.assertFalse(self.window.source_feedback_toast.isVisible())
+        QTest.qWait(350)
+        QApplication.processEvents()
+        self.assertFalse(self.window.source_feedback_label.isVisible())
+        self.assertTrue(self.window.source_feedback_toast.isVisible())
+        self.assertEqual(self.window.source_feedback_toast_message.text(), message)
+        self.assertEqual(self.window.source_feedback_toast_title.text(), "Formats ready")
+        self.assertEqual(
+            [toast.title_label.text() for toast in self.window._visible_source_feedback_toasts()],
+            ["Formats ready", "Loading formats"],
+        )
 
         self.window._set_source_feedback(
             "URL ready. Click Analyze URL to load formats and preview details.",
@@ -530,6 +1277,7 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
         self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertFalse(self.window.source_feedback_toast.isVisible())
+        self.assertEqual(len(self.window._visible_source_feedback_toasts()), 0)
 
         self.window._set_source_feedback("", tone="hidden")
         self.window._apply_responsive_layout()
@@ -537,8 +1285,56 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertFalse(self.window.source_feedback_toast.isVisible())
 
-    def test_source_feedback_banner_shows_inline_above_source_content(self) -> None:
+    def test_source_feedback_toasts_stack_newest_first(self) -> None:
         self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        loading_message = "Loading available formats..."
+        ready_message = "Formats are ready. Choose options and start the download."
+        self.window._set_source_feedback(loading_message, tone="loading")
+        QApplication.processEvents()
+        QTest.qWait(350)
+        QApplication.processEvents()
+
+        self.window._set_source_feedback(ready_message, tone="success")
+        QApplication.processEvents()
+        QTest.qWait(350)
+        QApplication.processEvents()
+
+        toasts = self.window._visible_source_feedback_toasts()
+        self.assertEqual(len(toasts), 2)
+        self.assertEqual(
+            [toast.title_label.text() for toast in toasts],
+            ["Formats ready", "Loading formats"],
+        )
+        self.assertEqual(
+            [toast.message_label.text() for toast in toasts],
+            [ready_message, loading_message],
+        )
+        self.assertLess(toasts[0].card.geometry().top(), toasts[1].card.geometry().top())
+
+    def test_source_feedback_loading_uses_toast_on_narrow_layouts(self) -> None:
+        self.window.show()
+        self.window.resize(900, 800)
+        QApplication.processEvents()
+
+        message = "Loading available formats..."
+        self.window._set_source_feedback(message, tone="loading")
+        QApplication.processEvents()
+        QTest.qWait(350)
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.source_feedback_toast.isVisible())
+        self.assertFalse(self.window.source_feedback_label.isVisible())
+        self.assertEqual(self.window.source_feedback_toast_message.text(), message)
+        self.assertEqual(self.window.source_feedback_toast_title.text(), "Loading formats")
+
+    def test_source_feedback_success_toast_stays_top_right_above_tab_bar_without_shifting_content(
+        self,
+    ) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
         QApplication.processEvents()
 
         before_row_y = self.window.source_row.geometry().y()
@@ -546,35 +1342,81 @@ class TestQtApp(unittest.TestCase):
             self.window.main_page,
             self.window.source_preview_card.rect().topLeft(),
         ).y()
+        root = self.window.centralWidget()
+        self.assertIsNotNone(root)
+        assert root is not None
+        root_rect = root.rect()
+        panel_rect = self.window.panel_stack.geometry()
 
         self.window._set_source_feedback(
             "Formats are ready. Choose options and start the download.",
             tone="success",
         )
         QApplication.processEvents()
-
-        feedback_top = self.window.source_feedback_label.mapTo(
-            self.window.main_page,
-            self.window.source_feedback_label.rect().topLeft(),
-        ).y()
-        feedback_bottom = self.window.source_feedback_label.mapTo(
-            self.window.main_page,
-            self.window.source_feedback_label.rect().bottomLeft(),
-        ).y()
+        QTest.qWait(350)
+        QApplication.processEvents()
+        target_rect = self.window._source_feedback_toast_target_rect()
+        toast_rect = self.window.source_feedback_toast.geometry()
         preview_top = self.window.source_preview_card.mapTo(
             self.window.main_page,
             self.window.source_preview_card.rect().topLeft(),
         ).y()
 
         self.assertEqual(self.window.source_row.geometry().y(), before_row_y)
-        self.assertGreater(
-            preview_top,
-            before_preview_top,
-        )
-        self.assertTrue(self.window.source_feedback_label.isVisible())
+        self.assertEqual(preview_top, before_preview_top)
+        self.assertFalse(self.window.source_feedback_label.isVisible())
+        self.assertTrue(self.window.source_feedback_toast.isVisible())
+        self.assertEqual(toast_rect, target_rect)
+        self.assertTrue(root_rect.contains(toast_rect))
+        self.assertGreater(toast_rect.left(), panel_rect.center().x())
+        self.assertLess(toast_rect.top(), panel_rect.top())
+
+    def test_source_feedback_success_toast_auto_hides_after_timeout(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        with patch.object(self.window, "_source_feedback_toast_timeout_ms", return_value=40):
+            self.window._set_source_feedback(
+                "Formats are ready. Choose options and start the download.",
+                tone="success",
+            )
+            QApplication.processEvents()
+            self.assertTrue(self.window.source_feedback_toast.isVisible())
+
+            QTest.qWait(700)
+            QApplication.processEvents()
+
         self.assertFalse(self.window.source_feedback_toast.isVisible())
-        self.assertGreater(feedback_top, self.window.source_row.geometry().bottom())
-        self.assertLess(feedback_bottom, preview_top)
+
+    def test_source_feedback_success_toast_can_be_dismissed_manually(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        with patch.object(self.window, "_source_feedback_toast_timeout_ms", return_value=0):
+            self.window._set_source_feedback(
+                "Formats are ready. Choose options and start the download.",
+                tone="success",
+            )
+            QApplication.processEvents()
+            QTest.qWait(350)
+            QApplication.processEvents()
+
+            self.assertTrue(self.window.source_feedback_toast.isVisible())
+            self.assertTrue(self.window.source_feedback_toast_dismiss_button.isVisible())
+
+            QTest.mouseClick(
+                self.window.source_feedback_toast_dismiss_button,
+                Qt.MouseButton.LeftButton,
+            )
+            QApplication.processEvents()
+            QTest.qWait(300)
+            QApplication.processEvents()
+            self.window._apply_responsive_layout()
+            QApplication.processEvents()
+
+        self.assertFalse(self.window.source_feedback_toast.isVisible())
 
     def test_about_dialog_uses_app_metadata(self) -> None:
         with patch.object(self.window._effects.dialogs, "information") as info_mock:
@@ -682,9 +1524,23 @@ class TestQtApp(unittest.TestCase):
             SOURCE_DETAILS_PLAYLIST_INDEX,
         )
 
-    def test_responsive_output_cards_reflow_on_resize(self) -> None:
+    def test_responsive_output_inspector_reflow_on_resize(self) -> None:
         self.window.show()
         QApplication.processEvents()
+
+        self.window.resize(900, 800)
+        QApplication.processEvents()
+        self.assertEqual(
+            self.window.workspace_layout.direction(),
+            QBoxLayout.Direction.LeftToRight,
+        )
+        workspace_rect = self.window.workspace_layout.parentWidget().rect().adjusted(
+            0, 0, -1, -1
+        )
+        self.assertLessEqual(
+            self.window.output_section.geometry().right(),
+            workspace_rect.right() + 1,
+        )
 
         self.window.resize(1180, 900)
         QApplication.processEvents()
@@ -692,13 +1548,21 @@ class TestQtApp(unittest.TestCase):
             self.window.workspace_layout.direction(),
             QBoxLayout.Direction.LeftToRight,
         )
-        self.assertLess(
+        self.assertEqual(
             self.window.output_layout.indexOf(self.window.format_card),
+            0,
+        )
+        self.assertEqual(
             self.window.output_layout.indexOf(self.window.save_card),
+            -1,
+        )
+        self.assertIs(
+            self.window.save_card.parentWidget(),
+            self.window.format_card,
         )
         self.assertEqual(
             self.window.folder_row_layout.direction(),
-            QBoxLayout.Direction.TopToBottom,
+            QBoxLayout.Direction.LeftToRight,
         )
         self.assertEqual(
             self.window.mixed_buttons_layout.direction(),
@@ -711,13 +1575,17 @@ class TestQtApp(unittest.TestCase):
             self.window.workspace_layout.direction(),
             QBoxLayout.Direction.LeftToRight,
         )
-        self.assertLess(
+        self.assertEqual(
             self.window.output_layout.indexOf(self.window.format_card),
+            0,
+        )
+        self.assertEqual(
             self.window.output_layout.indexOf(self.window.save_card),
+            -1,
         )
         self.assertEqual(
             self.window.folder_row_layout.direction(),
-            QBoxLayout.Direction.TopToBottom,
+            QBoxLayout.Direction.LeftToRight,
         )
         self.assertEqual(
             self.window.mixed_buttons_layout.direction(),
@@ -735,12 +1603,14 @@ class TestQtApp(unittest.TestCase):
             )
             return QRect(top_left, bottom_right).normalized()
 
-        self.assertFalse(self.window.format_combo.isVisible())
+        self.assertTrue(self.window.format_combo.isVisible())
+        self.assertEqual(self.window.codec_label.text(), "Codec & quality")
         for label, field in (
             (self.window.content_type_label, self.window.video_radio),
             (self.window.content_type_label, self.window.audio_radio),
             (self.window.container_label, self.window.container_combo),
             (self.window.codec_label, self.window.codec_combo),
+            (self.window.codec_label, self.window.format_combo),
         ):
             overlap = map_rect_to_output(label).intersected(map_rect_to_output(field))
             self.assertFalse(
@@ -806,7 +1676,7 @@ class TestQtApp(unittest.TestCase):
             return QRect(top_left, bottom_right).normalized()
 
         scan_types = (QLineEdit, QComboBox, QPushButton, QCheckBox, QRadioButton)
-        widths = (1000, 1100, 1180, 1320, 1500, 1700)
+        widths = (900, 1000, 1100, 1180, 1320, 1500, 1700)
         heights = (800, 820, 900, 1000)
 
         for width in widths:
@@ -836,6 +1706,136 @@ class TestQtApp(unittest.TestCase):
                                 f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
                             ),
                         )
+
+    def test_combined_output_inspector_stays_nested_across_resizes(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        def map_rect_to_output(widget: QWidget) -> QRect:
+            top_left = widget.mapTo(self.window.output_section, widget.rect().topLeft())
+            bottom_right = widget.mapTo(
+                self.window.output_section, widget.rect().bottomRight()
+            )
+            return QRect(top_left, bottom_right).normalized()
+
+        for width, height in ((900, 760), (900, 800), (950, 800), (1000, 800), (1110, 820)):
+            with self.subTest(size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+
+                output_rect = self.window.output_section.rect().adjusted(0, 0, -1, -1)
+                format_rect = map_rect_to_output(self.window.format_card)
+                save_rect = self.window.save_card.geometry().adjusted(0, 0, -1, -1)
+                format_inner_rect = self.window.format_card.rect().adjusted(0, 0, -1, -1)
+
+                self.assertTrue(
+                    output_rect.contains(format_rect),
+                    f"Combined output card drifts outside the output section at {width}x{height}",
+                )
+                self.assertTrue(
+                    format_inner_rect.contains(save_rect),
+                    f"Save controls drift outside the combined output card at {width}x{height}",
+                )
+
+    def test_rapid_resize_burst_keeps_card_seams_aligned(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        source_section = self.window.main_page.findChild(QGroupBox, "sourceSection")
+        self.assertIsNotNone(source_section)
+        assert source_section is not None
+
+        def right_edge_in_main(widget: QWidget) -> int:
+            return widget.mapTo(self.window.main_page, widget.rect().topRight()).x()
+
+        def left_edge_in_main(widget: QWidget) -> int:
+            return widget.mapTo(self.window.main_page, widget.rect().topLeft()).x()
+
+        def map_rect_to_output(widget: QWidget) -> QRect:
+            top_left = widget.mapTo(self.window.output_section, widget.rect().topLeft())
+            bottom_right = widget.mapTo(
+                self.window.output_section, widget.rect().bottomRight()
+            )
+            return QRect(top_left, bottom_right).normalized()
+
+        for width, height in (
+            (900, 760),
+            (1220, 820),
+            (950, 760),
+            (1500, 900),
+            (900, 800),
+            (1700, 960),
+            (1110, 820),
+        ):
+            self.window.resize(width, height)
+
+        QApplication.processEvents()
+
+        output_rect = self.window.output_section.rect().adjusted(0, 0, -1, -1)
+        format_rect = map_rect_to_output(self.window.format_card)
+        save_rect = self.window.save_card.geometry().adjusted(0, 0, -1, -1)
+        format_inner_rect = self.window.format_card.rect().adjusted(0, 0, -1, -1)
+
+        self.assertTrue(
+            output_rect.contains(format_rect),
+            "Combined output card should stay inside the output section after a rapid resize burst",
+        )
+        self.assertTrue(
+            format_inner_rect.contains(save_rect),
+            "Save controls should stay inside the combined output card after a rapid resize burst",
+        )
+        self.assertLessEqual(
+            abs(
+                right_edge_in_main(source_section)
+                - right_edge_in_main(self.window.run_activity_card)
+            ),
+            2,
+            "Lower-left seam should settle back onto the workspace split after a rapid resize burst",
+        )
+        self.assertLessEqual(
+            abs(
+                left_edge_in_main(self.window.output_section)
+                - left_edge_in_main(self.window.run_actions_card)
+            ),
+            2,
+            "Lower-right seam should settle back onto the workspace split after a rapid resize burst",
+        )
+
+    def test_run_split_stays_aligned_with_workspace_split_across_resizes(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        source_section = self.window.main_page.findChild(QGroupBox, "sourceSection")
+        self.assertIsNotNone(source_section)
+        assert source_section is not None
+
+        def right_edge_in_main(widget: QWidget) -> int:
+            return widget.mapTo(self.window.main_page, widget.rect().topRight()).x()
+
+        def left_edge_in_main(widget: QWidget) -> int:
+            return widget.mapTo(self.window.main_page, widget.rect().topLeft()).x()
+
+        for width, height in ((900, 760), (900, 800), (950, 760), (1110, 820), (1220, 820)):
+            with self.subTest(size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+
+                self.assertLessEqual(
+                    abs(
+                        right_edge_in_main(source_section)
+                        - right_edge_in_main(self.window.run_activity_card)
+                    ),
+                    2,
+                    f"Lower-left seam shifts away from the source/output split at {width}x{height}",
+                )
+                self.assertLessEqual(
+                    abs(
+                        left_edge_in_main(self.window.output_section)
+                        - left_edge_in_main(self.window.run_actions_card)
+                    ),
+                    2,
+                    f"Lower-right seam shifts away from the source/output split at {width}x{height}",
+                )
 
     def test_min_window_downloading_state_has_no_overlap_or_cutoff(self) -> None:
         self.window.show()
@@ -925,6 +1925,316 @@ class TestQtApp(unittest.TestCase):
             "Downloads view should fit inside the minimum window height",
         )
 
+    def test_compact_run_actions_trim_button_sizing_and_keep_vertical_stack(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        for button in (
+            self.window.start_button,
+            self.window.add_queue_button,
+            self.window.start_queue_button,
+            self.window.cancel_button,
+        ):
+            self.assertTrue(bool(button.property("compact")))
+
+        self.assertLess(
+            self.window.start_button.minimumHeight(),
+            self.window.analyze_button.minimumHeight(),
+        )
+        self.assertEqual(
+            self.window.start_button.minimumHeight(),
+            self.window.add_queue_button.minimumHeight(),
+        )
+        self.assertLessEqual(
+            abs(
+                self.window.start_button.geometry().left()
+                - self.window.add_queue_button.geometry().left()
+            ),
+            2,
+        )
+        self.assertLessEqual(
+            abs(
+                self.window.start_queue_button.geometry().left()
+                - self.window.cancel_button.geometry().left()
+            ),
+            2,
+        )
+        self.assertGreater(
+            self.window.add_queue_button.geometry().top(),
+            self.window.start_button.geometry().top(),
+        )
+        self.assertGreater(
+            self.window.start_queue_button.geometry().top(),
+            self.window.add_queue_button.geometry().top(),
+        )
+        self.assertGreater(
+            self.window.cancel_button.geometry().top(),
+            self.window.start_queue_button.geometry().top(),
+        )
+        start_top = self.window.start_button.mapTo(
+            self.window.run_actions_card,
+            self.window.start_button.rect().topLeft(),
+        ).y()
+        cancel_bottom = self.window.cancel_button.mapTo(
+            self.window.run_actions_card,
+            self.window.cancel_button.rect().bottomLeft(),
+        ).y()
+        bottom_gap = self.window.run_actions_card.rect().bottom() - cancel_bottom
+        self.assertEqual(self.window.run_actions_card.geometry().top(), 0)
+        self.assertLessEqual(
+            self.window.run_actions_card.geometry().bottom(),
+            self.window.run_section.rect().bottom(),
+        )
+        self.assertLessEqual(bottom_gap, 18)
+        self.assertGreater(start_top, bottom_gap)
+
+        self.window.resize(1220, 900)
+        QApplication.processEvents()
+
+        self.assertTrue(bool(self.window.start_button.property("compact")))
+        self.assertEqual(self.window.run_actions_card.geometry().top(), 0)
+        self.assertLess(
+            self.window.start_button.minimumHeight(),
+            self.window.analyze_button.minimumHeight(),
+        )
+
+    def test_session_stats_stay_visible_without_clipping_at_compact_heights(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for width, height in ((900, 760), (900, 800), (1220, 820)):
+            with self.subTest(size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+
+                self.assertTrue(self.window.session_title_label.isVisible())
+                self.assertTrue(self.window.run_stats_grid.isVisible())
+
+                for label in (
+                    self.window.session_completed_value,
+                    self.window.session_failed_value,
+                    self.window.session_speed_value,
+                    self.window.session_downloaded_value,
+                ):
+                    self.assertGreaterEqual(
+                        label.geometry().height(),
+                        label.minimumSizeHint().height(),
+                        f"{label.objectName()} is vertically clipped at {width}x{height}",
+                    )
+
+    def test_session_stat_cards_do_not_overlap_at_wide_sizes(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for width, height in ((1220, 900), (1500, 900), (1700, 960)):
+            with self.subTest(size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+
+                cards = self.window.run_stats_grid.findChildren(QWidget, "sessionMetricCard")
+                self.assertEqual(len(cards), 4)
+                mapped = [
+                    (
+                        card,
+                        QRect(
+                            card.mapTo(
+                                self.window.run_stats_grid,
+                                card.rect().topLeft(),
+                            ),
+                            card.mapTo(
+                                self.window.run_stats_grid,
+                                card.rect().bottomRight(),
+                            ),
+                        ).normalized(),
+                    )
+                    for card in cards
+                ]
+                for idx, (left_card, left_rect) in enumerate(mapped):
+                    for right_card, right_rect in mapped[idx + 1 :]:
+                        overlap = left_rect.intersected(right_rect)
+                        self.assertFalse(
+                            overlap.width() > 2 and overlap.height() > 2,
+                            (
+                                f"Session metric cards overlap at {width}x{height}: "
+                                f"{left_card.objectName()} vs {right_card.objectName()}"
+                            ),
+                        )
+
+    def test_combined_output_card_keeps_save_controls_nested_at_compact_or_default_heights(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for width, height in ((1220, 820), (1220, 800), (900, 800)):
+            self.window.resize(width, height)
+            QApplication.processEvents()
+            format_rect = self.window.format_card.rect().adjusted(0, 0, -1, -1)
+            save_rect = self.window.save_card.geometry().adjusted(0, 0, -1, -1)
+            self.assertTrue(
+                format_rect.contains(save_rect),
+                f"Save controls drift outside the combined output card at {width}x{height}",
+            )
+            self.assertGreater(
+                save_rect.top(),
+                0,
+                f"Save controls collapse into the top edge of the combined output card at {width}x{height}",
+            )
+
+    def test_combined_output_card_keeps_save_controls_visible_before_and_after_loading_formats(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        empty_heights: dict[tuple[int, int], int] = {}
+        for width, height in ((1220, 820), (900, 800)):
+            with self.subTest(state="empty", size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+                empty_heights[(width, height)] = self.window.format_card.height()
+                self.assertTrue(
+                    self.window.format_card.rect()
+                    .adjusted(0, 0, -1, -1)
+                    .contains(self.window.save_card.geometry().adjusted(0, 0, -1, -1)),
+                    f"Save controls should stay inside the combined output card at {width}x{height}",
+                )
+
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        format_label = "1080p 1920x1080 MP4 30fps [1080p] ~78.9 MiB"
+        self.window._video_labels = [format_label]
+        self.window._video_lookup = {
+            format_label: {
+                "ext": "mp4",
+                "vcodec": "avc1",
+                "label": format_label,
+            }
+        }
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        self.window.container_combo.setCurrentIndex(
+            self.window.container_combo.findData("mp4")
+        )
+        self.window.codec_combo.setCurrentIndex(
+            self.window.codec_combo.findData("avc1")
+        )
+        QApplication.processEvents()
+
+        for width, height in ((1220, 820), (900, 800)):
+            with self.subTest(state="loaded", size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+                self.assertTrue(self.window.format_combo.isVisible())
+                self.assertGreaterEqual(
+                    self.window.format_card.height(),
+                    empty_heights[(width, height)],
+                    f"Combined output card should not shrink after quality rows load at {width}x{height}",
+                )
+                self.assertTrue(
+                    self.window.format_card.rect()
+                    .adjusted(0, 0, -1, -1)
+                    .contains(self.window.save_card.geometry().adjusted(0, 0, -1, -1)),
+                    f"Save controls should stay inside the combined output card after formats load at {width}x{height}",
+                )
+
+    def test_loaded_formats_keep_spacing_between_quality_and_save_rows(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        format_label = "1080p 1920x1080 MP4 30fps [1080p] ~78.9 MiB"
+        self.window._video_labels = [format_label]
+        self.window._video_lookup = {
+            format_label: {
+                "ext": "mp4",
+                "vcodec": "avc1",
+                "label": format_label,
+            }
+        }
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        self.window.container_combo.setCurrentIndex(
+            self.window.container_combo.findData("mp4")
+        )
+        self.window.codec_combo.setCurrentIndex(
+            self.window.codec_combo.findData("avc1")
+        )
+        QApplication.processEvents()
+
+        for width, height in (
+            (1220, 820),
+            (1220, 800),
+            (900, 800),
+            (900, 760),
+            (1500, 900),
+            (1700, 960),
+        ):
+            with self.subTest(size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+
+                self.assertTrue(self.window.format_combo.isVisible())
+
+                save_rect = self.window.save_card.geometry().adjusted(0, 0, -1, -1)
+                self.assertGreaterEqual(
+                    save_rect.top()
+                    - self.window.format_combo.mapTo(
+                        self.window.format_card,
+                        self.window.format_combo.rect().bottomLeft(),
+                    ).y(),
+                    8,
+                    f"Loaded formats collapse the spacing between quality and save rows at {width}x{height}",
+                )
+
+                folder_bottom = self.window.browse_button.mapTo(
+                    self.window.format_card,
+                    self.window.browse_button.rect().bottomLeft(),
+                ).y()
+                self.assertGreaterEqual(
+                    self.window.format_card.rect().bottom() - folder_bottom,
+                    8,
+                    f"Output folder controls sit too close to the combined output card edge at {width}x{height}",
+                )
+
+    def test_format_card_expands_when_quality_combo_becomes_visible(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(900, 800)
+        QApplication.processEvents()
+
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._video_labels = ["1080p mp4 (avc1)"]
+        self.window._video_lookup = {
+            "1080p mp4 (avc1)": {
+                "ext": "mp4",
+                "vcodec": "avc1",
+                "label": "1080p mp4 (avc1)",
+            }
+        }
+        self.window.video_radio.setChecked(True)
+        self.window._on_mode_change()
+        self.window.container_combo.setCurrentIndex(
+            self.window.container_combo.findData("mp4")
+        )
+        self.window.codec_combo.setCurrentIndex(
+            self.window.codec_combo.findData("avc1")
+        )
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.format_combo.isVisible())
+        format_rect = QRect(
+            self.window.format_combo.mapTo(
+                self.window.format_card, self.window.format_combo.rect().topLeft()
+            ),
+            self.window.format_combo.mapTo(
+                self.window.format_card, self.window.format_combo.rect().bottomRight()
+            ),
+        ).normalized()
+        card_rect = self.window.format_card.rect().adjusted(0, 0, -1, -1)
+
+        self.assertTrue(
+            card_rect.contains(format_rect),
+            "Visible quality selector should remain inside the FORMAT card",
+        )
+
     def test_output_dir_field_resets_to_start_of_path(self) -> None:
         path = "/Users/harshakrishnaswamy/Downloads/example/folder"
 
@@ -932,51 +2242,56 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(
             self.window.output_dir_edit.text(),
-            "~/Downloads/example/folder",
+            path,
         )
         self.assertEqual(self.window.output_dir_edit.toolTip(), path)
         self.assertEqual(self.window.output_dir_edit.cursorPosition(), 0)
 
-    def test_min_width_save_card_keeps_output_folder_controls_clear_and_roomy(self) -> None:
+    def test_min_width_combined_output_card_keeps_output_folder_controls_clear_and_roomy(self) -> None:
         self.window.show()
         QApplication.processEvents()
         self.window.resize(1180, 900)
         QApplication.processEvents()
 
-        save_rect = self.window.save_card.rect().adjusted(0, 0, -1, -1)
+        card_rect = self.window.format_card.rect().adjusted(0, 0, -1, -1)
         output_rect = QRect(
             self.window.output_dir_edit.mapTo(
-                self.window.save_card, self.window.output_dir_edit.rect().topLeft()
+                self.window.format_card, self.window.output_dir_edit.rect().topLeft()
             ),
             self.window.output_dir_edit.mapTo(
-                self.window.save_card, self.window.output_dir_edit.rect().bottomRight()
+                self.window.format_card, self.window.output_dir_edit.rect().bottomRight()
             ),
         ).normalized()
         browse_rect = QRect(
             self.window.browse_button.mapTo(
-                self.window.save_card, self.window.browse_button.rect().topLeft()
+                self.window.format_card, self.window.browse_button.rect().topLeft()
             ),
             self.window.browse_button.mapTo(
-                self.window.save_card, self.window.browse_button.rect().bottomRight()
+                self.window.format_card, self.window.browse_button.rect().bottomRight()
             ),
         ).normalized()
 
-        self.assertTrue(save_rect.contains(output_rect))
-        self.assertTrue(save_rect.contains(browse_rect))
+        self.assertTrue(card_rect.contains(output_rect))
+        self.assertTrue(card_rect.contains(browse_rect))
         overlap = output_rect.intersected(browse_rect)
         self.assertFalse(
             overlap.width() > 2 and overlap.height() > 2,
-            "Output folder field overlaps the browse button in the save card",
+            "Output folder field overlaps the browse button in the combined output card",
+        )
+        self.assertEqual(
+            self.window.folder_row_layout.direction(),
+            QBoxLayout.Direction.LeftToRight,
+            "Desktop split layout should keep the folder row on one line",
         )
         self.assertGreater(
-            browse_rect.top(),
-            output_rect.bottom(),
-            "Browse button should sit below the output folder field in the stacked save layout",
+            browse_rect.left(),
+            output_rect.right(),
+            "Browse button should sit to the right of the output folder field in the combined output card",
         )
         self.assertGreaterEqual(
             self.window.output_dir_edit.width(),
             220,
-            "Output folder field should keep enough visible width in the save card",
+            "Output folder field should keep enough visible width in the combined output card",
         )
 
     def test_min_window_top_actions_have_icons_and_no_overlap(self) -> None:
@@ -1070,6 +2385,90 @@ class TestQtApp(unittest.TestCase):
                 actions_rect.contains(rect),
                 f"{button.text()} shifted outside the top actions rail",
             )
+
+    def test_top_nav_selection_card_tracks_visible_section(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        selection = self.window.classic_actions.findChild(QWidget, "topNavSelection")
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertTrue(selection.isVisible())
+
+        initial_center = selection.geometry().center()
+        downloads_center = self.window.downloads_button.geometry().center()
+        self.assertLess(abs(initial_center.x() - downloads_center.x()), 4)
+
+        self.window.logs_button.click()
+        QTest.qWait(260)
+        QApplication.processEvents()
+
+        logs_center = self.window.logs_button.geometry().center()
+        selection_center = selection.geometry().center()
+        self.assertLess(abs(selection_center.x() - logs_center.x()), 4)
+        self.assertTrue(self.window.logs_button.isChecked())
+
+        self.window.settings_button.click()
+        QTest.qWait(260)
+        QApplication.processEvents()
+
+        settings_center = self.window.settings_button.geometry().center()
+        selection_center = selection.geometry().center()
+        self.assertLess(abs(selection_center.x() - settings_center.x()), 4)
+        self.assertTrue(self.window.settings_button.isChecked())
+
+    def test_top_nav_selection_card_animates_between_sections(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        selection = self.window.classic_actions.findChild(QWidget, "topNavSelection")
+        self.assertIsNotNone(selection)
+        assert selection is not None
+
+        start_x = selection.geometry().center().x()
+        target_x = self.window.logs_button.geometry().center().x()
+        self.assertLess(start_x, target_x)
+
+        self.window.logs_button.click()
+        QTest.qWait(40)
+        QApplication.processEvents()
+
+        mid_x = selection.geometry().center().x()
+        self.assertGreater(mid_x, start_x)
+        self.assertLess(mid_x, target_x)
+
+        QTest.qWait(260)
+        QApplication.processEvents()
+
+        final_x = selection.geometry().center().x()
+        self.assertLess(abs(final_x - target_x), 4)
+
+    def test_content_mode_selection_card_tracks_checked_mode(self) -> None:
+        self.window.show()
+        self.window.video_radio.setChecked(True)
+        QApplication.processEvents()
+
+        mode_row = self.window.video_radio.parentWidget()
+        self.assertIsNotNone(mode_row)
+        assert mode_row is not None
+
+        selection = mode_row.findChild(QWidget, "contentModeSelection")
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertTrue(selection.isVisible())
+
+        initial_center = selection.geometry().center()
+        video_center = self.window.video_radio.geometry().center()
+        self.assertLess(abs(initial_center.x() - video_center.x()), 4)
+
+        self.window.audio_radio.setChecked(True)
+        QTest.qWait(260)
+        QApplication.processEvents()
+
+        audio_center = self.window.audio_radio.geometry().center()
+        selection_center = selection.geometry().center()
+        self.assertLess(abs(selection_center.x() - audio_center.x()), 4)
+        self.assertTrue(self.window.audio_radio.isChecked())
 
     def test_classic_top_actions_keep_settings_rightmost(self) -> None:
         self.window.show()
@@ -1189,7 +2588,7 @@ class TestQtApp(unittest.TestCase):
             PREVIEW_TITLE_TOOLTIP_DEFAULT,
         )
         self.assertEqual(self.window.source_preview_badge.text(), "URL")
-        self.assertEqual(self.window.preview_title_label.text(), "Source preview")
+        self.assertEqual(self.window.preview_title_label.text(), "Next queue item")
 
     def test_fetching_state_keeps_format_controls_disabled_until_ready(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
@@ -1243,9 +2642,12 @@ class TestQtApp(unittest.TestCase):
             is_playlist=False,
         )
         self.assertEqual(self.window.source_preview_badge.text(), "VID")
-        self.assertEqual(self.window.preview_title_label.text(), "Video ready")
+        self.assertEqual(self.window.preview_title_label.text(), "Ready to queue")
         self.assertEqual(self.window.preview_value.text(), "Sample")
-        self.assertEqual(self.window.source_preview_subtitle.text(), "Example Channel")
+        self.assertEqual(
+            self.window.source_preview_subtitle.text(),
+            "Example Channel · 5m 42s",
+        )
         mp4_index = self.window.container_combo.findData("mp4")
         self.assertGreaterEqual(mp4_index, 0)
         self.window.container_combo.setCurrentIndex(mp4_index)
@@ -1317,7 +2719,7 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window._close_after_cancel)
 
     def test_download_result_defaults_to_empty_mode(self) -> None:
-        self.assertTrue(self.window.download_result_card.isHidden())
+        self.assertFalse(self.window.download_result_card.isHidden())
         self.assertEqual(
             self.window.download_result_title.text(),
             "No completed download yet.",
@@ -1380,7 +2782,7 @@ class TestQtApp(unittest.TestCase):
 
         self.window._clear_last_output_path()
 
-        self.assertTrue(self.window.download_result_card.isHidden())
+        self.assertFalse(self.window.download_result_card.isHidden())
         self.assertEqual(
             self.window.download_result_title.text(),
             "No completed download yet.",
@@ -1391,6 +2793,18 @@ class TestQtApp(unittest.TestCase):
             "Files will appear here after a download finishes.",
         )
         self.assertFalse(self.window.copy_output_path_button.isEnabled())
+
+    def test_download_result_card_height_stays_stable_between_empty_and_ready_states(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        empty_height = self.window.download_result_card.height()
+
+        self.window._record_download_output(Path("/tmp/test-video.mp4"), "https://example.com/video")
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.download_result_card.height(), empty_height)
 
     def test_on_download_done_resets_progress_details(self) -> None:
         self.window._is_downloading = True
@@ -1490,6 +2904,53 @@ class TestQtApp(unittest.TestCase):
                 f"{label.text()} is horizontally clipped",
             )
         self.assertTrue(self.window.item_label.text().endswith("..."))
+
+    def test_metrics_strip_label_widths_stay_fixed_during_progress_updates(self) -> None:
+        self.window.show()
+        self.window.resize(900, 760)
+        QApplication.processEvents()
+
+        initial_widths = (
+            self.window.progress_label.width(),
+            self.window.speed_label.width(),
+            self.window.eta_label.width(),
+        )
+
+        self.window._on_progress_update(
+            {
+                "status": "downloading",
+                "percent": 100.0,
+                "speed": "9999.99 MiB/s",
+                "eta": "99:59:59",
+                "playlist_eta": "999:59:59",
+            }
+        )
+        QApplication.processEvents()
+
+        self.assertEqual(
+            (
+                self.window.progress_label.width(),
+                self.window.speed_label.width(),
+                self.window.eta_label.width(),
+            ),
+            initial_widths,
+        )
+
+    def test_session_stat_cards_keep_same_width_when_values_change(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        cards = self.window.run_stats_grid.findChildren(QWidget, "sessionMetricCard")
+        initial_widths = [card.width() for card in cards]
+
+        self.window.session_completed_value.setText("999")
+        self.window.session_failed_value.setText("999")
+        self.window.session_speed_value.setText("9999.99 MiB/s")
+        self.window.session_downloaded_value.setText("99999.9 GB")
+        QApplication.processEvents()
+
+        self.assertEqual([card.width() for card in cards], initial_widths)
 
     def test_attention_log_shows_logs_alert_icon(self) -> None:
         self.assertFalse(self.window._logs_alert_active)

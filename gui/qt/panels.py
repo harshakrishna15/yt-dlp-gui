@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..app_meta import APP_VERSION
-from .widgets import QueueListWidget, _NativeComboBox
+from .widgets import QueueEmptyStateWidget, QueueListWidget, _NativeComboBox
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,7 @@ class QueuePanelRefs:
     queue_stack: QStackedWidget
     queue_empty_index: int
     queue_content_index: int
+    queue_empty_state: QueueEmptyStateWidget
     queue_list: QueueListWidget
     queue_remove_button: QPushButton
     queue_move_up_button: QPushButton
@@ -283,14 +284,8 @@ def build_queue_panel(
     )
 
     queue_stack = QStackedWidget(shell.panel)
-    empty = _build_empty_state(
-        queue_stack,
-        badge="QUEUE",
-        title="Queue is empty",
-        description="Analyze a URL in Downloads, then add it here to build a batch run.",
-        hint="Next step: open Downloads, analyze a source, and add it to the queue.",
-    )
-    queue_empty_index = queue_stack.addWidget(empty.page)
+    empty = QueueEmptyStateWidget(queue_stack)
+    queue_empty_index = queue_stack.addWidget(empty)
 
     content = QWidget(queue_stack)
     content_layout = QVBoxLayout(content)
@@ -327,6 +322,7 @@ def build_queue_panel(
         queue_stack=queue_stack,
         queue_empty_index=queue_empty_index,
         queue_content_index=queue_content_index,
+        queue_empty_state=empty,
         queue_list=queue_list,
         queue_remove_button=queue_remove_button,
         queue_move_up_button=queue_move_up_button,

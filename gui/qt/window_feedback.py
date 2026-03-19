@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QFontMetrics
 
+from ..common import yt_dlp_helpers as helpers
 from ..core import error_feedback as core_error_feedback
+from ..core import queue_presentation
 from ..services import app_service
 from ..common.types import HistoryItem, SourceSummary
 from .constants import HISTORY_MAX_ENTRIES, LOG_MAX_LINES, MIN_WINDOW_HEIGHT
@@ -20,9 +23,6 @@ if TYPE_CHECKING:
 class WindowFeedbackMixin:
     def _set_metric_label_text(self: "QtYtDlpGui", label, text: str) -> None:
         label.setText(text)
-        label.setFixedWidth(
-            max(label.minimumSizeHint().width(), label.sizeHint().width())
-        )
         label.updateGeometry()
 
     def _refresh_download_result_view(self: "QtYtDlpGui") -> None:
@@ -50,7 +50,7 @@ class WindowFeedbackMixin:
             and bool(self._latest_output_path and self._latest_output_path.parent.exists())
         )
         self.copy_output_path_button.setEnabled(show_latest_output)
-        self.download_result_card.setVisible(show_latest_output)
+        self.download_result_card.setVisible(True)
 
     def _clear_last_output_path(self: "QtYtDlpGui") -> None:
         self._latest_output_path = None
@@ -224,74 +224,108 @@ class WindowFeedbackMixin:
     def _set_source_summary(
         self: "QtYtDlpGui", summary: SourceSummary | dict[str, object] | None
     ) -> None:
-        if isinstance(summary, dict):
-            badge_text = str(summary.get("badge_text") or "URL").strip() or "URL"
-            eyebrow_text = (
-                str(summary.get("eyebrow_text") or "Source preview").strip()
-                or "Source preview"
-            )
-            subtitle_text = (
-                str(summary.get("subtitle_text") or "").strip()
-                or "Choose export settings to start downloading."
-            )
-            detail_texts = [
-                str(summary.get("detail_one_text") or "").strip(),
-                str(summary.get("detail_two_text") or "").strip(),
-                str(summary.get("detail_three_text") or "").strip(),
-            ]
-        else:
-            badge_text = "URL"
-            eyebrow_text = "Source preview"
-            subtitle_text = "Title, creator, and duration will appear here."
-            detail_texts = ["", "", ""]
-
-        self.source_preview_badge.setText(badge_text)
-        self.preview_title_label.setText(eyebrow_text)
-        self.source_preview_subtitle.setText(subtitle_text)
-
-        for widget, text in zip(
-            (
-                self.source_preview_detail_one,
-                self.source_preview_detail_two,
-                self.source_preview_detail_three,
-            ),
-            detail_texts,
-        ):
-            widget.setText(text)
-            widget.setVisible(bool(text))
-
-        self._stabilize_source_preview_card_sizing()
-        self._refresh_downloads_page_geometry()
+        self._source_summary_data = queue_presentation.normalize_source_summary(summary)
+        self._refresh_queue_preview_card()
 
     def _set_preview_title(self: "QtYtDlpGui", title: str) -> None:
-        shown, tooltip = preview_title_fields(title)
+        self._preview_title_raw = str(title or "").strip()
+        self._refresh_queue_preview_card()
+
+    def _refresh_queue_preview_card(self: "QtYtDlpGui") -> None:
+        workspace_index_before = self.queue_workspace_stack.currentIndex()
+        title_visibility_before = self.preview_value.isVisible()
+        detail_widgets = (
+            self.source_preview_detail_one,
+            self.source_preview_detail_two,
+            self.source_preview_detail_three,
+        )
+        detail_visibility_before = tuple(widget.isVisible() for widget in detail_widgets)
+        model = queue_presentation.build_queue_preview_model(
+            queue_presentation.QueuePreviewInputs(
+                url=self.url_edit.text(),
+                preview_title=self._preview_title_raw,
+                source_summary=self._source_summary_data,
+                playlist_mode=self._playlist_mode,
+                mode=self._current_mode(),
+                container=self._current_container(),
+                is_fetching=self._is_fetching,
+                has_filtered_formats=bool(self._filtered_labels),
+                selected_quality=self._ready_summary_quality(
+                    self._selected_format_label()
+                ),
+                folder_text=self._ready_summary_folder(),
+                queue_count=len(self.queue_items),
+                playlist_items=self.playlist_items_edit.text(),
+            )
+        )
+        shown, tooltip = preview_title_fields(self._preview_title_raw)
+        has_title = bool(self._preview_title_raw)
         self.preview_value.setText(shown)
         self.preview_value.setToolTip(tooltip)
-        has_title = bool(str(title or "").strip())
         self.preview_value.setVisible(has_title)
         self.source_preview_placeholder.setVisible(not has_title)
+        self.source_preview_placeholder.setText(model.placeholder_text)
+        self.source_preview_badge.setText(model.badge_text)
+        self.preview_title_label.setText(model.heading_text)
+        self.source_preview_subtitle.setText(model.subtitle_text)
         self._set_widget_property(
             self.preview_value,
             "state",
             "ready" if has_title else "empty",
         )
-        self._apply_responsive_layout()
-        self._refresh_downloads_page_geometry()
+
+        detail_texts = [
+            model.detail_one_text,
+            model.detail_two_text,
+            model.detail_three_text,
+        ]
+        for widget, text in zip(
+            detail_widgets,
+            detail_texts,
+        ):
+            widget.setText(text)
+            widget.setVisible(bool(text))
+
+        self._sync_queue_workspace_view()
+        detail_visibility_after = tuple(widget.isVisible() for widget in detail_widgets)
+        needs_geometry_refresh = any(
+            (
+                workspace_index_before != self.queue_workspace_stack.currentIndex(),
+                title_visibility_before != has_title,
+                detail_visibility_before != detail_visibility_after,
+            )
+        )
+        self._stabilize_source_preview_card_sizing()
+        if needs_geometry_refresh:
+            self._refresh_downloads_page_geometry()
+            return
+        QTimer.singleShot(0, self._stabilize_source_preview_card_sizing)
+        self.source_preview_card.update()
 
     def _record_download_output(
-        self: "QtYtDlpGui", output_path: Path, source_url: str = ""
+        self: "QtYtDlpGui",
+        output_path: Path,
+        source_url: str = "",
+        metadata: dict[str, object] | None = None,
     ) -> None:
+        details = dict(metadata or {})
         recorded = app_service.record_history_output(
             history=self.download_history,
             seen_paths=self._history_seen_paths,
             output_path=output_path,
             source_url=source_url,
             max_entries=HISTORY_MAX_ENTRIES,
+            title=str(details.get("title") or ""),
+            format_label=str(details.get("format_label") or ""),
+            queue_settings=details.get("queue_settings")
+            if isinstance(details.get("queue_settings"), dict)
+            else None,
         )
         if not recorded:
             return
         self._set_last_output_path(output_path)
         self._refresh_history_panel()
+        self._refresh_queue_empty_state()
 
     def _refresh_history_panel(self: "QtYtDlpGui") -> None:
         self.history_list.clear()
@@ -316,6 +350,97 @@ class WindowFeedbackMixin:
         has_items = self.history_summary_list.count() > 0
         self.history_summary_list.setVisible(has_items)
         self.history_summary_empty.setVisible(not has_items)
+
+    def _history_relative_date_text(self: "QtYtDlpGui", timestamp_text: str) -> str:
+        clean = str(timestamp_text or "").strip()
+        if not clean:
+            return ""
+        try:
+            then = datetime.strptime(clean, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return clean
+        delta = self._effects.clock.now() - then
+        total_seconds = max(0, int(delta.total_seconds()))
+        total_days = delta.days
+        if total_days >= 2:
+            return f"{total_days} days ago"
+        if total_days == 1:
+            return "yesterday"
+        if total_seconds >= 3600:
+            hours = max(1, total_seconds // 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        if total_seconds >= 60:
+            minutes = max(1, total_seconds // 60)
+            return f"{minutes} min ago"
+        return "just now"
+
+    def _history_format_summary(self: "QtYtDlpGui", item: HistoryItem) -> str:
+        settings = item.get("queue_settings")
+        settings_dict = dict(settings) if isinstance(settings, dict) else {}
+        mode = str(settings_dict.get("mode") or "").strip().lower()
+        container = str(settings_dict.get("format_filter") or "").strip().upper()
+        format_label = str(item.get("format_label") or "").strip()
+        parts: list[str] = []
+        if container and container not in {"BEST", "BESTVIDEO*+BESTAUDIO/BEST"}:
+            parts.append(container)
+        if format_label and format_label not in {"-", container}:
+            parts.append(format_label)
+        if mode == "audio" and not format_label:
+            parts.append("Audio only")
+        return " · ".join(part for part in parts if part)
+
+    def _queue_empty_recent_items(self: "QtYtDlpGui") -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        for history_index, item in enumerate(self.download_history[:3]):
+            path_raw = str(item.get("path", "")).strip()
+            size_bytes = int(item.get("file_size_bytes", 0) or 0)
+            if size_bytes <= 0 and path_raw:
+                try:
+                    size_bytes = max(0, int(Path(path_raw).expanduser().stat().st_size))
+                except (OSError, RuntimeError, ValueError):
+                    size_bytes = 0
+            meta_parts = []
+            format_summary = self._history_format_summary(item)
+            if format_summary:
+                meta_parts.append(format_summary)
+            if size_bytes > 0:
+                meta_parts.append(helpers.humanize_bytes(size_bytes))
+            relative_date = self._history_relative_date_text(str(item.get("timestamp", "")))
+            if relative_date:
+                meta_parts.append(relative_date)
+            settings = item.get("queue_settings")
+            settings_dict = dict(settings) if isinstance(settings, dict) else {}
+            items.append(
+                {
+                    "history_index": history_index,
+                    "badge_text": "AUD"
+                    if str(settings_dict.get("mode") or "").strip().lower() == "audio"
+                    else "VID",
+                    "title": str(item.get("title") or item.get("name") or "Downloaded item"),
+                    "meta": " · ".join(part for part in meta_parts if part),
+                    "can_requeue": bool(
+                        str(item.get("source_url") or "").strip() and settings_dict
+                    ),
+                }
+            )
+        return items
+
+    def _refresh_queue_empty_state(self: "QtYtDlpGui") -> None:
+        items = self._queue_empty_recent_items()
+        for attr_name in ("queue_empty_state", "queue_summary_empty"):
+            widget = getattr(self, attr_name, None)
+            if widget is None:
+                continue
+            widget.set_recent_items(items)
+
+    def _requeue_history_item(self: "QtYtDlpGui", history_index: int) -> None:
+        row = int(history_index)
+        if row < 0 or row >= len(self.download_history):
+            return
+        if self._run_queue_controller.on_requeue_history_item(self.download_history[row]):
+            self._active_workspace_name = "queue"
+            return
+        self._set_status("Could not re-queue recent download")
 
     def _selected_history_item(self: "QtYtDlpGui") -> HistoryItem | None:
         row = self.history_list.currentRow()
@@ -349,6 +474,7 @@ class WindowFeedbackMixin:
         self.download_history.clear()
         self._history_seen_paths.clear()
         self._refresh_history_panel()
+        self._refresh_queue_empty_state()
         self._set_status("Download history cleared")
 
     def _stop_progress_animation(self: "QtYtDlpGui") -> None:
@@ -429,3 +555,5 @@ class WindowFeedbackMixin:
             self._set_metric_label_text(self.eta_label, "ETA: Finalizing")
         elif status == "cancelled":
             self._reset_progress_summary()
+        if self.queue_active:
+            self._refresh_queue_panel()

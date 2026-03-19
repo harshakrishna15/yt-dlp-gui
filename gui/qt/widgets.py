@@ -2,18 +2,31 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPropertyAnimation,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractButton,
     QAbstractItemView,
     QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QPushButton,
     QProgressBar,
     QSizePolicy,
+    QStackedWidget,
     QStyle,
     QStyleOptionViewItem,
     QStyledItemDelegate,
@@ -28,10 +41,186 @@ class _QtSignals(QObject):
     log = Signal(str)
     download_done = Signal(str)
     queue_item_done = Signal(bool, bool)
-    record_output = Signal(str, str)
+    record_output = Signal(str, str, object)
 
 
 QUEUE_SOURCE_INDEX_ROLE = Qt.ItemDataRole.UserRole
+
+
+class StableStackedWidget(QStackedWidget):
+    def sizeHint(self) -> QSize:
+        return self._largest_hint(super().sizeHint(), minimum=False)
+
+    def minimumSizeHint(self) -> QSize:
+        return self._largest_hint(super().minimumSizeHint(), minimum=True)
+
+    def _largest_hint(self, fallback: QSize, *, minimum: bool) -> QSize:
+        width = max(0, fallback.width())
+        height = max(0, fallback.height())
+        for index in range(self.count()):
+            widget = self.widget(index)
+            if widget is None:
+                continue
+            hint = widget.minimumSizeHint() if minimum else widget.sizeHint()
+            width = max(width, hint.width())
+            height = max(height, hint.height())
+        return QSize(width, height)
+
+
+class AnimatedSegmentedRail(QWidget):
+    _ANIMATION_MS = 220
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        selection_frame_object_name: str = "topNavSelection",
+        selection_rect_getter: Callable[[QAbstractButton], QRect] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._buttons: list[QAbstractButton] = []
+        self._selected_button: QAbstractButton | None = None
+        self._selection_anim: QPropertyAnimation | None = None
+        self._sync_queued = False
+        self._selection_rect_getter = selection_rect_getter
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._selection_frame = QFrame(self)
+        self._selection_frame.setObjectName(selection_frame_object_name)
+        self._selection_frame.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self._selection_frame.hide()
+
+    def add_button(self, button: QAbstractButton, *, stretch: int = 0) -> None:
+        if button in self._buttons:
+            return
+        button.setParent(self)
+        self._buttons.append(button)
+        layout = self.layout()
+        if isinstance(layout, QHBoxLayout):
+            layout.addWidget(button, stretch=stretch)
+        button.installEventFilter(self)
+        button.toggled.connect(self._queue_selection_sync)
+        button.raise_()
+
+    def sync_selection(self, *, animate: bool = True) -> None:
+        target = self._visible_checked_button()
+        if target is None:
+            self._stop_selection_animation()
+            self._selected_button = None
+            self._selection_frame.hide()
+            return
+
+        target_rect = self._selection_target_rect(target)
+        if target_rect.width() <= 0 or target_rect.height() <= 0:
+            self._selection_frame.hide()
+            return
+
+        self._selection_frame.lower()
+        for button in self._buttons:
+            button.raise_()
+
+        if self._selected_button is None or not self._selection_frame.isVisible():
+            self._stop_selection_animation()
+            self._selection_frame.setGeometry(target_rect)
+            self._selection_frame.show()
+            self._selected_button = target
+            return
+
+        previous = self._selected_button
+        active_animation = self._selection_anim
+        self._selected_button = target
+        if previous is target:
+            if active_animation is not None and animate:
+                end_rect = active_animation.endValue()
+                if isinstance(end_rect, QRect) and end_rect == target_rect:
+                    self._selection_frame.show()
+                    return
+            if not animate or not self.isVisible():
+                self._stop_selection_animation()
+                self._selection_frame.setGeometry(target_rect)
+                self._selection_frame.show()
+                return
+        elif not animate or not self.isVisible():
+            self._stop_selection_animation()
+            self._selection_frame.setGeometry(target_rect)
+            self._selection_frame.show()
+            return
+
+        start_rect = self._selection_frame.geometry()
+        if start_rect == target_rect:
+            self._selection_frame.show()
+            return
+
+        self._stop_selection_animation()
+        self._selection_anim = QPropertyAnimation(self._selection_frame, b"geometry", self)
+        self._selection_anim.setDuration(self._ANIMATION_MS)
+        self._selection_anim.setStartValue(start_rect)
+        self._selection_anim.setEndValue(target_rect)
+        self._selection_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._selection_anim.finished.connect(self._clear_selection_animation)
+        self._selection_frame.show()
+        self._selection_anim.start()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched in self._buttons and event.type() in {
+            QEvent.Type.Hide,
+            QEvent.Type.Move,
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+        }:
+            self.sync_selection(animate=self._selection_anim is not None or self._sync_queued)
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.sync_selection(animate=self._selection_anim is not None or self._sync_queued)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._sync_without_animation)
+
+    def _visible_checked_button(self) -> QAbstractButton | None:
+        for button in self._buttons:
+            if button.isVisible() and button.isChecked():
+                return button
+        return None
+
+    def _selection_target_rect(self, button: QAbstractButton) -> QRect:
+        if self._selection_rect_getter is not None:
+            return self._selection_rect_getter(button)
+        return button.geometry()
+
+    def _queue_selection_sync(self, _checked: bool = False) -> None:
+        if self._sync_queued:
+            return
+        self._sync_queued = True
+        QTimer.singleShot(0, self._run_queued_selection_sync)
+
+    def _run_queued_selection_sync(self) -> None:
+        self._sync_queued = False
+        self.sync_selection()
+
+    def _sync_without_animation(self) -> None:
+        self.sync_selection(animate=False)
+
+    def _stop_selection_animation(self) -> None:
+        if self._selection_anim is None:
+            return
+        self._selection_anim.stop()
+        self._selection_anim.deleteLater()
+        self._selection_anim = None
+
+    def _clear_selection_animation(self) -> None:
+        animation = self.sender()
+        if isinstance(animation, QPropertyAnimation):
+            animation.deleteLater()
+        self._selection_anim = None
 
 
 class _QueueItemDelegate(QStyledItemDelegate):
@@ -302,16 +491,173 @@ class WorkspaceSummaryWidget(QFrame):
         self._progress_bar.setValue(int(round(clamped * 10)))
 
 
-def _style_combo_popup(combo: QComboBox, *, border_color: str = "#bfdad1") -> None:
+class RecentDownloadRowWidget(QFrame):
+    again_requested = Signal(int)
+
+    def __init__(
+        self,
+        *,
+        history_index: int,
+        badge_text: str,
+        title: str,
+        meta: str,
+        can_requeue: bool,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._history_index = int(history_index)
+        self.setObjectName("recentDownloadCard")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(14)
+
+        badge_label = QLabel(str(badge_text or "VID"), self)
+        badge_label.setObjectName("recentDownloadBadge")
+        badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_label.setFixedSize(48, 48)
+        layout.addWidget(badge_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+        copy_col = QWidget(self)
+        copy_col.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        copy_col_layout = QVBoxLayout(copy_col)
+        copy_col_layout.setContentsMargins(0, 0, 0, 0)
+        copy_col_layout.setSpacing(3)
+
+        title_label = QLabel(str(title or "Downloaded item"), copy_col)
+        title_label.setObjectName("recentDownloadTitle")
+        title_label.setWordWrap(True)
+        meta_label = QLabel(str(meta or ""), copy_col)
+        meta_label.setObjectName("recentDownloadMeta")
+        meta_label.setWordWrap(True)
+        meta_label.setVisible(bool(str(meta or "").strip()))
+        copy_col_layout.addWidget(title_label)
+        copy_col_layout.addWidget(meta_label)
+        layout.addWidget(copy_col, stretch=1)
+
+        again_button = QPushButton("↓ Again", self)
+        again_button.setObjectName("historyAgainButton")
+        again_button.setEnabled(bool(can_requeue))
+        again_button.clicked.connect(self._emit_again_requested)
+        layout.addWidget(again_button, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+    def _emit_again_requested(self) -> None:
+        self.again_requested.emit(self._history_index)
+
+
+class QueueEmptyStateWidget(QWidget):
+    again_requested = Signal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        self._stack = QStackedWidget(self)
+        root_layout.addWidget(self._stack, stretch=1)
+
+        placeholder_page = QWidget(self._stack)
+        placeholder_layout = QVBoxLayout(placeholder_page)
+        placeholder_layout.setContentsMargins(24, 24, 24, 24)
+        placeholder_layout.setSpacing(10)
+        placeholder_layout.addStretch(1)
+
+        placeholder_card = QFrame(placeholder_page)
+        placeholder_card.setObjectName("queueEmptyPlaceholder")
+        placeholder_card.setMaximumWidth(360)
+        placeholder_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        placeholder_card_layout = QVBoxLayout(placeholder_card)
+        placeholder_card_layout.setContentsMargins(24, 24, 24, 24)
+        placeholder_card_layout.setSpacing(8)
+
+        self.placeholder_icon = QLabel("↓", placeholder_card)
+        self.placeholder_icon.setObjectName("queueEmptyIcon")
+        self.placeholder_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_icon.setFixedSize(64, 64)
+        self.placeholder_title = QLabel("Queue is empty", placeholder_card)
+        self.placeholder_title.setObjectName("queueEmptyTitle")
+        self.placeholder_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_description = QLabel(
+            "Paste a URL above to get started",
+            placeholder_card,
+        )
+        self.placeholder_description.setObjectName("queueEmptyDescription")
+        self.placeholder_description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        placeholder_card_layout.addWidget(
+            self.placeholder_icon,
+            alignment=Qt.AlignmentFlag.AlignHCenter,
+        )
+        placeholder_card_layout.addWidget(self.placeholder_title)
+        placeholder_card_layout.addWidget(self.placeholder_description)
+        placeholder_layout.addWidget(
+            placeholder_card,
+            alignment=Qt.AlignmentFlag.AlignHCenter,
+        )
+        placeholder_layout.addStretch(1)
+        self._placeholder_index = self._stack.addWidget(placeholder_page)
+
+        recent_page = QWidget(self._stack)
+        recent_layout = QVBoxLayout(recent_page)
+        recent_layout.setContentsMargins(0, 8, 0, 0)
+        recent_layout.setSpacing(12)
+
+        recent_title = QLabel("Recent downloads", recent_page)
+        recent_title.setObjectName("recentDownloadsTitle")
+        recent_layout.addWidget(recent_title)
+
+        self._rows_layout = QVBoxLayout()
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(10)
+        recent_layout.addLayout(self._rows_layout)
+        recent_layout.addStretch(1)
+        self._recent_index = self._stack.addWidget(recent_page)
+
+    def set_recent_items(self, items: list[dict[str, object]]) -> None:
+        while self._rows_layout.count():
+            child = self._rows_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not items:
+            self._stack.setCurrentIndex(self._placeholder_index)
+            return
+        for item in items:
+            row = RecentDownloadRowWidget(
+                history_index=int(item.get("history_index", -1)),
+                badge_text=str(item.get("badge_text", "VID")),
+                title=str(item.get("title", "Downloaded item")),
+                meta=str(item.get("meta", "")),
+                can_requeue=bool(item.get("can_requeue", False)),
+                parent=self,
+            )
+            row.again_requested.connect(
+                lambda history_index, signal=self.again_requested: signal.emit(history_index)
+            )
+            self._rows_layout.addWidget(row)
+        self._stack.setCurrentIndex(self._recent_index)
+
+
+def _style_combo_popup(combo: QComboBox, *, border_color: str = "#505049") -> None:
     popup = combo.view().window()
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
     popup.setAutoFillBackground(True)
     popup.setContentsMargins(0, 0, 0, 0)
     popup.setStyleSheet(
         f"""
-        background: #ffffff;
+        background: #20201d;
         border: 1px solid {border_color};
-        border-radius: 8px;
+        border-radius: 22px;
         """
     )
 

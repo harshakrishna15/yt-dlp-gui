@@ -379,9 +379,17 @@ class RunQueueController:
         self._ports.worker_executor.submit(
             self.run_single_download_worker,
             request=request,
+            history_title=str(getattr(w, "_preview_title_raw", "") or ""),
+            history_settings=dict(w._capture_queue_settings()),
         )
 
-    def run_single_download_worker(self, *, request: DownloadRequest) -> None:
+    def run_single_download_worker(
+        self,
+        *,
+        request: DownloadRequest,
+        history_title: str,
+        history_settings: QueueSettings,
+    ) -> None:
         result = app_service.run_download_request(
             request=request,
             cancel_event=self.state.cancel_event,
@@ -394,6 +402,11 @@ class RunQueueController:
                 "record_output",
                 str(p),
                 str(request["url"]),
+                {
+                    "title": str(history_title or ""),
+                    "format_label": str(request.get("fmt_label") or ""),
+                    "queue_settings": dict(history_settings or {}),
+                },
             ),
         )
         _emit_window_signal(self.window, "download_done", str(result))
@@ -533,6 +546,24 @@ class RunQueueController:
         s.queue_items = updated
         w._refresh_queue_panel()
         w._update_controls_state()
+
+    def on_requeue_history_item(self, history_item: dict[str, object]) -> bool:
+        s = self.state
+        w = self.window
+        if s.is_downloading:
+            return False
+        source_url = core_urls.strip_url_whitespace(
+            str(history_item.get("source_url") or "")
+        )
+        queue_settings = history_item.get("queue_settings")
+        settings = dict(queue_settings) if isinstance(queue_settings, dict) else {}
+        if not source_url or not settings:
+            return False
+        s.queue_items.append(core_queue_logic.queue_item(source_url, settings))
+        w._refresh_queue_panel()
+        w._set_status("Added recent download back to queue")
+        w._update_controls_state()
+        return True
 
     def on_add_to_queue(self) -> None:
         self._refresh_run_state()
@@ -681,7 +712,15 @@ class RunQueueController:
                     self.window, "progress", dict(payload)
                 ),
                 record_output=lambda p: _emit_window_signal(
-                    self.window, "record_output", str(p), url
+                    self.window,
+                    "record_output",
+                    str(p),
+                    url,
+                    {
+                        "title": str(resolved.get("title") or ""),
+                        "format_label": str(request.get("fmt_label") or ""),
+                        "queue_settings": dict(settings or {}),
+                    },
                 ),
                 ensure_output_dir=True,
             )

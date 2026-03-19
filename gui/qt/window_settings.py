@@ -20,14 +20,7 @@ class WindowSettingsMixin:
             path = Path(raw).expanduser()
         except (TypeError, ValueError, OSError):
             return raw
-        home = Path.home()
-        try:
-            relative = path.relative_to(home)
-        except ValueError:
-            return str(path)
-        if not relative.parts:
-            return "~"
-        return f"~/{relative.as_posix()}"
+        return str(path)
 
     def _build_settings_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_settings_panel(
@@ -53,11 +46,14 @@ class WindowSettingsMixin:
         self.queue_stack = refs.queue_stack
         self._queue_empty_index = refs.queue_empty_index
         self._queue_content_index = refs.queue_content_index
+        self.queue_empty_state = refs.queue_empty_state
         self.queue_list = refs.queue_list
         self.queue_remove_button = refs.queue_remove_button
         self.queue_move_up_button = refs.queue_move_up_button
         self.queue_move_down_button = refs.queue_move_down_button
         self.queue_clear_button = refs.queue_clear_button
+        self.queue_empty_state.again_requested.connect(self._requeue_history_item)
+        self.queue_summary_empty.again_requested.connect(self._requeue_history_item)
         self.queue_list.itemSelectionChanged.connect(self._refresh_queue_panel_state)
         self.queue_list.remove_requested.connect(self._queue_remove_row)
         self.queue_list.items_reordered.connect(self._queue_reorder_items)
@@ -121,6 +117,7 @@ class WindowSettingsMixin:
         self.output_dir_edit.setText(display)
         self.output_dir_edit.setToolTip(str(Path(raw).expanduser()))
         self.output_dir_edit.setCursorPosition(0)
+        self._refresh_queue_preview_card()
 
     def _load_user_settings(self: "QtYtDlpGui") -> None:
         settings = settings_store.load_settings(

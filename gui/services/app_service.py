@@ -174,10 +174,17 @@ def record_history_output(
     source_url: str,
     max_entries: int,
     timestamp: datetime | None = None,
+    title: str = "",
+    format_label: str = "",
+    queue_settings: QueueSettings | Mapping[str, Any] | None = None,
 ) -> bool:
     normalized = history_store.normalize_output_path(output_path)
     if not normalized:
         return False
+    try:
+        file_size_bytes = max(0, int(output_path.expanduser().stat().st_size))
+    except (OSError, RuntimeError, ValueError):
+        file_size_bytes = 0
     now = timestamp or datetime.now()
     history_store.upsert_history_entry(
         history,
@@ -186,5 +193,9 @@ def record_history_output(
         source_url=source_url,
         timestamp=now.strftime("%Y-%m-%d %H:%M:%S"),
         max_entries=max_entries,
+        title=str(title or "").strip(),
+        format_label=str(format_label or "").strip(),
+        file_size_bytes=file_size_bytes,
+        queue_settings=dict(queue_settings or {}),
     )
     return True

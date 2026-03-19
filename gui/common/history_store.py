@@ -29,6 +29,10 @@ def upsert_history_entry(
     source_url: str,
     timestamp: str,
     max_entries: int,
+    title: str = "",
+    format_label: str = "",
+    file_size_bytes: int = 0,
+    queue_settings: dict | None = None,
 ) -> None:
     if not normalized_path:
         return
@@ -40,8 +44,14 @@ def upsert_history_entry(
         item["timestamp"] = timestamp
         item["path"] = normalized_path
         item["name"] = file_name
+        item["title"] = str(title or item.get("title", ""))
+        item["format_label"] = str(format_label or item.get("format_label", ""))
+        if int(file_size_bytes or 0) > 0:
+            item["file_size_bytes"] = int(file_size_bytes)
         item["source_url"] = source_url
         item["canonical_path"] = canonical_path
+        if queue_settings:
+            item["queue_settings"] = dict(queue_settings)
         if idx > 0:
             history.pop(idx)
             history.insert(0, item)
@@ -54,8 +64,12 @@ def upsert_history_entry(
             "timestamp": timestamp,
             "path": normalized_path,
             "name": file_name,
+            "title": str(title or ""),
+            "format_label": str(format_label or ""),
+            "file_size_bytes": max(0, int(file_size_bytes or 0)),
             "source_url": source_url,
             "canonical_path": canonical_path,
+            "queue_settings": dict(queue_settings or {}),
         },
     )
     while len(history) > max(1, int(max_entries)):

@@ -509,6 +509,11 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(target, controller.run_single_download_worker)
         self.assertEqual(args, ())
         self.assertEqual(kwargs["request"], request)
+        self.assertEqual(kwargs["history_title"], "")
+        self.assertEqual(
+            kwargs["history_settings"],
+            {"mode": "audio", "format_filter": "mp3", "format_label": "High"},
+        )
 
     def test_start_queue_download_sets_state_and_submits_queue_worker(self) -> None:
         window = FakeWindow()
@@ -568,6 +573,33 @@ class TestRunQueueController(unittest.TestCase):
         controller.on_queue_clear()
         self.assertEqual(state.queue_items, [])
         self.assertGreaterEqual(window.queue_refreshes, 3)
+
+    def test_requeue_history_item_restores_prior_settings(self) -> None:
+        window = FakeWindow()
+        state = RunQueueState()
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        queued = controller.on_requeue_history_item(
+            {
+                "source_url": "https://example.com/watch?v=abc",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "h264",
+                    "format_label": "1080p",
+                },
+            }
+        )
+
+        self.assertTrue(queued)
+        self.assertEqual(len(state.queue_items), 1)
+        self.assertEqual(state.queue_items[0]["url"], "https://example.com/watch?v=abc")
+        self.assertEqual(
+            state.queue_items[0]["settings"]["codec_filter"],
+            "h264",
+        )
+        self.assertEqual(window.status_value.text(), "Added recent download back to queue")
 
     def test_on_start_with_missing_url_uses_dialog_port(self) -> None:
         window = FakeWindow()

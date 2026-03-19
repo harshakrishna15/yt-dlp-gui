@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import signal
 import re
-from urllib.parse import parse_qs, urlparse
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QSize, Qt, QTimer
@@ -23,6 +23,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QFrame,
+    QGraphicsDropShadowEffect,
+    QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidgetItem,
@@ -31,6 +34,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QPlainTextEdit,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -55,6 +59,7 @@ from .constants import (
     MIN_WINDOW_HEIGHT,
     MIN_WINDOW_WIDTH,
     PANEL_SWITCH_FADE_MS,
+    ROOMY_CONTENT_LAYOUT_MIN_HEIGHT,
     SOURCE_DETAILS_NONE_INDEX,
     SOURCE_DETAILS_PLAYLIST_INDEX,
     TOP_ACTION_ICON_PX,
@@ -74,12 +79,24 @@ from .view_builders import (
     UiRefs,
 )
 from ..core import format_selection as core_format_selection
+from ..core import queue_presentation
 from ..core import urls as core_urls
 from ..core import ui_state as core_ui_state
 from ..services import app_service
 from .state import PREVIEW_TITLE_TOOLTIP_DEFAULT
 from .widgets import QUEUE_SOURCE_INDEX_ROLE, WorkspaceSummaryWidget, _NativeComboBox, _QtSignals
 from ..common.types import DownloadOptions, DownloadRequest, HistoryItem, QueueItem, QueueSettings
+
+
+@dataclass
+class _SourceFeedbackToastEntry:
+    card: QFrame
+    title_label: QLabel
+    message_label: QLabel
+    dismiss_button: QPushButton
+    timer: QTimer | None = None
+    animation: QPropertyAnimation | None = None
+    placeholder: bool = False
 
 
 class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
@@ -92,7 +109,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._active_animations: list[QPropertyAnimation] = []
         self._shortcuts: list[QShortcut] = []
         self._progress_anim: QPropertyAnimation | None = None
-        self._source_feedback_toast_token = 0
+        self._source_feedback_toasts: list[_SourceFeedbackToastEntry] = []
+        self._source_feedback_toast_placeholder: _SourceFeedbackToastEntry | None = None
+        self._source_feedback_toast_parent: QWidget | None = None
+        self._last_toasted_source_feedback_version: int | None = None
         self._logs_alert_active = False
         self._header_icons_enabled = True
         self._legacy_log_alert_icon = self._build_alert_dot_icon()
@@ -123,23 +143,28 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._fetch_timer.setInterval(FETCH_DEBOUNCE_MS)
         self._fetch_timer.setSingleShot(True)
         self._fetch_timer.timeout.connect(self._start_fetch_formats)
-        self._source_feedback_toast_timer = QTimer(self)
-        self._source_feedback_toast_timer.setSingleShot(True)
-        self._source_feedback_toast_timer.timeout.connect(
-            self._hide_source_feedback_toast
-        )
+        self._resize_sync_timer = QTimer(self)
+        self._resize_sync_timer.setSingleShot(True)
+        self._resize_sync_timer.timeout.connect(self._run_deferred_resize_sync)
 
         self.download_history: list[HistoryItem] = []
         self._history_seen_paths: set[str] = set()
+        self.queue_empty_state = None
 
         self._log_lines: list[str] = []
         self._last_error_log = ""
         self._last_source_feedback_log: tuple[str, str] | None = None
+        self._current_source_feedback_message = ""
+        self._current_source_feedback_tone = "neutral"
+        self._source_feedback_version = 0
+        self._dismissed_source_feedback_version: int | None = None
         self._status_presenter = StatusPresenter()
         self._active_panel_name: str | None = None
-        self._active_workspace_name = "current"
+        self._active_workspace_name = "queue"
         self._applying_user_settings = False
         self._latest_output_path: Path | None = None
+        self._preview_title_raw = ""
+        self._source_summary_data: dict[str, str] | None = None
         self._current_item_progress = "-"
         self._current_item_title = "-"
         self._current_item_title_tooltip = "-"
@@ -397,9 +422,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         }
         self._configure_top_action_icons()
 
-        self.current_view_button.clicked.connect(
-            lambda _checked: self._show_main_workspace("current")
-        )
         self.queue_view_button.clicked.connect(
             lambda _checked: self._show_main_workspace("queue")
         )
@@ -407,7 +429,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             lambda _checked: self._show_main_workspace("history")
         )
         self.downloads_button.clicked.connect(
-            lambda _checked: self._show_main_workspace("current")
+            lambda _checked: self._show_main_workspace("queue")
         )
         self.settings_button.clicked.connect(
             lambda _checked: self._toggle_panel("settings")
@@ -419,7 +441,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             lambda _checked: self._show_main_workspace("history")
         )
         self.logs_button.clicked.connect(lambda _checked: self._toggle_panel("logs"))
-        self._select_workspace_view("current")
+        self._select_workspace_view("queue")
 
         combo_arrow_path = (
             Path(__file__).resolve().parent / "assets" / "combo-down-arrow.svg"
@@ -461,21 +483,31 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.use_playlist_url_button = mixed.use_playlist_url_button
 
         source_toast = ui.source_toast
-        self.source_feedback_toast = source_toast.card
-        self.source_feedback_toast_title = source_toast.title_label
-        self.source_feedback_toast_message = source_toast.message_label
+        self._source_feedback_toast_parent = source_toast.card.parentWidget() or ui.root
+        self._source_feedback_toast_placeholder = _SourceFeedbackToastEntry(
+            card=source_toast.card,
+            title_label=source_toast.title_label,
+            message_label=source_toast.message_label,
+            dismiss_button=source_toast.dismiss_button,
+            placeholder=True,
+        )
+        self._sync_source_feedback_toast_refs()
+        self.source_feedback_toast_dismiss_button.clicked.connect(
+            self._dismiss_source_feedback_toast
+        )
 
         downloads = ui.downloads
         self.main_page = downloads.main_page
         self._main_page_index = downloads.main_page_index
         self.workspace_layout = downloads.workspace_layout
         self.source_view_stack = downloads.source_view_stack
-        self._current_view_index = downloads.current_view_index
         self._queue_view_index = downloads.queue_view_index
         self._history_view_index = downloads.history_view_index
-        self.current_view_button = downloads.current_view_button
         self.queue_view_button = downloads.queue_view_button
         self.history_view_button = downloads.history_view_button
+        self.queue_workspace_stack = downloads.queue_workspace_stack
+        self._queue_workspace_preview_index = downloads.queue_workspace_preview_index
+        self._queue_workspace_summary_index = downloads.queue_workspace_summary_index
         self.queue_summary_list = downloads.queue_summary_list
         self.queue_summary_empty = downloads.queue_summary_empty
         self.history_summary_list = downloads.history_summary_list
@@ -532,8 +564,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.run_section = run.section
         self.run_activity_card = run.activity_card
         self.run_actions_card = run.actions_card
+        self.run_actions_shell_layout = run.actions_shell_layout
+        self.run_actions_layout = run.actions_layout
         self.run_stage_hint_label = run.stage_hint_label
         self.session_title_label = run.session_title_label
+        self.run_stats_grid = run.stats_grid
         self.status_value = run.status_value
         self.progress_bar = run.progress_bar
         self.start_button = run.start_button
@@ -655,7 +690,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         width = max(min_width, max(label.sizeHint().width() for label in labels))
         for label in labels:
             label.setFixedWidth(width)
-            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
     def _set_uniform_button_width(
         self, buttons: list[QPushButton], *, extra_px: int = 28
@@ -663,42 +698,98 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         live = [btn for btn in buttons if btn is not None]
         if not live:
             return
-        metrics = QFontMetrics(live[0].font())
         width = 0
         for button in live:
-            text_width = metrics.horizontalAdvance(button.text())
+            metrics = button.fontMetrics()
+            text_width = max(
+                metrics.horizontalAdvance(button.text()),
+                metrics.boundingRect(button.text()).width(),
+                metrics.tightBoundingRect(button.text()).width(),
+            )
             icon_width = 0
             if not button.icon().isNull():
                 icon_size = button.iconSize()
                 icon_width = max(icon_size.width(), icon_size.height()) + 8
-            width = max(width, text_width + icon_width)
-        width += extra_px
+            width = max(
+                width,
+                button.minimumSizeHint().width(),
+                button.sizeHint().width(),
+                text_width + icon_width + extra_px,
+            )
         for button in live:
             button.setMinimumWidth(width)
 
+    def _set_fixed_label_width_for_samples(
+        self, label: QLabel, samples: tuple[str, ...], *, extra_px: int = 4
+    ) -> None:
+        metrics = QFontMetrics(label.font())
+        width = max(
+            label.minimumSizeHint().width(),
+            *(metrics.horizontalAdvance(sample) for sample in samples),
+        )
+        label.setFixedWidth(width + extra_px)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+    def _stabilize_run_section_sizing(self) -> None:
+        self._set_fixed_label_width_for_samples(
+            self.progress_label,
+            ("Progress: 100.0%",),
+        )
+        self._set_fixed_label_width_for_samples(
+            self.speed_label,
+            ("Speed: 9999.99 MiB/s", "Speed: 99.99 GiB/s"),
+        )
+        self._set_fixed_label_width_for_samples(
+            self.eta_label,
+            ("ETA: Finalizing", "ETA: 99:59:59 / 999:59:59"),
+        )
+
+        for card in self.run_stats_grid.findChildren(QFrame, "sessionMetricCard"):
+            target_height = max(card.minimumSizeHint().height(), card.sizeHint().height())
+            card.setMinimumHeight(target_height)
+            card.setMaximumHeight(target_height)
+
+        result_height = max(
+            self.download_result_card.minimumSizeHint().height(),
+            self.download_result_card.sizeHint().height(),
+        )
+        self.download_result_card.setMinimumHeight(result_height)
+        self.download_result_card.setMaximumHeight(result_height)
+
+    def _use_compact_content_layout(self) -> bool:
+        return self.height() < ROOMY_CONTENT_LAYOUT_MIN_HEIGHT
+
+    def _use_compact_run_layout(self) -> bool:
+        # The always-visible metrics and result cards currently only fit reliably
+        # with the denser run layout metrics.
+        return True
+
+    def _set_source_row_button_widths(self) -> None:
+        self._set_uniform_button_width([self.paste_button], extra_px=16)
+        self._set_uniform_button_width([self.analyze_button], extra_px=16)
+
     def _normalize_control_sizing(self) -> None:
-        metrics = QFontMetrics(self.font())
-        compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
-        if compact_height:
-            control_height = max(31, metrics.height() + 9)
-            toggle_height = max(21, control_height - 9)
-        else:
-            control_height = max(34, metrics.height() + 11)
-            toggle_height = max(23, control_height - 9)
-        for edit in (
-            self.url_edit,
+        compact_height = self._use_compact_content_layout()
+        source_row_inputs = (self.url_edit,)
+        text_inputs = (
             self.playlist_items_edit,
             self.filename_edit,
             self.output_dir_edit,
-        ):
-            edit.setMinimumHeight(control_height)
-
-        for combo in (
+        )
+        combos = (
             self.container_combo,
             self.codec_combo,
             self.format_combo,
-        ):
-            combo.setMinimumHeight(control_height)
+        )
+        control_height = max(
+            31 if compact_height else 34,
+            *(
+                max(widget.minimumSizeHint().height(), widget.sizeHint().height())
+                for widget in (*text_inputs, *combos)
+            ),
+        )
+        for widget in (*source_row_inputs, *text_inputs, *combos):
+            widget.setMinimumHeight(control_height)
 
         for button in (
             self.downloads_button,
@@ -729,20 +820,35 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.logs_clear_button,
         ):
             button.setMinimumHeight(control_height)
-        self.start_button.setMinimumHeight(control_height + 4)
+        self.start_button.setMinimumHeight(
+            control_height if compact_height else control_height + 4
+        )
 
-        for toggle in (
+        toggles = (
             self.video_radio,
             self.audio_radio,
             self.convert_check,
-        ):
+        )
+        toggle_height = max(
+            23 if compact_height else 25,
+            *(
+                max(toggle.minimumSizeHint().height(), toggle.sizeHint().height())
+                for toggle in toggles
+            ),
+        )
+        for toggle in toggles:
             toggle.setMinimumHeight(toggle_height)
 
         for label in getattr(self, "_output_form_labels", []):
-            label.setMinimumHeight(toggle_height)
+            label.setMinimumHeight(
+                max(
+                    toggle_height,
+                    label.minimumSizeHint().height(),
+                    label.sizeHint().height(),
+                )
+            )
 
-        for row in getattr(self, "_output_form_rows", []):
-            row.setMinimumHeight(max(control_height, row.minimumSizeHint().height()))
+        self._sync_output_form_row_heights(control_height)
 
         self._set_uniform_button_width(
             [
@@ -754,13 +860,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ],
             extra_px=18,
         )
-        self._set_uniform_button_width(
-            [
-                self.paste_button,
-                self.analyze_button,
-            ],
-            extra_px=22,
-        )
+        self._set_source_row_button_widths()
         self._source_row_control_height = control_height
         self._lock_source_row_control_heights()
         self._set_uniform_button_width(
@@ -770,7 +870,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.start_queue_button,
                 self.cancel_button,
             ],
-            extra_px=34,
+            extra_px=12 if compact_height else 34,
         )
         self._set_uniform_button_width(
             [
@@ -822,9 +922,18 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.source_preview_detail_three.minimumSizeHint().height(),
             self.source_preview_detail_three.sizeHint().height(),
         )
+        for chip in (
+            self.source_preview_detail_one,
+            self.source_preview_detail_two,
+            self.source_preview_detail_three,
+        ):
+            chip.setFixedHeight(
+                max(chip.minimumSizeHint().height(), chip.sizeHint().height())
+            )
+            chip.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         detail_row.setFixedHeight(detail_row_height + detail_vertical_padding + 2)
 
-        compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
+        compact_height = self._use_compact_content_layout()
         if not self.isVisible():
             self._source_preview_locked_heights[compact_height] = 0
             self.source_preview_card.setMinimumHeight(0)
@@ -839,7 +948,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 source_section.updateGeometry()
             return
 
-        base_min_height = 56 if compact_height else 66
+        base_min_height = 50 if compact_height else 58
         preview_layout = self.source_preview_card.layout()
         locked_height = self._source_preview_locked_heights[compact_height]
         preview_height = max(
@@ -854,8 +963,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 preview_layout.sizeHint().height(),
             )
         self._source_preview_locked_heights[compact_height] = preview_height
-        self.source_preview_card.setMinimumHeight(preview_height)
-        self.source_preview_card.setMaximumHeight(preview_height)
+        self.source_preview_card.setFixedHeight(preview_height)
         self.source_preview_card.updateGeometry()
 
         source_content = self.source_preview_card.parentWidget()
@@ -871,16 +979,24 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         target = max(0, int(self._source_row_control_height))
         if target <= 0:
             return
+        controls = (
+            self.url_edit,
+            self.paste_button,
+            self.analyze_button,
+        )
+        target = max(
+            target,
+            *(
+                max(widget.minimumSizeHint().height(), widget.sizeHint().height())
+                for widget in controls
+            ),
+        )
         row_margins = self.source_row.layout().contentsMargins() if self.source_row.layout() else None
         if row_margins is not None:
             self.source_row.setFixedHeight(
                 target + row_margins.top() + row_margins.bottom() + 2
             )
-        for widget in (
-            self.url_edit,
-            self.paste_button,
-            self.analyze_button,
-        ):
+        for widget in controls:
             widget.setFixedHeight(target)
 
     def _constrain_source_row_widths(self, *, preferred_url_width: int) -> None:
@@ -897,6 +1013,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         reserved_width = action_width + horizontal_padding + (row_spacing * 2)
         available_width = self.source_row.width()
         if available_width <= 0:
+            source_parent = self.source_row.parentWidget()
+            if source_parent is not None:
+                available_width = source_parent.contentsRect().width()
+        if available_width <= 0:
             available_width = max(self.width(), reserved_width + preferred_url_width)
         url_width = min(
             preferred_url_width,
@@ -910,7 +1030,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         compact = width < 1240
         field_ratio = 0.26 if compact else 0.22
         field_width = max(210, min(380, int(width * field_ratio)))
-        dropdown_width = max(180, min(340, int(width * 0.19)))
+        dropdown_width = max(220, min(420, int(width * 0.23)))
 
         self._constrain_source_row_widths(preferred_url_width=field_width)
         self.playlist_items_edit.setMinimumWidth(field_width)
@@ -924,12 +1044,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.output_section.setMinimumWidth(0)
             self.output_section.setMaximumWidth(16777215)
         else:
-            inspector_width = max(440, min(560, int(width * 0.42)))
+            inspector_width = max(440, min(640, int(width * 0.46)))
             self.output_section.setMinimumWidth(inspector_width)
             self.output_section.setMaximumWidth(inspector_width + 40)
 
     def _set_output_layout_mode(self, mode: str) -> None:
         stacked_mode = mode == "stacked"
+        compact_height = self._use_compact_content_layout()
         self._output_layout_mode = mode
         self.workspace_layout.setDirection(
             QBoxLayout.Direction.TopToBottom
@@ -937,34 +1058,161 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             else QBoxLayout.Direction.LeftToRight
         )
         self.workspace_layout.setSpacing(14 if stacked_mode else 18)
-        self.output_layout.setSpacing(12 if stacked_mode else 14)
-        self.format_layout.setSpacing(12 if stacked_mode else 10)
-        self.save_layout.setSpacing(12 if stacked_mode else 10)
+        output_shell_layout = self.output_section.layout()
+        if isinstance(output_shell_layout, QVBoxLayout):
+            shell_margin = 4 if compact_height else 16
+            output_shell_layout.setContentsMargins(
+                shell_margin, shell_margin, shell_margin, shell_margin
+            )
+            output_shell_layout.setSpacing(6 if compact_height else 12)
+        outer_spacing = 6 if compact_height else 10
+        card_spacing = 6 if compact_height else 10
+        card_side_margin = 8 if compact_height else 14
+        card_top_margin = 8 if compact_height else 14
+        card_bottom_margin = 8 if compact_height else 14
+        self.output_layout.setSpacing(outer_spacing)
+        self.format_layout.setSpacing(card_spacing)
+        self.save_layout.setSpacing(max(6, card_spacing - 2))
+        self.format_layout.setContentsMargins(
+            card_side_margin,
+            card_top_margin,
+            card_side_margin,
+            card_bottom_margin,
+        )
+        self.save_layout.setContentsMargins(
+            0,
+            2 if compact_height else 4,
+            0,
+            0,
+        )
         self._set_output_form_label_width()
         self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.mode_row_layout.setSpacing(12 if stacked_mode else 14)
-        self.folder_row_layout.setDirection(QBoxLayout.Direction.TopToBottom)
-        self.folder_row_layout.setSpacing(10)
+        self.mode_row_layout.setSpacing(10 if stacked_mode else 14)
+        self.folder_row_layout.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if stacked_mode
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self.folder_row_layout.setSpacing(6 if compact_height else 10)
+
+    def _set_run_section_layout_mode(self) -> None:
+        compact_height = self._use_compact_run_layout()
+        self.session_title_label.setVisible(True)
+        self.run_stats_grid.setVisible(True)
+
+        run_layout = self.run_section.layout()
+        if isinstance(run_layout, QBoxLayout):
+            run_layout.setSpacing(18)
+            run_layout.setStretch(0, 13)
+            run_layout.setStretch(1, 7)
+
+        action_margin = 14 if compact_height else 20
+        action_spacing = 6 if compact_height else 8
+        buttons_shell_layout = self.run_actions_shell_layout
+        buttons_shell_layout.setContentsMargins(
+            action_margin, action_margin, action_margin, action_margin
+        )
+        buttons_layout = self.run_actions_layout
+        buttons_layout.setHorizontalSpacing(action_spacing)
+        buttons_layout.setVerticalSpacing(action_spacing)
+
+        activity_layout = self.run_activity_card.layout()
+        if isinstance(activity_layout, QVBoxLayout):
+            activity_margin = 8 if compact_height else 16
+            activity_layout.setContentsMargins(
+                activity_margin, activity_margin, activity_margin, activity_margin
+            )
+            activity_layout.setSpacing(5 if compact_height else 12)
+
+        metrics_card_layout = self.metrics_card.layout()
+        if isinstance(metrics_card_layout, QHBoxLayout):
+            metrics_card_layout.setSpacing(12 if compact_height else 16)
+        metrics_strip_layout = self.metrics_strip.layout()
+        if isinstance(metrics_strip_layout, QBoxLayout):
+            metrics_strip_layout.setSpacing(6 if compact_height else 12)
+
+        stats_layout = self.run_stats_grid.layout()
+        if isinstance(stats_layout, QGridLayout):
+            stats_layout.setHorizontalSpacing(8 if compact_height else 10)
+            stats_layout.setVerticalSpacing(6 if compact_height else 10)
+
+        result_layout = self.download_result_card.layout()
+        if isinstance(result_layout, QHBoxLayout):
+            result_margin_h = 10 if compact_height else 14
+            result_margin_v = 6 if compact_height else 12
+            result_layout.setContentsMargins(
+                result_margin_h, result_margin_v, result_margin_h, result_margin_v
+            )
+            result_layout.setSpacing(6 if compact_height else 8)
+
+        for widget in (
+            self.start_button,
+            self.add_queue_button,
+            self.start_queue_button,
+            self.cancel_button,
+            self.session_title_label,
+            self.ready_summary_label,
+            self.progress_label,
+            self.speed_label,
+            self.eta_label,
+            self.item_label,
+        ):
+            self._set_widget_property(widget, "compact", compact_height)
+
+        for label in self.run_stats_grid.findChildren(QLabel):
+            if label.objectName() in {"sessionMetricValue", "sessionMetricLabel"}:
+                self._set_widget_property(label, "compact", compact_height)
+
+        for card in self.run_stats_grid.findChildren(QFrame, "sessionMetricCard"):
+            self._set_widget_property(card, "compact", compact_height)
+            card_layout = card.layout()
+            if isinstance(card_layout, QVBoxLayout):
+                card_layout.setContentsMargins(
+                    8 if compact_height else 14,
+                    6 if compact_height else 12,
+                    8 if compact_height else 14,
+                    6 if compact_height else 12,
+                )
+                card_layout.setSpacing(2 if compact_height else 4)
+
+        self._stabilize_run_section_sizing()
+
+        for button in (
+            self.start_button,
+            self.add_queue_button,
+            self.start_queue_button,
+            self.cancel_button,
+        ):
+            buttons_layout.removeWidget(button)
+
+        buttons_layout.addWidget(self.start_button, 0, 0, 1, 2)
+        buttons_layout.addWidget(self.add_queue_button, 1, 0, 1, 2)
+        buttons_layout.addWidget(self.start_queue_button, 2, 0, 1, 2)
+        buttons_layout.addWidget(self.cancel_button, 3, 0, 1, 2)
+        buttons_layout.setRowStretch(0, 0)
+        buttons_layout.setRowStretch(1, 0)
+        buttons_layout.setRowStretch(2, 0)
+        buttons_layout.setRowStretch(3, 0)
+        buttons_layout.setRowStretch(4, 0)
 
     def _apply_responsive_layout(self) -> None:
         desired_mode = "stacked" if self.width() < 860 else "split"
         self._set_output_layout_mode(desired_mode)
+        self._set_run_section_layout_mode()
 
-        compact_height = self.height() <= (MIN_WINDOW_HEIGHT - 40)
-        self.source_preview_subtitle.setVisible(not compact_height)
+        self.source_preview_subtitle.setVisible(self.height() >= MIN_WINDOW_HEIGHT)
         self._stabilize_source_preview_card_sizing()
         self._sync_source_feedback_visibility()
         self.mixed_buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self._sync_source_details_height()
 
     def _install_tooltips(self) -> None:
-        self.downloads_button.setToolTip("Show the current source workspace.")
+        self.downloads_button.setToolTip("Show the queue workspace.")
         self.settings_button.setToolTip("Open settings view.")
         self.queue_button.setToolTip("Show queued downloads in the workspace.")
         self.history_button.setToolTip("Show download history in the workspace.")
         self.logs_button.setToolTip("Open logs view.")
-        self.current_view_button.setToolTip("Show the current source summary.")
-        self.queue_view_button.setToolTip("Show queued downloads.")
+        self.queue_view_button.setToolTip("Show the current queue and source summary.")
         self.history_view_button.setToolTip("Show download history.")
 
         self.url_edit.setToolTip("Paste a video or playlist URL.")
@@ -1060,6 +1308,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         download_state = "ready" if has_formats_data else "staged"
         if is_fetching:
             download_state = "loading"
+        staged_widgets: list[QWidget] = []
         for widget in (
             self.output_section,
             self.format_card,
@@ -1068,8 +1317,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.source_preview_card,
             self.download_result_card,
         ):
-            if widget is not None:
-                self._set_widget_property(widget, "stage", download_state)
+            if widget is None or widget in staged_widgets:
+                continue
+            staged_widgets.append(widget)
+            self._set_widget_property(widget, "stage", download_state)
 
         output_hint = ""
         run_hint = ""
@@ -1093,18 +1344,16 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.analyze_button.setText("Refresh formats")
         else:
             self.analyze_button.setText("Analyze URL")
-        self._set_uniform_button_width(
-            [
-                self.paste_button,
-                self.analyze_button,
-            ],
-            extra_px=22,
-        )
+        self._set_source_row_button_widths()
+        self._lock_source_row_control_heights()
+        self._set_source_row_button_widths()
+        self._normalize_input_widths()
 
     def _refresh_queue_panel_state(self) -> None:
         has_items = self.queue_list.count() > 0
         has_selection = bool(self.queue_list.selectedIndexes())
         editable = not self.queue_active
+        self._refresh_queue_empty_state()
         self.queue_stack.setCurrentIndex(
             self._queue_content_index if has_items else self._queue_empty_index
         )
@@ -1132,28 +1381,78 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.logs_clear_button.setEnabled(has_logs)
 
     def _set_source_feedback(self, text: str, *, tone: str = "neutral") -> None:
+        tone_value = (
+            tone
+            if tone in {"neutral", "loading", "success", "warning", "error", "hidden"}
+            else "neutral"
+        )
+        message = str(text or "").strip()
         self._status_presenter.last_source_feedback_log = self._last_source_feedback_log
         self._status_presenter.set_source_feedback(
             text,
-            tone=tone,
+            tone=tone_value,
             append_log=self._append_log,
         )
         self._last_source_feedback_log = self._status_presenter.last_source_feedback_log
+        self._current_source_feedback_message = message
+        self._current_source_feedback_tone = tone_value
+        self._source_feedback_version += 1
+        self._dismissed_source_feedback_version = None
         self.source_feedback_label.setText(
             str(text or "Paste a video or playlist URL, then analyze it to load formats.")
         )
-        self._set_widget_property(self.source_feedback_label, "tone", str(tone or "neutral"))
+        self._set_widget_property(self.source_feedback_label, "tone", tone_value)
         self._sync_source_feedback_visibility()
 
+    def _can_show_floating_source_feedback_toast(self) -> bool:
+        return self.panel_stack.currentIndex() == self._main_page_index
+
+    def _source_feedback_should_clear_toasts(self, tone: str, message: str) -> bool:
+        return (
+            not bool(message)
+            or tone in {"", "neutral", "hidden"}
+            or not self._can_show_floating_source_feedback_toast()
+        )
+
+    def _source_feedback_uses_toast(self, tone: str, message: str) -> bool:
+        return (
+            bool(message)
+            and tone not in {"", "neutral", "hidden"}
+            and self._can_show_floating_source_feedback_toast()
+            and self._dismissed_source_feedback_version != self._source_feedback_version
+        )
+
     def _sync_source_feedback_visibility(self) -> None:
-        tone = str(self.source_feedback_label.property("tone") or "neutral")
-        message = self.source_feedback_label.text().strip()
-        show_source_feedback = tone not in {"", "neutral", "hidden"} and bool(message)
-        visibility_changed = self.source_feedback_label.isVisible() != show_source_feedback
-        self.source_feedback_label.setVisible(show_source_feedback)
-        self._hide_source_feedback_toast(animated=False)
+        tone = self._current_source_feedback_tone
+        message = self._current_source_feedback_message
+        visibility_changed = self.source_feedback_label.isVisible()
+        self.source_feedback_label.hide()
+        if self._source_feedback_should_clear_toasts(tone, message):
+            self._last_toasted_source_feedback_version = None
+            self._hide_source_feedback_toast(animated=False)
+        elif (
+            self._source_feedback_uses_toast(tone, message)
+            and self._last_toasted_source_feedback_version != self._source_feedback_version
+        ):
+            self._show_source_feedback_toast(message, tone=tone)
+            self._last_toasted_source_feedback_version = self._source_feedback_version
+        elif self._source_feedback_toasts:
+            self._layout_source_feedback_toast()
         if visibility_changed:
             self._refresh_downloads_page_geometry()
+
+    def _dismiss_source_feedback_toast(
+        self,
+        toast: _SourceFeedbackToastEntry | bool | None = None,
+    ) -> None:
+        entry = toast if isinstance(toast, _SourceFeedbackToastEntry) else None
+        if entry is None:
+            if not self._source_feedback_toasts:
+                return
+            entry = self._source_feedback_toasts[0]
+        if self._source_feedback_toasts and entry is self._source_feedback_toasts[0]:
+            self._dismissed_source_feedback_version = self._source_feedback_version
+        self._remove_source_feedback_toast(entry, animated=True)
 
     def _set_metrics_visible(self, visible: bool) -> None:
         self.metrics_card.setVisible(True)
@@ -1227,22 +1526,141 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return f"{name} folder"
         return "Output folder"
 
+    def _sync_output_form_row_heights(
+        self,
+        control_height: int | None = None,
+        *,
+        expand_visible_quality_row: bool = False,
+    ) -> None:
+        if control_height is None:
+            control_height = max(
+                0,
+                self.container_combo.minimumHeight(),
+                self.codec_combo.minimumHeight(),
+                self.format_combo.minimumHeight(),
+            )
+        quality_row = None
+        if len(getattr(self, "_output_form_rows", [])) >= 3:
+            quality_row = self._output_form_rows[2]
+        for row in getattr(self, "_output_form_rows", []):
+            layout = row.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
+            target_height = max(control_height, row.minimumSizeHint().height())
+            if expand_visible_quality_row and row is quality_row:
+                target_height = max(target_height, row.sizeHint().height())
+            row.setMinimumHeight(
+                target_height
+            )
+            row.updateGeometry()
+
+    def _sync_output_card_heights(self) -> None:
+        if (
+            self.format_card is self.save_card
+            or self.output_layout.indexOf(self.format_card) < 0
+            or self.output_layout.indexOf(self.save_card) < 0
+        ):
+            return
+        cards = tuple(
+            card
+            for card in (self.format_card, self.save_card)
+            if card is not None
+        )
+        if len(cards) < 2:
+            return
+
+        for card in cards:
+            card.setMinimumHeight(0)
+            card.setMaximumHeight(16777215)
+            layout = card.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
+
+        target_height = max(
+            max(card.minimumSizeHint().height(), card.sizeHint().height())
+            for card in cards
+        )
+        output_parent = self.output_layout.parentWidget()
+        available_height = (
+            output_parent.contentsRect().height() if output_parent is not None else 0
+        )
+        required_height = (
+            target_height * len(cards)
+        ) + (self.output_layout.spacing() * (len(cards) - 1))
+        if available_height < required_height:
+            return
+        for card in cards:
+            card.setMinimumHeight(target_height)
+            card.setMaximumHeight(target_height)
+            card.updateGeometry()
+
+    def _sync_run_section_split_widths(self) -> None:
+        if self._output_layout_mode == "stacked":
+            self.run_actions_card.setMinimumWidth(0)
+            self.run_actions_card.setMaximumWidth(16777215)
+            self.run_activity_card.setMinimumWidth(0)
+            self.run_activity_card.setMaximumWidth(16777215)
+            return
+
+        target_width = self.output_section.width()
+        if target_width <= 0:
+            return
+        self.run_actions_card.setMinimumWidth(target_width)
+        self.run_actions_card.setMaximumWidth(target_width)
+        self.run_activity_card.setMinimumWidth(0)
+        self.run_activity_card.setMaximumWidth(16777215)
+        self.run_actions_card.updateGeometry()
+        self.run_activity_card.updateGeometry()
+
     def _refresh_downloads_page_geometry(self) -> None:
+        self.workspace_layout.invalidate()
+        self.workspace_layout.activate()
+        self.output_layout.invalidate()
+        self.output_layout.activate()
+        refreshed_widgets: list[QWidget] = []
         for widget in (
             self.source_preview_card.parentWidget(),
+            self.format_card,
+            self.save_card,
             self.output_section,
             self.ready_summary_label.parentWidget(),
             self.main_page,
         ):
-            if widget is not None:
-                widget.updateGeometry()
-                layout = widget.layout()
-                if layout is not None:
-                    layout.activate()
+            if widget is None or widget in refreshed_widgets:
+                continue
+            refreshed_widgets.append(widget)
+            widget.updateGeometry()
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
         main_layout = self.main_page.layout()
         if main_layout is not None:
+            main_layout.invalidate()
+            main_layout.activate()
+        self._sync_output_card_heights()
+        if main_layout is not None:
+            main_layout.invalidate()
+            main_layout.activate()
+        self._sync_run_section_split_widths()
+        if main_layout is not None:
+            main_layout.invalidate()
             main_layout.activate()
         self._sync_current_panel_geometry()
+
+    def _queue_deferred_resize_sync(self) -> None:
+        self._resize_sync_timer.start(0)
+
+    def _run_deferred_resize_sync(self) -> None:
+        self._refresh_downloads_page_geometry()
+        self._layout_mixed_url_overlay()
+        self._layout_source_feedback_toast()
+        self._refresh_current_item_text()
+        self._refresh_download_result_view()
+        if self._latest_output_path is not None:
+            self._refresh_last_output_text()
 
     def _sync_current_panel_geometry(self) -> None:
         current = self.panel_stack.currentWidget()
@@ -1265,6 +1683,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         visibility_changed = self.ready_summary_label.isVisible() != show_summary
         self.ready_summary_label.setVisible(show_summary)
         if not show_summary:
+            self._refresh_queue_preview_card()
             if visibility_changed:
                 self._refresh_downloads_page_geometry()
             return
@@ -1276,34 +1695,33 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.ready_summary_label.setText(
             f"{container_text} • {codec_text} • {quality_text} • {folder_text}"
         )
+        self._refresh_queue_preview_card()
         if visibility_changed:
             self._refresh_downloads_page_geometry()
 
     def _workspace_view_index(self, name: str) -> int:
         mapping = {
-            "current": self._current_view_index,
             "queue": self._queue_view_index,
             "history": self._history_view_index,
         }
-        return mapping.get(name, self._current_view_index)
+        return mapping.get(name, self._queue_view_index)
 
     def _select_workspace_view(self, name: str) -> None:
-        target = name if name in {"current", "queue", "history"} else "current"
+        target = name if name in {"queue", "history"} else "queue"
         self._active_workspace_name = target
         self.source_view_stack.setCurrentIndex(self._workspace_view_index(target))
-        self.current_view_button.setChecked(target == "current")
         self.queue_view_button.setChecked(target == "queue")
         self.history_view_button.setChecked(target == "history")
         if self._active_panel_name is None:
-            self.downloads_button.setChecked(target == "current")
+            self.downloads_button.setChecked(True)
             self.queue_button.setChecked(target == "queue")
             self.history_button.setChecked(target == "history")
             self.settings_button.setChecked(False)
             self.logs_button.setChecked(False)
         self._refresh_top_action_icons()
 
-    def _show_main_workspace(self, name: str = "current") -> None:
-        target = name if name in {"current", "queue", "history"} else "current"
+    def _show_main_workspace(self, name: str = "queue") -> None:
+        target = name if name in {"queue", "history"} else "queue"
         window_size = self.size()
         if self.panel_stack.currentIndex() != self._main_page_index:
             self.panel_stack.setCurrentIndex(self._main_page_index)
@@ -1368,6 +1786,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        self._normalize_control_sizing()
+        self._apply_responsive_layout()
         self._stabilize_source_preview_card_sizing()
         self._refresh_downloads_page_geometry()
         self._apply_window_icon()
@@ -1449,11 +1869,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ("history", self.history_button),
             ("logs", self.logs_button),
         ):
-            if self._active_panel_name in {"settings", "logs"}:
+            if self._active_panel_name is not None:
                 is_checked = self._active_panel_name == name
             else:
                 is_checked = {
-                    "downloads": self._active_workspace_name == "current",
+                    "downloads": True,
                     "queue": self._active_workspace_name == "queue",
                     "history": self._active_workspace_name == "history",
                     "settings": False,
@@ -1485,6 +1905,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ],
             extra_px=12,
         )
+        sync_selection = getattr(self.classic_actions, "sync_selection", None)
+        if callable(sync_selection):
+            sync_selection()
 
     def _configure_top_action_icons(self) -> None:
         self._top_action_icons = {
@@ -1603,6 +2026,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.mixed_url_overlay.raise_()
 
     def _source_feedback_toast_timeout_ms(self, tone: str) -> int:
+        if tone == "loading":
+            return 2800
         if tone == "success":
             return 3400
         if tone == "warning":
@@ -1611,95 +2036,321 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return 5200
         return 0
 
+    def _source_feedback_toast_title(self, tone: str) -> str:
+        if tone == "loading":
+            return "Loading formats"
+        if tone == "success":
+            return "Formats ready"
+        if tone == "warning":
+            return "Check source"
+        if tone == "error":
+            return "Could not load formats"
+        return APP_DISPLAY_NAME
+
+    def _source_feedback_toast_anchor_rect(self) -> QRect:
+        header = getattr(self, "top_actions", None)
+        header_widget = header.parentWidget() if header is not None else None
+        if header_widget is not None:
+            return header_widget.geometry()
+        return self.panel_stack.geometry()
+
+    def _source_feedback_toast_entry(
+        self,
+        parent: QWidget | None = None,
+    ) -> _SourceFeedbackToastEntry:
+        toast_parent = parent or self._source_feedback_toast_parent or self.centralWidget()
+        if toast_parent is None:
+            toast_parent = self
+        source_toast = QFrame(toast_parent)
+        source_toast.setObjectName("sourceToastCard")
+        source_toast.setProperty("tone", "success")
+        source_toast.setMinimumWidth(260)
+        source_toast.setMaximumWidth(340)
+        source_toast_shadow = QGraphicsDropShadowEffect(source_toast)
+        source_toast_shadow.setBlurRadius(28)
+        source_toast_shadow.setOffset(0, 10)
+        source_toast_shadow.setColor(QColor(15, 33, 45, 48))
+        source_toast.setGraphicsEffect(source_toast_shadow)
+        source_toast_layout = QVBoxLayout(source_toast)
+        source_toast_layout.setContentsMargins(16, 12, 16, 14)
+        source_toast_layout.setSpacing(4)
+        source_toast_header = QWidget(source_toast)
+        source_toast_header_layout = QHBoxLayout(source_toast_header)
+        source_toast_header_layout.setContentsMargins(0, 0, 0, 0)
+        source_toast_header_layout.setSpacing(8)
+        source_toast_title = QLabel("Formats ready", source_toast_header)
+        source_toast_title.setObjectName("sourceToastTitle")
+        source_toast_dismiss_button = QPushButton("×", source_toast_header)
+        source_toast_dismiss_button.setObjectName("sourceToastDismissButton")
+        source_toast_dismiss_button.setToolTip("Dismiss notification")
+        source_toast_dismiss_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        source_toast_dismiss_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        source_toast_dismiss_button.setFixedSize(24, 24)
+        source_toast_message = QLabel("", source_toast)
+        source_toast_message.setObjectName("sourceToastMessage")
+        source_toast_message.setWordWrap(True)
+        source_toast_header_layout.addWidget(source_toast_title)
+        source_toast_header_layout.addStretch(1)
+        source_toast_header_layout.addWidget(source_toast_dismiss_button)
+        source_toast_layout.addWidget(source_toast_header)
+        source_toast_layout.addWidget(source_toast_message)
+        source_toast.hide()
+        timer = QTimer(source_toast)
+        timer.setSingleShot(True)
+        entry = _SourceFeedbackToastEntry(
+            card=source_toast,
+            title_label=source_toast_title,
+            message_label=source_toast_message,
+            dismiss_button=source_toast_dismiss_button,
+            timer=timer,
+        )
+        source_toast_dismiss_button.clicked.connect(
+            lambda checked=False, toast=entry: self._dismiss_source_feedback_toast(toast)
+        )
+        timer.timeout.connect(lambda toast=entry: self._dismiss_source_feedback_toast(toast))
+        return entry
+
+    def _sync_source_feedback_toast_refs(self) -> None:
+        entry = self._source_feedback_toasts[0] if self._source_feedback_toasts else self._source_feedback_toast_placeholder
+        if entry is None:
+            return
+        self.source_feedback_toast = entry.card
+        self.source_feedback_toast_title = entry.title_label
+        self.source_feedback_toast_message = entry.message_label
+        self.source_feedback_toast_dismiss_button = entry.dismiss_button
+
+    def _source_feedback_toast_target_rects(
+        self,
+        toasts: list[_SourceFeedbackToastEntry] | None = None,
+    ) -> list[QRect]:
+        toast_items = list(toasts if toasts is not None else self._source_feedback_toasts)
+        if not toast_items:
+            return []
+        anchor_rect = self._source_feedback_toast_anchor_rect()
+        max_width = max(260, min(340, anchor_rect.width() - 36))
+        y = anchor_rect.top() + 18
+        rects: list[QRect] = []
+        for entry in toast_items:
+            entry.card.setMaximumWidth(max_width)
+            layout = entry.card.layout()
+            if layout is not None:
+                layout.activate()
+            entry.card.adjustSize()
+            hint = entry.card.sizeHint()
+            width = max(
+                entry.card.minimumWidth(),
+                min(max_width, hint.width()),
+            )
+            height = hint.height()
+            x = anchor_rect.right() - width - 18
+            rects.append(QRect(x, y, width, height))
+            y += height + 10
+        return rects
+
     def _source_feedback_toast_target_rect(self) -> QRect:
-        panel_rect = self.panel_stack.geometry()
-        max_width = max(300, min(380, panel_rect.width() - 36))
-        self.source_feedback_toast.setMaximumWidth(max_width)
-        layout = self.source_feedback_toast.layout()
-        if layout is not None:
-            layout.activate()
-        self.source_feedback_toast.adjustSize()
-        hint = self.source_feedback_toast.sizeHint()
-        width = min(max_width, hint.width())
-        height = hint.height()
-        x = panel_rect.right() - width - 18
-        y = panel_rect.top() + 18
-        return QRect(x, y, width, height)
+        rects = self._source_feedback_toast_target_rects(self._source_feedback_toasts[:1])
+        return rects[0] if rects else QRect()
 
     def _source_feedback_toast_hidden_rect(self, target: QRect) -> QRect:
-        panel_rect = self.panel_stack.geometry()
+        anchor_rect = self._source_feedback_toast_anchor_rect()
         return QRect(
-            panel_rect.right() + 24,
+            anchor_rect.right() + 24,
             target.y(),
             target.width(),
             target.height(),
         )
 
-    def _layout_source_feedback_toast(self) -> None:
-        if not self.source_feedback_toast.isVisible():
+    def _stop_source_feedback_toast_animation(
+        self,
+        toast: _SourceFeedbackToastEntry,
+    ) -> None:
+        if toast.animation is None:
             return
-        target = self._source_feedback_toast_target_rect()
-        self.source_feedback_toast.setGeometry(target)
+        toast.animation.stop()
+        toast.animation.deleteLater()
+        toast.animation = None
+
+    def _complete_source_feedback_toast_animation(
+        self,
+        toast: _SourceFeedbackToastEntry,
+        animation: QPropertyAnimation,
+    ) -> None:
+        if toast.animation is animation:
+            toast.animation = None
+        animation.deleteLater()
+
+    def _dispose_source_feedback_toast(
+        self,
+        toast: _SourceFeedbackToastEntry,
+    ) -> None:
+        self._stop_source_feedback_toast_animation(toast)
+        if toast.timer is not None:
+            toast.timer.stop()
+            toast.timer.deleteLater()
+        toast.card.hide()
+        if not toast.placeholder:
+            toast.card.deleteLater()
+
+    def _complete_source_feedback_toast_exit(
+        self,
+        toast: _SourceFeedbackToastEntry,
+        animation: QPropertyAnimation,
+    ) -> None:
+        if toast.animation is animation:
+            toast.animation = None
+        animation.deleteLater()
+        self._dispose_source_feedback_toast(toast)
+
+    def _animate_source_feedback_toast(
+        self,
+        toast: _SourceFeedbackToastEntry,
+        *,
+        start_rect: QRect,
+        end_rect: QRect,
+        duration_ms: int,
+        easing_curve: QEasingCurve.Type,
+        delete_after: bool = False,
+    ) -> None:
+        self._stop_source_feedback_toast_animation(toast)
+        if start_rect == end_rect:
+            toast.card.setGeometry(end_rect)
+            if delete_after:
+                self._dispose_source_feedback_toast(toast)
+            return
+        anim = QPropertyAnimation(toast.card, b"geometry", self)
+        anim.setDuration(duration_ms)
+        anim.setStartValue(start_rect)
+        anim.setEndValue(end_rect)
+        anim.setEasingCurve(easing_curve)
+        if delete_after:
+            anim.finished.connect(
+                lambda toast=toast, animation=anim: self._complete_source_feedback_toast_exit(
+                    toast, animation
+                )
+            )
+        else:
+            anim.finished.connect(
+                lambda toast=toast, animation=anim: self._complete_source_feedback_toast_animation(
+                    toast, animation
+                )
+            )
+        toast.animation = anim
+        anim.start()
+
+    def _trim_source_feedback_toasts(self) -> None:
+        while len(self._source_feedback_toasts) > 4:
+            oldest = self._source_feedback_toasts.pop()
+            self._dispose_source_feedback_toast(oldest)
+
+    def _remove_source_feedback_toast(
+        self,
+        toast: _SourceFeedbackToastEntry,
+        *,
+        animated: bool,
+    ) -> None:
+        if toast not in self._source_feedback_toasts:
+            return
+        self._source_feedback_toasts.remove(toast)
+        current_rect = toast.card.geometry()
+        self._sync_source_feedback_toast_refs()
+        self._reflow_source_feedback_toasts(animated=animated)
+        if not animated or not toast.card.isVisible():
+            self._dispose_source_feedback_toast(toast)
+            return
+        self._animate_source_feedback_toast(
+            toast,
+            start_rect=current_rect,
+            end_rect=self._source_feedback_toast_hidden_rect(current_rect),
+            duration_ms=220,
+            easing_curve=QEasingCurve.Type.InCubic,
+            delete_after=True,
+        )
+
+    def _reflow_source_feedback_toasts(self, *, animated: bool) -> None:
+        if not self._source_feedback_toasts:
+            return
+        for toast, target in zip(
+            self._source_feedback_toasts,
+            self._source_feedback_toast_target_rects(),
+        ):
+            current = toast.card.geometry()
+            if not toast.card.isVisible():
+                current = self._source_feedback_toast_hidden_rect(target)
+                toast.card.setGeometry(current)
+                toast.card.show()
+            if animated:
+                self._animate_source_feedback_toast(
+                    toast,
+                    start_rect=current,
+                    end_rect=target,
+                    duration_ms=240,
+                    easing_curve=QEasingCurve.Type.OutCubic,
+                )
+            else:
+                self._stop_source_feedback_toast_animation(toast)
+                toast.card.setGeometry(target)
+        for toast in reversed(self._source_feedback_toasts):
+            toast.card.raise_()
+
+    def _layout_source_feedback_toast(self) -> None:
+        if not self._source_feedback_toasts:
+            return
+        self._reflow_source_feedback_toasts(animated=False)
 
     def _show_source_feedback_toast(self, text: str, *, tone: str) -> None:
         clean = str(text or "").strip()
         if not clean:
             self._hide_source_feedback_toast()
             return
-        self._source_feedback_toast_timer.stop()
-        self.source_feedback_toast_message.setText(clean)
-        self._set_widget_property(self.source_feedback_toast, "tone", str(tone or "success"))
-        target = self._source_feedback_toast_target_rect()
-        hidden = self._source_feedback_toast_hidden_rect(target)
-        current = self.source_feedback_toast.geometry()
-        if not self.source_feedback_toast.isVisible():
-            current = hidden
-        self.source_feedback_toast.setGeometry(current)
-        self.source_feedback_toast.show()
-        self.source_feedback_toast.raise_()
-        self._source_feedback_toast_token += 1
-        token = self._source_feedback_toast_token
-        anim = QPropertyAnimation(self.source_feedback_toast, b"geometry", self)
-        anim.setDuration(280)
-        anim.setStartValue(current)
-        anim.setEndValue(target)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._track_animation(anim)
-        anim.start()
+        toast = self._source_feedback_toast_entry()
+        toast.title_label.setText(self._source_feedback_toast_title(tone))
+        toast.message_label.setText(clean)
+        self._set_widget_property(toast.card, "tone", str(tone or "success"))
+        self._source_feedback_toasts.insert(0, toast)
+        self._trim_source_feedback_toasts()
+        self._sync_source_feedback_toast_refs()
+        targets = self._source_feedback_toast_target_rects()
+        for entry, target in zip(self._source_feedback_toasts, targets):
+            current = entry.card.geometry()
+            if entry is toast or not entry.card.isVisible():
+                current = self._source_feedback_toast_hidden_rect(target)
+            entry.card.setGeometry(current)
+            entry.card.show()
+            self._animate_source_feedback_toast(
+                entry,
+                start_rect=current,
+                end_rect=target,
+                duration_ms=280,
+                easing_curve=QEasingCurve.Type.OutCubic,
+            )
+        for entry in reversed(self._source_feedback_toasts):
+            entry.card.raise_()
         timeout_ms = self._source_feedback_toast_timeout_ms(tone)
-        if timeout_ms > 0:
-            self._source_feedback_toast_timer.start(timeout_ms)
-        else:
-            self._source_feedback_toast_token = token
+        if timeout_ms > 0 and toast.timer is not None:
+            toast.timer.start(timeout_ms)
 
     def _hide_source_feedback_toast(self, *, animated: bool = True) -> None:
-        self._source_feedback_toast_timer.stop()
-        if not self.source_feedback_toast.isVisible():
+        if not self._source_feedback_toasts:
             return
-        target = self._source_feedback_toast_target_rect()
-        hidden = self._source_feedback_toast_hidden_rect(target)
-        if not animated:
-            self.source_feedback_toast.hide()
-            self.source_feedback_toast.setGeometry(hidden)
-            return
-        self._source_feedback_toast_token += 1
-        token = self._source_feedback_toast_token
-        start_rect = self.source_feedback_toast.geometry()
-        anim = QPropertyAnimation(self.source_feedback_toast, b"geometry", self)
-        anim.setDuration(220)
-        anim.setStartValue(start_rect)
-        anim.setEndValue(hidden)
-        anim.setEasingCurve(QEasingCurve.Type.InCubic)
-        anim.finished.connect(
-            lambda token=token: self._complete_source_feedback_toast_hide(token)
-        )
-        self._track_animation(anim)
-        anim.start()
+        toasts = list(self._source_feedback_toasts)
+        self._source_feedback_toasts.clear()
+        self._sync_source_feedback_toast_refs()
+        for toast in toasts:
+            if not animated or not toast.card.isVisible():
+                self._dispose_source_feedback_toast(toast)
+                continue
+            current_rect = toast.card.geometry()
+            self._animate_source_feedback_toast(
+                toast,
+                start_rect=current_rect,
+                end_rect=self._source_feedback_toast_hidden_rect(current_rect),
+                duration_ms=220,
+                easing_curve=QEasingCurve.Type.InCubic,
+                delete_after=True,
+            )
 
-    def _complete_source_feedback_toast_hide(self, token: int) -> None:
-        if token != self._source_feedback_toast_token:
-            return
-        self.source_feedback_toast.hide()
+    def _visible_source_feedback_toasts(self) -> list[_SourceFeedbackToastEntry]:
+        return [toast for toast in self._source_feedback_toasts if toast.card.isVisible()]
 
     def _show_feedback_popup(self, *, title: str, message: str, critical: bool = False) -> None:
         clean_message = str(message or "").strip() or "Something went wrong."
@@ -1925,13 +2576,25 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         return self.format_combo.currentText().strip()
 
     def _sync_format_combo_visibility(self) -> None:
-        show_quality_combo = self.format_combo.count() > 0
-        label_text = "Codec & quality" if show_quality_combo else "Codec"
-        visibility_changed = self.format_combo.isVisible() != show_quality_combo
+        has_quality_options = self.format_combo.count() > 0
+        has_formats_data = bool(self._video_labels or self._audio_labels)
+        if has_quality_options:
+            placeholder_text = "Choose exact format/quality."
+        elif has_formats_data:
+            placeholder_text = "No exact matches for this filter."
+        else:
+            placeholder_text = "Analyze a URL to load quality."
+        self.format_combo.setPlaceholderText(placeholder_text)
+
+        label_text = "Codec & quality"
+        visibility_changed = not self.format_combo.isVisible()
         label_changed = self.codec_label.text() != label_text
-        self.format_combo.setVisible(show_quality_combo)
+        self.format_combo.setVisible(True)
         self.codec_label.setText(label_text)
         if visibility_changed or label_changed:
+            self._sync_output_form_row_heights(
+                expand_visible_quality_row=True
+            )
             self._refresh_downloads_page_geometry()
 
     def _selected_format_info(self) -> dict | None:
@@ -1967,8 +2630,18 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _on_start(self) -> None:
         self._run_queue_controller.on_start()
 
-    def _run_single_download_worker(self, *, request: DownloadRequest) -> None:
-        self._run_queue_controller.run_single_download_worker(request=request)
+    def _run_single_download_worker(
+        self,
+        *,
+        request: DownloadRequest,
+        history_title: str,
+        history_settings: QueueSettings,
+    ) -> None:
+        self._run_queue_controller.run_single_download_worker(
+            request=request,
+            history_title=history_title,
+            history_settings=history_settings,
+        )
 
     def _on_download_done(self, result: str) -> None:
         self._run_queue_controller.on_download_done(result)
@@ -2043,60 +2716,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _queue_clear(self) -> None:
         self._run_queue_controller.on_queue_clear()
 
-    def _summary_badge_for_queue_mode(self, mode: str) -> str:
-        normalized = str(mode or "").strip().lower()
-        if normalized == "audio":
-            return "AUD"
-        if normalized == "video":
-            return "VID"
-        return "URL"
-
-    def _summary_title_from_url(self, url: str) -> str:
-        clean = str(url or "").strip()
-        if not clean:
-            return "Queued item"
-        parsed = urlparse(clean)
-        query = parse_qs(parsed.query)
-        if "v" in query and query["v"]:
-            host = parsed.netloc.replace("www.", "") or "youtube"
-            return f"{host} · {query['v'][0]}"
-        path = parsed.path.strip("/") or parsed.netloc or clean
-        path = re.sub(r"\s+", " ", path)
-        if len(path) > 48:
-            return f"{path[:45].rstrip()}..."
-        return path
-
-    def _queue_summary_title(self, item: QueueItem | dict[str, object]) -> str:
-        settings = item.get("settings") or {}
-        custom_filename = str(settings.get("custom_filename") or "").strip()
-        if custom_filename:
-            return custom_filename
-        item_url = str(item.get("url") or "").strip()
-        current_url = self.url_edit.text().strip()
-        preview_title = self.preview_value.toolTip().strip()
-        if item_url and current_url and item_url == current_url and preview_title:
-            return preview_title
-        format_label = str(settings.get("format_label") or "").strip()
-        if format_label and format_label != "-":
-            return format_label
-        return self._summary_title_from_url(item_url)
-
-    def _queue_summary_meta(
-        self, item: QueueItem | dict[str, object], *, idx: int
-    ) -> str:
-        settings = item.get("settings") or {}
-        mode = str(settings.get("mode") or "").strip().lower()
-        mode_text = "Audio only" if mode == "audio" else "Video & audio"
-        format_label = str(settings.get("format_label") or "").strip()
-        output_dir = str(settings.get("output_dir") or "").strip()
-        folder_name = Path(output_dir).expanduser().name if output_dir else ""
-        parts = [mode_text]
-        if format_label and format_label != "-":
-            parts.append(format_label)
-        if folder_name:
-            parts.append(folder_name)
-        return " · ".join(part for part in parts if part) or f"Queue item {idx}"
-
     def _append_workspace_summary_item(
         self,
         list_widget,
@@ -2125,51 +2744,102 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         list_widget.addItem(item)
         list_widget.setItemWidget(item, widget)
 
+    def _sync_queue_workspace_view(self) -> None:
+        has_source_summary = bool(
+            self._source_summary_data
+            and any(str(value or "").strip() for value in self._source_summary_data.values())
+        )
+        has_source_context = any(
+            (
+                self.url_edit.text().strip(),
+                self._preview_title_raw,
+                self._is_fetching,
+                bool(self._filtered_labels),
+                bool(self._playlist_mode),
+                has_source_summary,
+            )
+        )
+        has_queue_items = bool(self.queue_items)
+        target_index = (
+            self._queue_workspace_preview_index
+            if has_source_context and has_queue_items
+            else self._queue_workspace_summary_index
+        )
+        if self.queue_workspace_stack.currentIndex() != target_index:
+            self.queue_workspace_stack.setCurrentIndex(target_index)
+
     def _refresh_queue_panel(self) -> None:
         self.queue_list.clear()
         self.queue_summary_list.clear()
+        summary_context = queue_presentation.QueueSummaryContext(
+            current_url=self.url_edit.text(),
+            current_preview_title=self._preview_title_raw,
+            current_item_title=self._current_item_title_tooltip,
+            progress_text=self.progress_label.text(),
+            speed_text=self.speed_label.text(),
+            eta_text=self.eta_label.text(),
+        )
         for idx, item in enumerate(self.queue_items, start=1):
-            settings = item.get("settings") or {}
-            mode = settings.get("mode") or "-"
-            container = settings.get("format_filter") or "-"
-            codec = settings.get("codec_filter") or "-"
-            label = settings.get("format_label") or "-"
-            prefix = ""
-            if (
-                self.queue_active
-                and self.queue_index is not None
-                and (idx - 1) == self.queue_index
-            ):
-                prefix = "> "
-            text = f"{prefix}{idx}. {item.get('url', '')} [{mode}/{container}/{codec}] {label}"
-            list_item = QListWidgetItem(text)
-            list_item.setData(QUEUE_SOURCE_INDEX_ROLE, idx - 1)
-            list_item.setToolTip(text)
-            self.queue_list.addItem(list_item)
             is_active = (
                 self.queue_active
                 and self.queue_index is not None
                 and (idx - 1) == self.queue_index
             )
-            summary_title = self._queue_summary_title(item)
-            summary_meta = self._queue_summary_meta(item, idx=idx)
+            text = queue_presentation.build_queue_list_text(
+                item,
+                idx=idx,
+                active=is_active,
+            )
+            list_item = QListWidgetItem(text)
+            list_item.setData(QUEUE_SOURCE_INDEX_ROLE, idx - 1)
+            list_item.setToolTip(text)
+            self.queue_list.addItem(list_item)
+        summary_start = 0
+        if self.queue_active and self.queue_index is not None:
+            summary_start = max(0, min(int(self.queue_index), len(self.queue_items)))
+        for idx, item in enumerate(
+            self.queue_items[summary_start:],
+            start=summary_start + 1,
+        ):
+            is_active = (
+                self.queue_active
+                and self.queue_index is not None
+                and (idx - 1) == self.queue_index
+            )
+            summary = queue_presentation.build_queue_summary_entry(
+                item,
+                idx=idx,
+                active=is_active,
+                context=summary_context,
+            )
             self._append_workspace_summary_item(
                 self.queue_summary_list,
-                badge_text=self._summary_badge_for_queue_mode(str(mode)),
-                title=summary_title,
-                meta=summary_meta,
-                status_text="Downloading" if is_active else "Queued",
+                badge_text=summary.badge_text,
+                title=summary.title,
+                meta=summary.meta,
+                status_text=summary.status_text,
                 progress_percent=(self.progress_bar.value() / 10.0) if is_active else None,
-                tone="active" if is_active else "default",
-                tooltip=text,
+                tone=summary.tone,
+                tooltip=summary.list_text,
             )
         self._refresh_queue_panel_state()
         has_items = self.queue_summary_list.count() > 0
+        self.queue_summary_empty.set_recent_items(
+            self._queue_empty_recent_items() if not has_items else []
+        )
         self.queue_summary_list.setVisible(has_items)
         self.queue_summary_empty.setVisible(not has_items)
+        self._sync_queue_workspace_view()
+        self._refresh_queue_preview_card()
 
-    def _on_record_output(self, output_path_raw: str, source_url: str) -> None:
-        self._record_download_output(Path(output_path_raw), source_url)
+    def _on_record_output(
+        self,
+        output_path_raw: str,
+        source_url: str,
+        metadata: object = None,
+    ) -> None:
+        payload = dict(metadata) if isinstance(metadata, dict) else None
+        self._record_download_output(Path(output_path_raw), source_url, payload)
 
     def _update_controls_state(self) -> None:
         url_present = bool(self.url_edit.text().strip())
@@ -2232,7 +2902,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         super().resizeEvent(event)
         self._normalize_control_sizing()
         self._apply_responsive_layout()
-        self._sync_current_panel_geometry()
+        self._refresh_downloads_page_geometry()
         self._layout_mixed_url_overlay()
         self._layout_source_feedback_toast()
         self._refresh_current_item_text()
@@ -2241,6 +2911,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._refresh_download_result_view()
         if self._latest_output_path is not None:
             self._refresh_last_output_text()
+        self._queue_deferred_resize_sync()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_user_settings()

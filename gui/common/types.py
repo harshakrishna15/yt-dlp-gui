@@ -78,8 +78,12 @@ class HistoryItem(TypedDict, total=False):
     timestamp: str
     path: str
     name: str
+    title: str
+    format_label: str
+    file_size_bytes: int
     source_url: str
     canonical_path: str
+    queue_settings: QueueSettings
 
 
 class ResolvedFormat(TypedDict, total=False):
