@@ -559,6 +559,14 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.output_dir_edit = downloads.output_dir_edit
         self.browse_button = downloads.browse_button
         self.output_folder_label = downloads.output_folder_label
+        self.progress_bar = downloads.progress_bar
+        self.ready_summary_label = downloads.ready_summary_label
+        self.metrics_card = downloads.metrics_card
+        self.metrics_strip = downloads.metrics_strip
+        self.progress_label = downloads.progress_label
+        self.speed_label = downloads.speed_label
+        self.eta_label = downloads.eta_label
+        self.item_label = downloads.item_label
 
         run = downloads.run
         self.run_section = run.section
@@ -570,18 +578,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.session_title_label = run.session_title_label
         self.run_stats_grid = run.stats_grid
         self.status_value = run.status_value
-        self.progress_bar = run.progress_bar
         self.start_button = run.start_button
         self.add_queue_button = run.add_queue_button
         self.start_queue_button = run.start_queue_button
         self.cancel_button = run.cancel_button
-        self.ready_summary_label = run.ready_summary_label
-        self.metrics_card = run.metrics_card
-        self.metrics_strip = run.metrics_strip
-        self.progress_label = run.progress_label
-        self.speed_label = run.speed_label
-        self.eta_label = run.eta_label
-        self.item_label = run.item_label
         self.download_result_card = run.download_result_card
         self.download_result_title = run.download_result_title
         self.download_result_path = run.download_result_path
@@ -693,7 +693,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
     def _set_uniform_button_width(
-        self, buttons: list[QPushButton], *, extra_px: int = 28
+        self,
+        buttons: list[QPushButton],
+        *,
+        extra_px: int = 28,
+        fixed: bool = False,
     ) -> None:
         live = [btn for btn in buttons if btn is not None]
         if not live:
@@ -717,7 +721,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 text_width + icon_width + extra_px,
             )
         for button in live:
-            button.setMinimumWidth(width)
+            if fixed:
+                button.setFixedWidth(width)
+            else:
+                button.setMinimumWidth(width)
 
     def _set_fixed_label_width_for_samples(
         self, label: QLabel, samples: tuple[str, ...], *, extra_px: int = 4
@@ -859,6 +866,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.logs_button,
             ],
             extra_px=18,
+            fixed=True,
         )
         self._set_source_row_button_widths()
         self._source_row_control_height = control_height
@@ -1043,10 +1051,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if stacked_mode:
             self.output_section.setMinimumWidth(0)
             self.output_section.setMaximumWidth(16777215)
+            self.run_actions_card.setMinimumWidth(0)
+            self.run_actions_card.setMaximumWidth(16777215)
         else:
             inspector_width = max(440, min(640, int(width * 0.46)))
-            self.output_section.setMinimumWidth(inspector_width)
-            self.output_section.setMaximumWidth(inspector_width + 40)
+            for widget in (self.output_section, self.run_actions_card):
+                widget.setMinimumWidth(inspector_width)
+                widget.setMaximumWidth(inspector_width)
 
     def _set_output_layout_mode(self, mode: str) -> None:
         stacked_mode = mode == "stacked"
@@ -1604,11 +1615,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.run_activity_card.setMaximumWidth(16777215)
             return
 
-        target_width = self.output_section.width()
-        if target_width <= 0:
-            return
-        self.run_actions_card.setMinimumWidth(target_width)
-        self.run_actions_card.setMaximumWidth(target_width)
+        target_width = max(
+            self.output_section.minimumWidth(),
+            self.output_section.width(),
+        )
+        if target_width > 0:
+            self.run_actions_card.setMinimumWidth(target_width)
+            self.run_actions_card.setMaximumWidth(target_width)
         self.run_activity_card.setMinimumWidth(0)
         self.run_activity_card.setMaximumWidth(16777215)
         self.run_actions_card.updateGeometry()
@@ -1619,6 +1632,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.workspace_layout.activate()
         self.output_layout.invalidate()
         self.output_layout.activate()
+        output_width = max(0, self.output_section.contentsRect().width() - 8)
+        if output_width > 0:
+            self.format_card.setMaximumWidth(output_width)
+            self.format_card.updateGeometry()
         refreshed_widgets: list[QWidget] = []
         for widget in (
             self.source_preview_card.parentWidget(),
@@ -1655,6 +1672,16 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _run_deferred_resize_sync(self) -> None:
         self._refresh_downloads_page_geometry()
+        for widget in (
+            self.main_page,
+            self.output_section,
+            self.format_card,
+            self.save_card,
+            self.run_section,
+        ):
+            layout = widget.layout()
+            if layout is not None:
+                layout.activate()
         self._layout_mixed_url_overlay()
         self._layout_source_feedback_toast()
         self._refresh_current_item_text()
@@ -1904,6 +1931,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.logs_button,
             ],
             extra_px=12,
+            fixed=True,
         )
         sync_selection = getattr(self.classic_actions, "sync_selection", None)
         if callable(sync_selection):
@@ -2762,7 +2790,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         has_queue_items = bool(self.queue_items)
         target_index = (
             self._queue_workspace_preview_index
-            if has_source_context and has_queue_items
+            if has_source_context and not has_queue_items
             else self._queue_workspace_summary_index
         )
         if self.queue_workspace_stack.currentIndex() != target_index:

@@ -6,7 +6,6 @@ from typing import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLayout,
@@ -218,13 +217,25 @@ def build_settings_panel(
     form_intro.setWordWrap(True)
     form_card_layout.addWidget(form_intro)
 
-    form_host = QWidget(form_card)
-    layout = QFormLayout(form_host)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setHorizontalSpacing(18)
-    layout.setVerticalSpacing(12)
+    settings_stack = QWidget(form_card)
+    settings_stack_layout = QVBoxLayout(settings_stack)
+    settings_stack_layout.setContentsMargins(0, 0, 0, 0)
+    settings_stack_layout.setSpacing(12)
 
-    edit_friendly_encoder_combo = _NativeComboBox(form_host)
+    encode_card = QFrame(settings_stack)
+    encode_card.setObjectName("settingsRowCard")
+    encode_card_layout = QVBoxLayout(encode_card)
+    encode_card_layout.setContentsMargins(16, 14, 16, 14)
+    encode_card_layout.setSpacing(8)
+    encode_title = QLabel("Edit-friendly encode", encode_card)
+    encode_title.setObjectName("settingsRowTitle")
+    encode_description = QLabel(
+        "Choose the default encoder strategy for new downloads. Automatic picks the best available option.",
+        encode_card,
+    )
+    encode_description.setObjectName("settingsRowDescription")
+    encode_description.setWordWrap(True)
+    edit_friendly_encoder_combo = _NativeComboBox(encode_card)
     register_native_combo(edit_friendly_encoder_combo)
     edit_friendly_encoder_combo.addItem("Automatic (recommended)", "auto")
     edit_friendly_encoder_combo.addItem("Apple hardware encoder", "apple")
@@ -232,32 +243,80 @@ def build_settings_panel(
     edit_friendly_encoder_combo.addItem("AMD hardware encoder", "amd")
     edit_friendly_encoder_combo.addItem("Intel hardware encoder", "intel")
     edit_friendly_encoder_combo.addItem("CPU software encoder", "cpu")
-    layout.addRow("Edit-friendly encode", edit_friendly_encoder_combo)
+    edit_friendly_encoder_combo.setMinimumWidth(280)
+    edit_friendly_encoder_combo.setMaximumWidth(460)
+    encode_card_layout.addWidget(encode_title)
+    encode_card_layout.addWidget(encode_description)
+    encode_card_layout.addWidget(
+        edit_friendly_encoder_combo, alignment=Qt.AlignmentFlag.AlignLeft
+    )
+    settings_stack_layout.addWidget(encode_card)
 
     open_folder_after_download_check = QCheckBox(
-        "Open output folder after downloads", form_host
+        "Open output folder after downloads", settings_stack
     )
-    layout.addRow("Post-download", open_folder_after_download_check)
+    post_download_card = QFrame(settings_stack)
+    post_download_card.setObjectName("settingsRowCard")
+    post_download_card_layout = QVBoxLayout(post_download_card)
+    post_download_card_layout.setContentsMargins(16, 14, 16, 14)
+    post_download_card_layout.setSpacing(8)
+    post_download_title = QLabel("Post-download", post_download_card)
+    post_download_title.setObjectName("settingsRowTitle")
+    post_download_description = QLabel(
+        "Control what happens after a download finishes.",
+        post_download_card,
+    )
+    post_download_description.setObjectName("settingsRowDescription")
+    post_download_description.setWordWrap(True)
+    post_download_card_layout.addWidget(post_download_title)
+    post_download_card_layout.addWidget(post_download_description)
+    post_download_card_layout.addWidget(open_folder_after_download_check)
+    settings_stack_layout.addWidget(post_download_card)
 
-    app_row = QWidget(form_host)
-    app_row_layout = QHBoxLayout(app_row)
-    app_row_layout.setContentsMargins(0, 0, 0, 0)
-    app_row_layout.setSpacing(10)
-    version_label = QLabel(f"Version {APP_VERSION}", app_row)
+    app_card = QFrame(settings_stack)
+    app_card.setObjectName("settingsAppCard")
+    app_card_layout = QVBoxLayout(app_card)
+    app_card_layout.setContentsMargins(16, 14, 16, 14)
+    app_card_layout.setSpacing(12)
+
+    app_header = QWidget(app_card)
+    app_header_layout = QHBoxLayout(app_header)
+    app_header_layout.setContentsMargins(0, 0, 0, 0)
+    app_header_layout.setSpacing(10)
+    app_title = QLabel("App", app_header)
+    app_title.setObjectName("settingsRowTitle")
+    version_label = QLabel(f"Version {APP_VERSION}", app_header)
     version_label.setObjectName("panelInlineMeta")
-    about_button = QPushButton("About", app_row)
+    app_header_layout.addWidget(app_title)
+    app_header_layout.addStretch(1)
+    app_header_layout.addWidget(version_label)
+
+    app_description = QLabel(
+        "Open app details or export a diagnostics report for troubleshooting.",
+        app_card,
+    )
+    app_description.setObjectName("settingsRowDescription")
+    app_description.setWordWrap(True)
+
+    app_actions = QWidget(app_card)
+    app_actions_layout = QHBoxLayout(app_actions)
+    app_actions_layout.setContentsMargins(0, 0, 0, 0)
+    app_actions_layout.setSpacing(10)
+    about_button = QPushButton("About", app_actions)
     about_button.setObjectName("ghostButton")
     about_button.clicked.connect(on_show_about)
-    export_diagnostics_button = QPushButton("Export diagnostics", app_row)
+    export_diagnostics_button = QPushButton("Export diagnostics", app_actions)
     export_diagnostics_button.setObjectName("ghostButton")
     export_diagnostics_button.clicked.connect(on_export_diagnostics)
-    app_row_layout.addWidget(version_label)
-    app_row_layout.addStretch(1)
-    app_row_layout.addWidget(about_button)
-    app_row_layout.addWidget(export_diagnostics_button)
-    layout.addRow("App", app_row)
+    app_actions_layout.addWidget(about_button)
+    app_actions_layout.addWidget(export_diagnostics_button)
+    app_actions_layout.addStretch(1)
+    app_card_layout.addWidget(app_header)
+    app_card_layout.addWidget(app_description)
+    app_card_layout.addWidget(app_actions)
+    settings_stack_layout.addWidget(app_card)
 
-    form_card_layout.addWidget(form_host)
+    form_card_layout.addWidget(settings_stack)
     shell.body_layout.addWidget(form_card)
     shell.body_layout.addStretch(1)
     return SettingsPanelRefs(

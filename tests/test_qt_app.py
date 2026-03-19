@@ -619,7 +619,7 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(
             self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
+            self.window._queue_workspace_summary_index,
         )
         before_preview_height = self.window.source_preview_card.height()
         before_preview_top = self.window.source_preview_card.mapTo(
@@ -633,7 +633,7 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(
             self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
+            self.window._queue_workspace_summary_index,
         )
         self.assertEqual(self.window.source_preview_card.height(), before_preview_height)
         self.assertEqual(
@@ -644,18 +644,18 @@ class TestQtApp(unittest.TestCase):
             before_preview_top,
         )
         self.assertEqual(self.window.output_section.height(), before_output_height)
-        self.assertTrue(self.window.preview_value.isVisible())
-        self.assertTrue(self.window.source_preview_subtitle.isVisible())
-        self.assertTrue(self.window.source_preview_detail_one.isVisible())
-        self.assertTrue(self.window.source_preview_detail_two.isVisible())
-        self.assertTrue(self.window.source_preview_detail_three.isVisible())
+        self.assertFalse(self.window.preview_value.isVisible())
+        self.assertFalse(self.window.source_preview_subtitle.isVisible())
+        self.assertFalse(self.window.source_preview_detail_one.isVisible())
+        self.assertFalse(self.window.source_preview_detail_two.isVisible())
+        self.assertFalse(self.window.source_preview_detail_three.isVisible())
 
         self.window.video_radio.click()
         QApplication.processEvents()
 
         self.assertEqual(
             self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
+            self.window._queue_workspace_summary_index,
         )
         self.assertEqual(self.window.source_preview_card.height(), before_preview_height)
         self.assertEqual(
@@ -702,7 +702,55 @@ class TestQtApp(unittest.TestCase):
             self.window.video_radio.click()
             QApplication.processEvents()
 
-        self.assertEqual(geometry_refresh_mock.call_count, 0)
+        self.assertEqual(geometry_refresh_mock.call_count, 2)
+
+    def test_queue_workspace_prefers_scrollable_summary_when_items_exist(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats(queue_ready=True)
+
+        self.assertEqual(
+            self.window.queue_workspace_stack.currentIndex(),
+            self.window._queue_workspace_summary_index,
+        )
+        self.assertEqual(self.window.queue_summary_list.count(), 1)
+        self.assertEqual(
+            self.window.queue_summary_list.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+        self.assertEqual(
+            self.window.queue_summary_list.horizontalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+
+    def test_history_workspace_list_is_scrollable(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.window._record_download_output(
+            Path("/tmp/example.mp4"),
+            "https://example.com/watch?v=a",
+            {
+                "title": "Some title",
+                "format_label": "1080p",
+                "queue_settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "format_label": "1080p",
+                },
+            },
+        )
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.history_summary_list.count(), 1)
+        self.assertEqual(
+            self.window.history_summary_list.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+        self.assertEqual(
+            self.window.history_summary_list.horizontalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
 
     def test_workspace_tabs_switch_source_stack_and_toolbar_state(self) -> None:
         self.window.show()
@@ -829,9 +877,8 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(
             self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_summary_index,
+            self.window._queue_workspace_preview_index,
         )
-        self.assertTrue(self.window.queue_summary_empty.isVisible())
         self.assertEqual(self.window.preview_title_label.text(), "Ready to queue")
         self.assertEqual(self.window.preview_value.text(), "Sample")
 
@@ -1835,6 +1882,21 @@ class TestQtApp(unittest.TestCase):
                     ),
                     2,
                     f"Lower-right seam shifts away from the source/output split at {width}x{height}",
+                )
+
+    def test_run_actions_card_tracks_output_width_across_resizes(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for width, height in ((900, 760), (950, 760), (1110, 820), (1220, 820)):
+            with self.subTest(size=f"{width}x{height}"):
+                self.window.resize(width, height)
+                QApplication.processEvents()
+
+                self.assertLessEqual(
+                    abs(self.window.output_section.width() - self.window.run_actions_card.width()),
+                    1,
+                    f"Right column widths diverged at {width}x{height}",
                 )
 
     def test_min_window_downloading_state_has_no_overlap_or_cutoff(self) -> None:

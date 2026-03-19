@@ -572,6 +572,22 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 12px;
             font-weight: 600;
         }
+        QFrame#settingsRowCard, QFrame#settingsAppCard {
+            background: __surface_soft_glass_strong__;
+            border: 1px solid __border_soft__;
+            border-radius: 18px;
+        }
+        QLabel#settingsRowTitle {
+            color: __text_primary__;
+            font-size: 16px;
+            font-weight: 800;
+        }
+        QLabel#settingsRowDescription {
+            color: __text_muted__;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.35em;
+        }
         QLabel#panelEmptyBadge {
             background: __accent_soft__;
             border: none;
@@ -663,6 +679,12 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QFrame#progressCard[state="active"] {
             background: transparent;
+        }
+        QFrame#outputProgressCard {
+            background: __surface_soft_glass_strong__;
+            border: 1px solid __border_soft__;
+            border-radius: 16px;
+            padding: 10px 12px 12px 12px;
         }
         QFrame#runActivityCard, QFrame#runActionCard {
             background: __surface_glass_strong__;
@@ -1062,7 +1084,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             border-radius: 18px;
             font-weight: 700;
+            min-width: 112px;
             padding: 8px 14px;
+            text-align: center;
         }
         QPushButton#topNavButton:hover {
             background: transparent;

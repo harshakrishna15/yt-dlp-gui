@@ -7,6 +7,7 @@ from typing import Callable
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QFormLayout,
     QFrame,
@@ -78,18 +79,10 @@ class RunSectionRefs:
     session_title_label: QLabel
     stats_grid: QWidget
     status_value: QLabel
-    progress_bar: QProgressBar
     start_button: QPushButton
     add_queue_button: QPushButton
     start_queue_button: QPushButton
     cancel_button: QPushButton
-    ready_summary_label: QLabel
-    metrics_card: QFrame
-    metrics_strip: QFrame
-    progress_label: QLabel
-    speed_label: QLabel
-    eta_label: QLabel
-    item_label: QLabel
     download_result_card: QFrame
     download_result_title: QLabel
     download_result_path: QLabel
@@ -165,6 +158,14 @@ class DownloadsViewRefs:
     output_dir_edit: QLineEdit
     browse_button: QPushButton
     output_folder_label: QLabel
+    progress_bar: QProgressBar
+    ready_summary_label: QLabel
+    metrics_card: QFrame
+    metrics_strip: QFrame
+    progress_label: QLabel
+    speed_label: QLabel
+    eta_label: QLabel
+    item_label: QLabel
     run: RunSectionRefs
 
 
@@ -270,6 +271,14 @@ class _OutputSectionRefs:
     output_dir_edit: QLineEdit
     browse_button: QPushButton
     output_folder_label: QLabel
+    progress_bar: QProgressBar
+    ready_summary_label: QLabel
+    metrics_card: QFrame
+    metrics_strip: QFrame
+    progress_label: QLabel
+    speed_label: QLabel
+    eta_label: QLabel
+    item_label: QLabel
 
 
 class TopBarBuilder:
@@ -374,66 +383,6 @@ class RunSectionBuilder:
         stage_hint_label.hide()
         activity_layout.addWidget(stage_hint_label)
         activity_layout.addWidget(status_value)
-
-        progress_bar = QProgressBar(activity_card)
-        progress_bar.setRange(0, 1000)
-        progress_bar.setValue(0)
-        progress_bar.setTextVisible(False)
-        activity_layout.addWidget(progress_bar)
-
-        metrics_card = QFrame(activity_card)
-        metrics_card.setObjectName("progressCard")
-        metrics_card_layout = QHBoxLayout(metrics_card)
-        metrics_card_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_card_layout.setSpacing(16)
-
-        metrics_strip = QFrame(metrics_card)
-        metrics_strip.setObjectName("metricsStrip")
-        metrics_layout = QHBoxLayout(metrics_strip)
-        metrics_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_layout.setSpacing(12)
-        progress_label = QLabel("Progress: -", metrics_strip)
-        progress_label.setObjectName("metricInline")
-        progress_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
-        )
-        speed_label = QLabel("Speed: -", metrics_strip)
-        speed_label.setObjectName("metricInline")
-        speed_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
-        )
-        eta_label = QLabel("ETA: -", metrics_strip)
-        eta_label.setObjectName("metricInline")
-        eta_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
-        )
-        item_label = QLabel("Item: -", metrics_strip)
-        item_label.setObjectName("metricInlineItem")
-        item_label.setMinimumWidth(0)
-        item_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        metrics_layout.addWidget(progress_label)
-        metrics_layout.addWidget(speed_label)
-        metrics_layout.addWidget(eta_label)
-        metrics_layout.addWidget(item_label, stretch=1)
-        metrics_card_layout.addWidget(metrics_strip, stretch=1)
-
-        ready_summary_label = QLabel("", metrics_card)
-        ready_summary_label.setObjectName("readySummaryLine")
-        ready_summary_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        ready_summary_label.setMaximumWidth(240)
-        ready_summary_label.setToolTip(
-            "Current output summary based on selected format and save folder."
-        )
-        metrics_card_layout.addWidget(
-            ready_summary_label,
-            alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-        )
-        activity_layout.addWidget(metrics_card)
-
         session_title_label = QLabel("SESSION", activity_card)
         session_title_label.setObjectName("runSectionLabel")
         activity_layout.addWidget(session_title_label)
@@ -579,18 +528,10 @@ class RunSectionBuilder:
             session_title_label=session_title_label,
             stats_grid=stats_grid,
             status_value=status_value,
-            progress_bar=progress_bar,
             start_button=start_button,
             add_queue_button=add_queue_button,
             start_queue_button=start_queue_button,
             cancel_button=cancel_button,
-            ready_summary_label=ready_summary_label,
-            metrics_card=metrics_card,
-            metrics_strip=metrics_strip,
-            progress_label=progress_label,
-            speed_label=speed_label,
-            eta_label=eta_label,
-            item_label=item_label,
             download_result_card=download_result_card,
             download_result_title=download_result_title,
             download_result_path=download_result_path,
@@ -787,6 +728,14 @@ class DownloadsViewBuilder:
             output_dir_edit=output.output_dir_edit,
             browse_button=output.browse_button,
             output_folder_label=output.output_folder_label,
+            progress_bar=output.progress_bar,
+            ready_summary_label=output.ready_summary_label,
+            metrics_card=output.metrics_card,
+            metrics_strip=output.metrics_strip,
+            progress_label=output.progress_label,
+            speed_label=output.speed_label,
+            eta_label=output.eta_label,
+            item_label=output.item_label,
             run=run,
         )
 
@@ -894,8 +843,8 @@ class DownloadsViewBuilder:
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         source_preview_layout = QHBoxLayout(source_preview_card)
-        source_preview_layout.setContentsMargins(12, 10, 12, 10)
-        source_preview_layout.setSpacing(12)
+        source_preview_layout.setContentsMargins(7, 10, 7, 10)
+        source_preview_layout.setSpacing(10)
 
         source_preview_badge = QLabel("URL", source_preview_card)
         source_preview_badge.setObjectName("sourcePreviewBadge")
@@ -1036,6 +985,16 @@ class DownloadsViewBuilder:
         queue_summary_list = QListWidget(queue_summary_page)
         queue_summary_list.setObjectName("workspaceList")
         queue_summary_list.setSpacing(10)
+        queue_summary_list.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
+        queue_summary_list.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        queue_summary_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        queue_summary_list.setWrapping(False)
         queue_summary_list.setVisible(False)
         queue_summary_page_layout.addWidget(queue_summary_empty, stretch=1)
         queue_summary_page_layout.addWidget(queue_summary_list, stretch=1)
@@ -1058,6 +1017,16 @@ class DownloadsViewBuilder:
         history_summary_list = QListWidget(history_page)
         history_summary_list.setObjectName("workspaceList")
         history_summary_list.setSpacing(10)
+        history_summary_list.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
+        history_summary_list.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        history_summary_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        history_summary_list.setWrapping(False)
         history_page_layout.addWidget(history_summary_empty)
         history_page_layout.addWidget(history_summary_list, stretch=1)
         history_view_index = source_view_stack.addWidget(history_page)
@@ -1122,17 +1091,18 @@ class DownloadsViewBuilder:
         output_shell_layout.addWidget(output_content, stretch=1)
         output_layout = QVBoxLayout(output_content)
         output_layout.setContentsMargins(0, 0, 0, 0)
-        output_layout.setSpacing(8)
+        output_layout.setSpacing(10)
 
         format_card = QGroupBox("", output_section)
         format_card.setObjectName("formatSection")
+        format_card.setMinimumWidth(0)
         format_card.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         format_layout = QVBoxLayout(format_card)
         format_layout.setContentsMargins(14, 14, 14, 14)
         format_layout.setSpacing(10)
-        format_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        format_layout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         format_layout.addWidget(
             _build_section_header(format_card, "OUTPUT", compact=True)
         )
@@ -1249,13 +1219,14 @@ class DownloadsViewBuilder:
         format_layout.addSpacing(4)
         save_card = QWidget(format_card)
         save_card.setObjectName("saveSection")
+        save_card.setMinimumWidth(0)
         save_card.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         save_layout = QVBoxLayout(save_card)
         save_layout.setContentsMargins(0, 2, 0, 0)
         save_layout.setSpacing(8)
-        save_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        save_layout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         filename_edit = QLineEdit(save_card)
         filename_edit.setPlaceholderText("Optional...")
         file_name_label = QLabel("File name", save_card)
@@ -1302,7 +1273,72 @@ class DownloadsViewBuilder:
         )
 
         format_layout.addWidget(save_card)
+        progress_bar = QProgressBar(output_content)
+        progress_bar.setRange(0, 1000)
+        progress_bar.setValue(0)
+        progress_bar.setTextVisible(False)
+
+        metrics_card = QFrame(output_content)
+        metrics_card.setObjectName("progressCard")
+        metrics_card_layout = QHBoxLayout(metrics_card)
+        metrics_card_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_card_layout.setSpacing(16)
+
+        metrics_strip = QFrame(metrics_card)
+        metrics_strip.setObjectName("metricsStrip")
+        metrics_layout = QHBoxLayout(metrics_strip)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_layout.setSpacing(12)
+        progress_label = QLabel("Progress: -", metrics_strip)
+        progress_label.setObjectName("metricInline")
+        progress_label.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
+        )
+        speed_label = QLabel("Speed: -", metrics_strip)
+        speed_label.setObjectName("metricInline")
+        speed_label.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
+        )
+        eta_label = QLabel("ETA: -", metrics_strip)
+        eta_label.setObjectName("metricInline")
+        eta_label.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
+        )
+        item_label = QLabel("Item: -", metrics_strip)
+        item_label.setObjectName("metricInlineItem")
+        item_label.setMinimumWidth(0)
+        item_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        metrics_layout.addWidget(progress_label)
+        metrics_layout.addWidget(speed_label)
+        metrics_layout.addWidget(eta_label)
+        metrics_layout.addWidget(item_label, stretch=1)
+        metrics_card_layout.addWidget(metrics_strip, stretch=1)
+
+        ready_summary_label = QLabel("", metrics_card)
+        ready_summary_label.setObjectName("readySummaryLine")
+        ready_summary_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        ready_summary_label.setMaximumWidth(240)
+        ready_summary_label.setToolTip(
+            "Current output summary based on selected format and save folder."
+        )
+        metrics_card_layout.addWidget(
+            ready_summary_label,
+            alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        progress_footer = QFrame(output_content)
+        progress_footer.setObjectName("outputProgressCard")
+        progress_footer_layout = QVBoxLayout(progress_footer)
+        progress_footer_layout.setContentsMargins(0, 0, 0, 0)
+        progress_footer_layout.setSpacing(8)
+        progress_footer_layout.addWidget(progress_bar)
+        progress_footer_layout.addWidget(metrics_card)
         output_layout.addWidget(format_card)
+        output_layout.addWidget(progress_footer)
         output_layout.addStretch(1)
         return _OutputSectionRefs(
             section=output_section,
@@ -1332,6 +1368,14 @@ class DownloadsViewBuilder:
             output_dir_edit=output_dir_edit,
             browse_button=browse_button,
             output_folder_label=output_folder_label,
+            progress_bar=progress_bar,
+            ready_summary_label=ready_summary_label,
+            metrics_card=metrics_card,
+            metrics_strip=metrics_strip,
+            progress_label=progress_label,
+            speed_label=speed_label,
+            eta_label=eta_label,
+            item_label=item_label,
         )
 
 
