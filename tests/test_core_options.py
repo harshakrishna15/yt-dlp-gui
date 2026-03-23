@@ -28,6 +28,33 @@ class TestCoreOptions(unittest.TestCase):
         self.assertEqual(options.sanitize_custom_filename("  foo/bar.mp4 "), "foo bar")
         self.assertEqual(options.sanitize_custom_filename(".."), "")
 
+    def test_parse_and_coerce_subtitle_languages(self) -> None:
+        self.assertEqual(
+            options.parse_subtitle_languages(" en,ES, en , fr "),
+            ["en", "es", "fr"],
+        )
+        self.assertEqual(
+            options.coerce_subtitle_languages(["EN", " en ", "", "es"]),
+            ["en", "es"],
+        )
+        self.assertEqual(
+            options.coerce_subtitle_languages("de, DE ,it"),
+            ["de", "it"],
+        )
+
+    def test_normalize_edit_friendly_encoder_preference_aliases(self) -> None:
+        self.assertEqual(options.normalize_edit_friendly_encoder_preference("nvenc"), "nvidia")
+        self.assertEqual(
+            options.normalize_edit_friendly_encoder_preference("videotoolbox"),
+            "apple",
+        )
+        self.assertEqual(options.normalize_edit_friendly_encoder_preference("qsv"), "intel")
+        self.assertEqual(options.normalize_edit_friendly_encoder_preference("x264"), "cpu")
+        self.assertEqual(
+            options.normalize_edit_friendly_encoder_preference("unknown"),
+            "auto",
+        )
+
     def test_build_download_options_uses_supported_defaults(self) -> None:
         result = options.build_download_options(
             custom_filename_raw=" my:file.mp4 ",

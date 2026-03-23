@@ -47,6 +47,11 @@ class QueuePanelRefs:
 
 
 @dataclass(frozen=True)
+class SessionPanelRefs:
+    panel: QWidget
+
+
+@dataclass(frozen=True)
 class HistoryPanelRefs:
     panel: QWidget
     history_stack: QStackedWidget
@@ -107,11 +112,12 @@ def _build_panel_shell(
     header_layout.setSpacing(3)
     title_label = QLabel(title, header)
     title_label.setObjectName("panelHeaderTitle")
-    subtitle_label = QLabel(subtitle, header)
-    subtitle_label.setObjectName("panelHeaderSubtitle")
-    subtitle_label.setWordWrap(True)
     header_layout.addWidget(title_label)
-    header_layout.addWidget(subtitle_label)
+    if subtitle.strip():
+        subtitle_label = QLabel(subtitle, header)
+        subtitle_label.setObjectName("panelHeaderSubtitle")
+        subtitle_label.setWordWrap(True)
+        header_layout.addWidget(subtitle_label)
 
     body = QWidget(card)
     body_layout = QVBoxLayout(body)
@@ -200,7 +206,7 @@ def build_settings_panel(
     shell = _build_panel_shell(
         parent=parent,
         title="Preferences",
-        subtitle="Performance, post-download behavior, and app diagnostics.",
+        subtitle="",
     )
 
     form_card = QFrame(shell.panel)
@@ -208,14 +214,6 @@ def build_settings_panel(
     form_card_layout = QVBoxLayout(form_card)
     form_card_layout.setContentsMargins(16, 16, 16, 16)
     form_card_layout.setSpacing(12)
-
-    form_intro = QLabel(
-        "These defaults apply to new downloads until you change them in the main workflow.",
-        form_card,
-    )
-    form_intro.setObjectName("panelFormIntro")
-    form_intro.setWordWrap(True)
-    form_card_layout.addWidget(form_intro)
 
     settings_stack = QWidget(form_card)
     settings_stack_layout = QVBoxLayout(settings_stack)
@@ -229,12 +227,6 @@ def build_settings_panel(
     encode_card_layout.setSpacing(8)
     encode_title = QLabel("Edit-friendly encode", encode_card)
     encode_title.setObjectName("settingsRowTitle")
-    encode_description = QLabel(
-        "Choose the default encoder strategy for new downloads. Automatic picks the best available option.",
-        encode_card,
-    )
-    encode_description.setObjectName("settingsRowDescription")
-    encode_description.setWordWrap(True)
     edit_friendly_encoder_combo = _NativeComboBox(encode_card)
     register_native_combo(edit_friendly_encoder_combo)
     edit_friendly_encoder_combo.addItem("Automatic (recommended)", "auto")
@@ -246,7 +238,6 @@ def build_settings_panel(
     edit_friendly_encoder_combo.setMinimumWidth(280)
     edit_friendly_encoder_combo.setMaximumWidth(460)
     encode_card_layout.addWidget(encode_title)
-    encode_card_layout.addWidget(encode_description)
     encode_card_layout.addWidget(
         edit_friendly_encoder_combo, alignment=Qt.AlignmentFlag.AlignLeft
     )
@@ -262,14 +253,7 @@ def build_settings_panel(
     post_download_card_layout.setSpacing(8)
     post_download_title = QLabel("Post-download", post_download_card)
     post_download_title.setObjectName("settingsRowTitle")
-    post_download_description = QLabel(
-        "Control what happens after a download finishes.",
-        post_download_card,
-    )
-    post_download_description.setObjectName("settingsRowDescription")
-    post_download_description.setWordWrap(True)
     post_download_card_layout.addWidget(post_download_title)
-    post_download_card_layout.addWidget(post_download_description)
     post_download_card_layout.addWidget(open_folder_after_download_check)
     settings_stack_layout.addWidget(post_download_card)
 
@@ -291,13 +275,6 @@ def build_settings_panel(
     app_header_layout.addStretch(1)
     app_header_layout.addWidget(version_label)
 
-    app_description = QLabel(
-        "Open app details or export a diagnostics report for troubleshooting.",
-        app_card,
-    )
-    app_description.setObjectName("settingsRowDescription")
-    app_description.setWordWrap(True)
-
     app_actions = QWidget(app_card)
     app_actions_layout = QHBoxLayout(app_actions)
     app_actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -312,7 +289,6 @@ def build_settings_panel(
     app_actions_layout.addWidget(export_diagnostics_button)
     app_actions_layout.addStretch(1)
     app_card_layout.addWidget(app_header)
-    app_card_layout.addWidget(app_description)
     app_card_layout.addWidget(app_actions)
     settings_stack_layout.addWidget(app_card)
 
@@ -390,6 +366,21 @@ def build_queue_panel(
     )
 
 
+def build_session_panel(
+    *,
+    parent: QWidget,
+    session_card: QWidget,
+) -> SessionPanelRefs:
+    shell = _build_panel_shell(
+        parent=parent,
+        title="Session",
+        subtitle="Track current run totals and the latest completed download.",
+    )
+    shell.body_layout.addWidget(session_card)
+    shell.body_layout.addStretch(1)
+    return SessionPanelRefs(panel=shell.panel)
+
+
 def build_history_panel(
     *,
     parent: QWidget,
@@ -461,7 +452,7 @@ def build_logs_panel(
     shell = _build_panel_shell(
         parent=parent,
         title="Activity log",
-        subtitle="Inspect activity, format fetches, and the latest errors without leaving the app.",
+        subtitle="",
     )
 
     logs_stack = QStackedWidget(shell.panel)
@@ -469,8 +460,8 @@ def build_logs_panel(
         logs_stack,
         badge="LOGS",
         title="Nothing logged yet",
-        description="Analyze a URL or start a download to populate the activity log.",
-        hint="Fetches, status updates, and the latest errors will appear in this panel.",
+        description="",
+        hint="",
     )
     logs_empty_index = logs_stack.addWidget(empty.page)
 

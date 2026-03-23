@@ -1100,7 +1100,8 @@ def _progress_hook_factory(
                             pct_val = (elapsed_s / total_time_s) * 100.0
                 if pct_val is not None:
                     pct_val = max(0.0, min(100.0, float(pct_val)))
-                speed_bps = status.get("speed")
+                speed_bps = _as_non_negative_float(status.get("speed"))
+                downloaded_bytes = _as_non_negative_float(downloaded)
                 playlist_eta = ""
                 if playlist_count and display_index and eta_s is not None:
                     remaining_after_current = max(
@@ -1132,8 +1133,14 @@ def _progress_hook_factory(
                         "status": "downloading",
                         "percent": pct_val,
                         "speed": _format_speed(speed_bps),
+                        "speed_bps": speed_bps,
                         "eta": _format_eta(eta_s),
                         "playlist_eta": playlist_eta,
+                        "downloaded_bytes": (
+                            int(downloaded_bytes)
+                            if downloaded_bytes is not None
+                            else None
+                        ),
                     }
                 )
         elif status.get("status") == "finished":

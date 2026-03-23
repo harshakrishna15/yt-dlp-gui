@@ -71,14 +71,10 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
         }
         QWidget#topBarShell {
-            background: __surface_glass_strong__;
-            border: 1px solid __border_soft__;
-            border-radius: 24px;
-            padding: 0px;
-        }
-        QWidget#topBarBrand {
             background: transparent;
+            border: none;
             border-radius: 0px;
+            padding: 0px;
         }
         QScrollBar:vertical {
             background: transparent;
@@ -116,17 +112,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QMessageBox QPushButton {
             min-width: 96px;
-        }
-        #titleLabel {
-            font-family: "Arial Rounded MT Bold", "Avenir Next";
-            font-size: 28px;
-            font-weight: 800;
-            color: __text_primary__;
-        }
-        #subtleLabel {
-            color: __text_muted__;
-            font-size: 11px;
-            font-weight: 600;
         }
         QLabel#sectionFormLabel {
             color: __text_label__;
@@ -210,12 +195,12 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             padding: 0px;
         }
-        QGroupBox#outputSection {
+        QWidget#outputSection {
             margin-top: 0px;
             padding: 0px;
-            background: __surface_glass_strong__;
-            border: 1px solid __border_soft__;
-            border-radius: 20px;
+            background: transparent;
+            border: none;
+            border-radius: 0px;
         }
         QGroupBox#runSection {
             margin-top: 0px;
@@ -223,11 +208,13 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: transparent;
             border: none;
         }
-        QGroupBox#outputSection[stage="staged"] {
-            background: __surface_glass_strong__;
+        QWidget#outputSection[stage="staged"] {
+            background: transparent;
+            border: none;
         }
-        QGroupBox#outputSection[stage="loading"] {
-            background: __surface_glass_strong__;
+        QWidget#outputSection[stage="loading"] {
+            background: transparent;
+            border: none;
         }
         QGroupBox#formatSection {
             margin-top: 0px;
@@ -245,7 +232,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             border-radius: 0px;
         }
-        QGroupBox#outputSection[stage="ready"] QGroupBox#formatSection {
+        QWidget#outputSection[stage="ready"] QGroupBox#formatSection {
             background: __surface__;
         }
         QGroupBox#formatSection[stage="staged"] {
@@ -259,35 +246,31 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             border-radius: 0px;
         }
-        QWidget#commandBar QLineEdit {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface__,
-                stop: 1 __surface__
-            );
+        QWidget#commandBar QFrame#urlInputShell {
+            background: transparent;
+            border: none;
+            border-radius: 0px;
+        }
+        QWidget#commandBar QFrame#urlInputShell[state="hover"] {
+            background: transparent;
+            border: none;
+        }
+        QWidget#commandBar QFrame#urlInputShell[state="focus"] {
+            background: transparent;
+            border: none;
+        }
+        QWidget#commandBar QLineEdit#urlInputField {
+            background: __surface__;
             border: 1px solid __border_soft__;
-            border-radius: __input_radius__;
-            padding: 9px 16px;
+            border-radius: 18px;
+            padding: 10px 16px;
             color: __field_text__;
             font-size: 16px;
             selection-background-color: __accent_wash_strong__;
             selection-color: __text_primary__;
         }
-        QWidget#commandBar QLineEdit:hover {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_hover__,
-                stop: 1 __surface__
-            );
-            border: 1px solid __border_hover__;
-        }
-        QWidget#commandBar QLineEdit:focus {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_focus__,
-                stop: 1 __surface__
-            );
-            border: 1px solid __accent_border__;
+        QWidget#commandBar QLineEdit#urlInputField:disabled {
+            color: __field_disabled_text__;
         }
         QWidget#commandBar QPushButton {
             background: __surface__;
@@ -296,7 +279,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-family: "Arial Rounded MT Bold", "Avenir Next";
             font-size: 14px;
             font-weight: 700;
-            padding: 8px 14px;
+            padding: 10px 16px;
         }
         QWidget#commandBar QPushButton:hover {
             background: __surface__;
@@ -311,6 +294,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __text_inverse__;
             border: 1px solid __accent__;
             font-weight: 700;
+            padding: 10px 16px;
+            min-height: 0px;
+            border-radius: 18px;
         }
         QWidget#commandBar QPushButton#analyzeUrlButton:hover {
             background: __accent_hover__;
@@ -673,23 +659,28 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             padding: 0px;
         }
         QFrame#progressCard {
-            background: transparent;
-            border: none;
-            border-radius: 0px;
-        }
-        QFrame#progressCard[state="active"] {
-            background: transparent;
-        }
-        QFrame#outputProgressCard {
             background: __surface_soft_glass_strong__;
             border: 1px solid __border_soft__;
             border-radius: 16px;
-            padding: 10px 12px 12px 12px;
         }
-        QFrame#runActivityCard, QFrame#runActionCard {
+        QFrame#progressCard[state="active"] {
+            border: 1px solid __accent_border__;
+        }
+        QGroupBox#runSection[embedded="true"] {
+            background: transparent;
+            border: none;
+            margin: 0px;
+            padding: 0px;
+        }
+        QFrame#runActivityCard {
             background: __surface_glass_strong__;
             border: 1px solid __border_soft__;
             border-radius: 24px;
+        }
+        QFrame#runActionCard {
+            background: transparent;
+            border: none;
+            border-radius: 0px;
         }
         QFrame#sessionMetricCard {
             background: __surface__;
@@ -793,14 +784,14 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __field_text__;
         }
         QLineEdit, QComboBox {
-            padding: 7px 14px;
+            padding: 10px 16px;
         }
         QPlainTextEdit, QListWidget {
             padding: 8px 12px;
         }
         QComboBox {
-            padding: 6px 14px;
-            padding-right: 42px;
+            padding: 9px 16px;
+            padding-right: 46px;
             selection-background-color: __surface_selected_strong__;
             selection-color: __field_text__;
             font-weight: 600;
@@ -832,6 +823,15 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             );
         }
         QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QComboBox:focus {
+            border: 1px solid __accent_border__;
+            background: qlineargradient(
+                x1: 0, y1: 0, x2: 0, y2: 1,
+                stop: 0 __field_surface_focus__,
+                stop: 1 __surface__
+            );
+        }
+        QWidget#commandBar QLineEdit#urlInputField:hover,
+        QWidget#commandBar QLineEdit#urlInputField:focus {
             border: 1px solid __accent_border__;
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
@@ -1112,13 +1112,13 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-family: "Arial Rounded MT Bold", "Avenir Next";
             font-size: 15px;
             font-weight: 700;
-            padding: 10px 18px;
-            min-height: 42px;
+            padding: 12px 20px;
+            min-height: 46px;
         }
         QPushButton#primaryActionButton[compact="true"] {
             font-size: 14px;
-            padding: 7px 14px;
-            min-height: 36px;
+            padding: 9px 16px;
+            min-height: 40px;
         }
         QPushButton#primaryActionButton:hover,
         QPushButton#analyzeUrlButton:hover {
@@ -1187,36 +1187,49 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __text_secondary__;
             font-size: 15px;
             font-weight: 700;
-            min-height: 40px;
+            min-height: 44px;
+            padding: 10px 18px;
         }
         QPushButton#secondaryActionButton[compact="true"] {
             font-size: 14px;
-            padding: 6px 14px;
-            min-height: 34px;
+            padding: 8px 16px;
+            min-height: 38px;
         }
         QPushButton#secondaryActionButton:hover {
             background: __surface_selected__;
         }
         QPushButton#dangerActionButton {
             background: transparent;
-            border: 1px solid __error_border__;
-            color: __error_text__;
+            border: 1px solid __border_soft__;
+            border-radius: 12px;
+            color: __text_secondary__;
             font-size: 15px;
             font-weight: 700;
-            min-height: 40px;
+            min-height: 44px;
+            padding: 10px 18px;
         }
         QPushButton#dangerActionButton[compact="true"] {
             font-size: 14px;
-            padding: 6px 14px;
-            min-height: 34px;
+            padding: 8px 16px;
+            min-height: 38px;
         }
         QPushButton#dangerActionButton:hover {
-            background: rgba(159, 75, 67, 28);
-            border: 1px solid __error_border__;
-            color: __error_text__;
+            background: __surface_glass_strong__;
+            border: 1px solid __border_hover__;
+            color: __button_hover_text__;
+        }
+        QPushButton#dangerActionButton:pressed {
+            background: __surface_selected__;
+            border: 1px solid __border_hover__;
+            color: __button_hover_text__;
+        }
+        QPushButton#dangerActionButton:disabled {
+            background: transparent;
+            color: __button_disabled_text__;
+            border: 1px solid __field_disabled_border__;
         }
         QPushButton#compactButton {
-            padding: 4px 12px;
+            padding: 8px 14px;
         }
         QCheckBox {
             color: __button_text__;
@@ -1246,7 +1259,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 15px;
             font-weight: 700;
             spacing: 0px;
-            padding: 8px 14px;
+            padding: 12px 18px;
         }
         QRadioButton#contentModeButton::indicator {
             width: 0px;

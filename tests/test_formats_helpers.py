@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from _yt_dlp_stub import ensure_yt_dlp_stub
@@ -124,6 +125,16 @@ class TestFormatHelpers(unittest.TestCase):
         ]
         self.assertEqual(helpers.extract_audio_languages(formats), ["en", "es"])
 
+    def test_sort_formats_prefers_video_mp4_avc_then_other_formats(self) -> None:
+        formats = [
+            {"format_id": "a1", "vcodec": "none", "ext": "webm", "abr": 160},
+            {"format_id": "v3", "vcodec": "vp9", "ext": "webm", "height": 1080},
+            {"format_id": "v2", "vcodec": "av01", "ext": "mp4", "height": 1080},
+            {"format_id": "v1", "vcodec": "avc1.640028", "ext": "mp4", "height": 720},
+        ]
+        ordered = helpers.sort_formats(formats)
+        self.assertEqual([fmt["format_id"] for fmt in ordered], ["v1", "v2", "v3", "a1"])
+
 
 class TestTooling(unittest.TestCase):
     @patch("gui.common.tooling.shutil.which")
@@ -142,6 +153,43 @@ class TestTooling(unittest.TestCase):
 
         mock_resolve_binary.side_effect = _fake
         self.assertEqual(tooling.missing_required_binaries(), ["ffmpeg"])
+
+
+class TestToolchainDetection(unittest.TestCase):
+    @patch("gui.common.yt_dlp_helpers.resolve_binary")
+    @patch("gui.common.yt_dlp_helpers._import_yt_dlp")
+    def test_detect_toolchain_reports_versions_and_paths(
+        self,
+        mock_import_yt_dlp,
+        mock_resolve_binary,
+    ) -> None:
+        class _FakeVersion:
+            __version__ = "2026.1.29"
+
+        class _FakeYtDlpModule:
+            version = _FakeVersion()
+
+        mock_import_yt_dlp.return_value = _FakeYtDlpModule
+
+        def _resolve(tool: str):
+            if tool == "yt-dlp":
+                return (Path("/usr/local/bin/yt-dlp"), "system")
+            if tool == "ffmpeg":
+                return (Path("/usr/local/bin/ffmpeg"), "system")
+            if tool == "ffprobe":
+                return (None, "missing")
+            return (None, "missing")
+
+        mock_resolve_binary.side_effect = _resolve
+        detected = helpers.detect_toolchain()
+
+        self.assertEqual(detected["yt_dlp_module_version"], "2026.1.29")
+        self.assertEqual(detected["yt_dlp_binary_source"], "system")
+        self.assertEqual(detected["yt_dlp_binary_path"], "/usr/local/bin/yt-dlp")
+        self.assertEqual(detected["ffmpeg_source"], "system")
+        self.assertEqual(detected["ffmpeg_path"], "/usr/local/bin/ffmpeg")
+        self.assertEqual(detected["ffprobe_source"], "missing")
+        self.assertEqual(detected["ffprobe_path"], "not found")
 
 
 if __name__ == "__main__":

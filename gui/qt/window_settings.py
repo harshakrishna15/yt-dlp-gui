@@ -35,6 +35,13 @@ class WindowSettingsMixin:
         self.about_button = refs.about_button
         return refs.panel
 
+    def _build_session_panel(self: "QtYtDlpGui") -> QWidget:
+        refs = qt_panels.build_session_panel(
+            parent=self,
+            session_card=self.run_activity_card,
+        )
+        return refs.panel
+
     def _build_queue_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_queue_panel(
             parent=self,

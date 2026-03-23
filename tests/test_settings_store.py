@@ -8,6 +8,26 @@ from gui.common import settings_store
 
 
 class TestSettingsStore(unittest.TestCase):
+    def test_user_settings_path_uses_override_then_default(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "YT_DLP_GUI_SETTINGS_PATH": "~/custom/settings.json",
+                "HOME": "/Users/tester",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                settings_store.user_settings_path(),
+                Path("/Users/tester/custom/settings.json"),
+            )
+        with patch("gui.common.settings_store.Path.home", return_value=Path("/Users/tester")):
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(
+                    settings_store.user_settings_path(),
+                    Path("/Users/tester/.yt-dlp-gui/settings.json"),
+                )
+
     def test_load_settings_returns_defaults_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             settings_path = Path(tmpdir) / "settings.json"
@@ -61,6 +81,25 @@ class TestSettingsStore(unittest.TestCase):
         self.assertEqual(loaded["output_dir"], "/tmp/default")
         self.assertEqual(loaded["edit_friendly_encoder"], "nvidia")
         self.assertTrue(loaded["open_folder_after_download"])
+
+    def test_save_settings_returns_false_on_write_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "settings.json"
+            with patch.dict(
+                os.environ, {"YT_DLP_GUI_SETTINGS_PATH": str(settings_path)}
+            ), patch(
+                "pathlib.Path.write_text",
+                side_effect=OSError("write failed"),
+            ):
+                ok = settings_store.save_settings(
+                    {
+                        "output_dir": "/tmp/downloads",
+                        "edit_friendly_encoder": "auto",
+                        "open_folder_after_download": False,
+                    },
+                    default_output_dir="/tmp/default",
+                )
+        self.assertFalse(ok)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QFontMetrics
 
-from ..common import yt_dlp_helpers as helpers
+from ..common import download, yt_dlp_helpers as helpers
 from ..core import error_feedback as core_error_feedback
 from ..core import queue_presentation
 from ..services import app_service
@@ -21,6 +21,133 @@ if TYPE_CHECKING:
 
 
 class WindowFeedbackMixin:
+    def _format_session_speed_bps(
+        self: "QtYtDlpGui", speed_bps: float | None
+    ) -> str:
+        if speed_bps is None or speed_bps <= 0:
+            return "-"
+        units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
+        value = float(speed_bps)
+        unit_idx = 0
+        while value >= 1024.0 and unit_idx < len(units) - 1:
+            value /= 1024.0
+            unit_idx += 1
+        if unit_idx == 0:
+            return f"{value:.0f} {units[unit_idx]}"
+        return f"{value:.2f} {units[unit_idx]}"
+
+    def _format_session_success_rate(
+        self: "QtYtDlpGui", completed: int, failed: int
+    ) -> str:
+        processed = max(0, int(completed)) + max(0, int(failed))
+        if processed <= 0:
+            return "-"
+        return f"{(max(0, int(completed)) / processed) * 100.0:.0f}%"
+
+    def _refresh_session_metrics(
+        self: "QtYtDlpGui", *, now_ts: float | None = None
+    ) -> None:
+        completed = max(0, int(self._session_completed_items))
+        failed = max(0, int(self._session_failed_items))
+        avg_speed_bps = (
+            self._session_speed_sample_total_bps / self._session_speed_sample_count
+            if self._session_speed_sample_count > 0
+            else None
+        )
+        peak_speed_bps = (
+            self._session_peak_speed_bps if self._session_peak_speed_bps > 0 else None
+        )
+        elapsed_text = "-"
+        if self._session_started_ts is not None:
+            current_ts = (
+                float(now_ts)
+                if now_ts is not None
+                else float(self._effects.clock.now_ts())
+            )
+            elapsed_text = download.format_duration(
+                max(0.0, current_ts - float(self._session_started_ts))
+            )
+        remaining = 0
+        if self._session_total_items > 0 and self._is_downloading:
+            remaining = max(0, int(self._session_total_items) - completed - failed)
+        label_values = (
+            (self.session_completed_value, str(completed)),
+            (self.session_failed_value, str(failed)),
+            (
+                self.session_success_rate_value,
+                self._format_session_success_rate(completed, failed),
+            ),
+            (self.session_remaining_value, str(remaining)),
+            (self.session_speed_value, self._format_session_speed_bps(avg_speed_bps)),
+            (
+                self.session_peak_speed_value,
+                self._format_session_speed_bps(peak_speed_bps),
+            ),
+            (
+                self.session_downloaded_value,
+                helpers.humanize_bytes(self._session_downloaded_bytes) or "0 B",
+            ),
+            (self.session_elapsed_value, elapsed_text),
+        )
+        for label, value in label_values:
+            label.setText(value)
+            label.updateGeometry()
+        self.run_stats_grid.updateGeometry()
+
+    def _reset_session_metrics(
+        self: "QtYtDlpGui",
+        *,
+        total_items: int,
+        started_ts: float | None = None,
+    ) -> None:
+        self._session_started_ts = float(started_ts) if started_ts is not None else None
+        self._session_total_items = max(0, int(total_items))
+        self._session_completed_items = 0
+        self._session_failed_items = 0
+        self._session_downloaded_bytes = 0
+        self._session_speed_sample_total_bps = 0.0
+        self._session_speed_sample_count = 0
+        self._session_peak_speed_bps = 0.0
+        self._session_progress_item_key = ""
+        self._session_current_item_downloaded_bytes = 0
+        self._refresh_session_metrics(now_ts=started_ts)
+
+    def _set_session_counts(
+        self: "QtYtDlpGui", *, completed: int, failed: int
+    ) -> None:
+        self._session_completed_items = max(0, int(completed))
+        self._session_failed_items = max(0, int(failed))
+        self._refresh_session_metrics()
+
+    def _record_session_speed_sample(
+        self: "QtYtDlpGui", speed_bps: float
+    ) -> None:
+        if speed_bps <= 0:
+            return
+        self._session_speed_sample_total_bps += float(speed_bps)
+        self._session_speed_sample_count += 1
+        self._session_peak_speed_bps = max(
+            float(self._session_peak_speed_bps),
+            float(speed_bps),
+        )
+
+    def _record_session_downloaded_bytes(
+        self: "QtYtDlpGui", downloaded_bytes: int
+    ) -> None:
+        if downloaded_bytes <= 0:
+            return
+        self._session_current_item_downloaded_bytes = max(
+            int(self._session_current_item_downloaded_bytes),
+            int(downloaded_bytes),
+        )
+
+    def _finalize_session_downloaded_bytes(self: "QtYtDlpGui") -> None:
+        if self._session_current_item_downloaded_bytes > 0:
+            self._session_downloaded_bytes += int(
+                self._session_current_item_downloaded_bytes
+            )
+        self._session_current_item_downloaded_bytes = 0
+
     def _set_metric_label_text(self: "QtYtDlpGui", label, text: str) -> None:
         label.setText(text)
         label.updateGeometry()
@@ -286,6 +413,7 @@ class WindowFeedbackMixin:
             widget.setText(text)
             widget.setVisible(bool(text))
 
+        self.source_preview_card.hide()
         self._sync_queue_workspace_view()
         detail_visibility_after = tuple(widget.isVisible() for widget in detail_widgets)
         needs_geometry_refresh = any(
@@ -515,7 +643,6 @@ class WindowFeedbackMixin:
         self._set_metric_label_text(self.speed_label, "Speed: -")
         self._set_metric_label_text(self.eta_label, "ETA: -")
         self._set_current_item_display(progress="-", title="-")
-        self.session_speed_value.setText("0 KB/s")
         self._set_metrics_visible(False)
 
     def _on_progress_update(self: "QtYtDlpGui", payload: object) -> None:
@@ -526,8 +653,10 @@ class WindowFeedbackMixin:
             self._set_metrics_visible(True)
             percent = payload.get("percent")
             speed = payload.get("speed")
+            speed_bps = payload.get("speed_bps")
             eta = payload.get("eta")
             playlist_eta = str(payload.get("playlist_eta") or "").strip()
+            downloaded_bytes = payload.get("downloaded_bytes")
             if isinstance(percent, (int, float)):
                 self._animate_progress_bar_to(float(percent))
                 self._set_metric_label_text(
@@ -535,7 +664,10 @@ class WindowFeedbackMixin:
                 )
             if isinstance(speed, str):
                 self._set_metric_label_text(self.speed_label, f"Speed: {speed or '-'}")
-                self.session_speed_value.setText(speed or "0 KB/s")
+            if isinstance(speed_bps, (int, float)) and float(speed_bps) > 0:
+                self._record_session_speed_sample(float(speed_bps))
+            if isinstance(downloaded_bytes, (int, float)) and int(downloaded_bytes) > 0:
+                self._record_session_downloaded_bytes(int(downloaded_bytes))
             eta_text = str(eta).strip() if isinstance(eta, str) else ""
             if playlist_eta:
                 self._set_metric_label_text(
@@ -545,15 +677,23 @@ class WindowFeedbackMixin:
                 self._set_metric_label_text(self.eta_label, f"ETA: {eta_text}")
             else:
                 self._set_metric_label_text(self.eta_label, "ETA: -")
+            self._refresh_session_metrics()
         elif status == "item":
             if not self._show_progress_item:
                 return
             item = str(payload.get("item") or "").strip()
             if item:
+                if item != self._session_progress_item_key:
+                    self._session_progress_item_key = item
+                    self._session_current_item_downloaded_bytes = 0
                 self._set_current_item_from_text(item)
         elif status == "finished":
+            self._finalize_session_downloaded_bytes()
             self._set_metric_label_text(self.eta_label, "ETA: Finalizing")
+            self._refresh_session_metrics()
         elif status == "cancelled":
+            self._session_current_item_downloaded_bytes = 0
             self._reset_progress_summary()
+            self._refresh_session_metrics()
         if self.queue_active:
             self._refresh_queue_panel()

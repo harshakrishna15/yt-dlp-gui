@@ -4,6 +4,31 @@ from gui.core import queue_presentation
 
 
 class TestQueuePresentation(unittest.TestCase):
+    def test_normalize_source_summary_coerces_all_fields_to_clean_strings(self) -> None:
+        normalized = queue_presentation.normalize_source_summary(
+            {
+                "badge_text": " vid ",
+                "eyebrow_text": None,
+                "subtitle_text": "  Creator  ",
+                "detail_one_text": 123,
+                "detail_two_text": "  ",
+                "detail_three_text": 456,
+            }
+        )
+
+        self.assertEqual(
+            normalized,
+            {
+                "badge_text": "vid",
+                "eyebrow_text": "",
+                "subtitle_text": "Creator",
+                "detail_one_text": "123",
+                "detail_two_text": "",
+                "detail_three_text": "456",
+            },
+        )
+        self.assertIsNone(queue_presentation.normalize_source_summary(None))
+
     def test_queue_preview_defaults(self) -> None:
         model = queue_presentation.build_queue_preview_model(
             queue_presentation.QueuePreviewInputs(
@@ -140,6 +165,30 @@ class TestQueuePresentation(unittest.TestCase):
         )
 
         self.assertEqual(entry.title, "youtube.com · abc123")
+        self.assertEqual(entry.meta, "Video & audio")
+
+    def test_metric_value_uses_prefix_and_fallback(self) -> None:
+        self.assertEqual(
+            queue_presentation.metric_value("Progress: 25%", "Progress:"),
+            "25%",
+        )
+        self.assertEqual(
+            queue_presentation.metric_value("Progress: -", "Progress:", fallback="n/a"),
+            "n/a",
+        )
+        self.assertEqual(
+            queue_presentation.metric_value("Speed: 1 MiB/s", "Progress:", fallback=""),
+            "",
+        )
+
+    def test_queue_summary_entry_fallbacks_for_missing_data(self) -> None:
+        entry = queue_presentation.build_queue_summary_entry(
+            {"url": "", "settings": {"mode": "other"}},
+            idx=3,
+            active=False,
+        )
+        self.assertEqual(entry.badge_text, "URL")
+        self.assertEqual(entry.title, "Queued item")
         self.assertEqual(entry.meta, "Video & audio")
 
 

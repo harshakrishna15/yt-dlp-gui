@@ -7,6 +7,8 @@ REQUIRED_ASSET_FILENAMES = (
     "combo-down-arrow.svg",
     "downloads.svg",
     "downloads-active.svg",
+    "session.svg",
+    "session-active.svg",
     "settings.svg",
     "settings-active.svg",
     "queue.svg",

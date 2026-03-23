@@ -30,9 +30,11 @@ class ProgressUpdate(TypedDict, total=False):
     status: str
     percent: float | None
     speed: str
+    speed_bps: float | None
     eta: str
     playlist_eta: str
     item: str
+    downloaded_bytes: int | None
 
 
 class DownloadOptions(TypedDict):

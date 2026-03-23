@@ -322,6 +322,9 @@ class RunQueueController:
         s = self.state
         if s.is_downloading:
             return
+        if s.queue_items:
+            self.start_queue_download()
+            return
         url = w.url_edit.text().strip()
         issue = core_workflow.single_start_issue(
             url=url,
@@ -344,6 +347,7 @@ class RunQueueController:
             return
 
         options = w._snapshot_download_options()
+        started_ts = self._ports.clock.now_ts()
         s.run_state = RunState.SINGLE
         s.is_downloading = True
         s.cancel_requested = False
@@ -351,8 +355,7 @@ class RunQueueController:
         s.show_progress_item = True
         w._clear_logs()
         w._reset_progress_summary()
-        _set_window_label_text(w, "session_completed_value", "0")
-        _set_window_label_text(w, "session_failed_value", "0")
+        w._reset_session_metrics(total_items=1, started_ts=started_ts)
         w._clear_last_output_path()
         w._set_metrics_visible(True)
         w._set_status("Downloading...")
@@ -424,8 +427,7 @@ class RunQueueController:
         s.show_progress_item = False
         w._reset_progress_summary()
         if result == download.DOWNLOAD_SUCCESS:
-            _set_window_label_text(w, "session_completed_value", "1")
-            _set_window_label_text(w, "session_failed_value", "0")
+            w._set_session_counts(completed=1, failed=0)
             w._set_status("Download complete")
             w._set_source_feedback(
                 "Download complete. You can paste another URL anytime.",
@@ -433,8 +435,7 @@ class RunQueueController:
             )
             w._maybe_open_output_folder()
         elif result == download.DOWNLOAD_CANCELLED:
-            _set_window_label_text(w, "session_completed_value", "0")
-            _set_window_label_text(w, "session_failed_value", "0")
+            w._set_session_counts(completed=0, failed=0)
             w._set_status("Cancelled")
             w._set_source_feedback(
                 "Download cancelled. Update settings or URL and try again.",
@@ -442,8 +443,7 @@ class RunQueueController:
             )
             w._clear_last_output_path()
         else:
-            _set_window_label_text(w, "session_completed_value", "0")
-            _set_window_label_text(w, "session_failed_value", "1")
+            w._set_session_counts(completed=0, failed=1)
             failure = core_error_feedback.download_failed_feedback(w._last_error_log)
             w._set_status(failure.status)
             w._set_source_feedback(
@@ -627,8 +627,10 @@ class RunQueueController:
         s.cancel_event = self._ports.cancel_events.new_event()
         w._clear_logs()
         w._reset_progress_summary()
-        _set_window_label_text(w, "session_completed_value", "0")
-        _set_window_label_text(w, "session_failed_value", "0")
+        w._reset_session_metrics(
+            total_items=len(s.queue_items),
+            started_ts=s.queue_started_ts,
+        )
         w._clear_last_output_path()
         w._set_metrics_visible(True)
         w._set_status("Downloading queue...")
@@ -749,11 +751,9 @@ class RunQueueController:
         s.queue_failed_items = progress.failed_items
         s.cancel_requested = progress.cancel_requested
         processed_items = int(s.queue_index) + 1
-        _set_window_label_text(w, "session_failed_value", str(progress.failed_items))
-        _set_window_label_text(
-            w,
-            "session_completed_value",
-            str(max(0, processed_items - progress.failed_items)),
+        w._set_session_counts(
+            completed=max(0, processed_items - progress.failed_items),
+            failed=progress.failed_items,
         )
         if progress.should_finish:
             if progress.finish_cancelled:
@@ -786,19 +786,15 @@ class RunQueueController:
         s.cancel_requested = False
         s.cancel_event = None
         if cancelled:
-            _set_window_label_text(
-                w,
-                "session_completed_value",
-                str(max(0, queue_length - failed_items - 1)),
+            w._set_session_counts(
+                completed=max(0, queue_length - failed_items - 1),
+                failed=failed_items,
             )
-            _set_window_label_text(w, "session_failed_value", str(failed_items))
         else:
-            _set_window_label_text(
-                w,
-                "session_completed_value",
-                str(max(0, queue_length - failed_items)),
+            w._set_session_counts(
+                completed=max(0, queue_length - failed_items),
+                failed=failed_items,
             )
-            _set_window_label_text(w, "session_failed_value", str(failed_items))
 
         outcome = core_workflow.queue_finish_outcome(
             cancelled=cancelled,

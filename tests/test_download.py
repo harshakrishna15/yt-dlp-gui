@@ -131,6 +131,41 @@ class TestBuildYdlOptions(unittest.TestCase):
             download.YDL_MAX_CONCURRENT_FRAGMENTS,
         )
 
+        opts_floor = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            concurrent_fragments=0,
+        )
+        self.assertEqual(opts_floor["concurrent_fragment_downloads"], 1)
+
+        opts_invalid = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            concurrent_fragments="invalid",  # type: ignore[arg-type]
+        )
+        self.assertEqual(
+            opts_invalid["concurrent_fragment_downloads"],
+            download.YDL_MAX_CONCURRENT_FRAGMENTS,
+        )
+
     @patch("gui.common.download.resolve_binary")
     def test_build_opts_playlist_items_sets_filters(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
@@ -290,6 +325,41 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertTrue(opts["writethumbnail"])
         self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertNotIn({"key": "FFmpegEmbedSubtitle"}, opts["postprocessors"])
+
+    @patch("gui.common.download.resolve_binary")
+    def test_build_opts_ignores_auto_or_any_audio_language(self, mock_resolve_binary) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts_auto = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            audio_language="auto",
+        )
+        self.assertNotIn("format_sort", opts_auto)
+
+        opts_any = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+            audio_language="any",
+        )
+        self.assertNotIn("format_sort", opts_any)
 
 
 class TestEditFriendlyMp4Postprocess(unittest.TestCase):
@@ -777,6 +847,27 @@ class TestEditFriendlyEncoderSelection(unittest.TestCase):
             log=logs.append,
         )
         self.assertEqual(selected, "libx264")
+
+
+class TestEncoderProbe(unittest.TestCase):
+    @patch("gui.common.download.subprocess.run", side_effect=OSError("boom"))
+    def test_available_h264_video_encoders_falls_back_on_subprocess_error(
+        self, _mock_run
+    ) -> None:
+        encoders = download._available_h264_video_encoders(Path("/usr/bin/ffmpeg"))
+        self.assertEqual(encoders, {"libx264"})
+
+    @patch("gui.common.download.subprocess.run")
+    def test_available_h264_video_encoders_falls_back_on_nonzero_exit(
+        self, mock_run
+    ) -> None:
+        mock_run.return_value = type(
+            "_Result",
+            (),
+            {"returncode": 1, "stdout": "", "stderr": "error"},
+        )()
+        encoders = download._available_h264_video_encoders(Path("/usr/bin/ffmpeg"))
+        self.assertEqual(encoders, {"libx264"})
 
 
 class TestUtilityFormatting(unittest.TestCase):

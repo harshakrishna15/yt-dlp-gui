@@ -123,6 +123,15 @@ class FakeWindow:
         self._playlist_mode = False
         self._filtered_lookup: dict[str, dict] = {}
         self._last_error_log = ""
+        self.session_completed_value = FakeStatusValue("0")
+        self.session_failed_value = FakeStatusValue("0")
+        self.session_success_rate_value = FakeStatusValue("-")
+        self.session_remaining_value = FakeStatusValue("0")
+        self.session_speed_value = FakeStatusValue("-")
+        self.session_peak_speed_value = FakeStatusValue("-")
+        self.session_downloaded_value = FakeStatusValue("0 B")
+        self.session_elapsed_value = FakeStatusValue("-")
+        self._session_total_items = 0
 
         self.status_updates: list[str] = []
         self.feedback_updates: list[tuple[str, str]] = []
@@ -187,6 +196,38 @@ class FakeWindow:
 
     def _reset_progress_summary(self) -> None:
         self.progress_resets += 1
+
+    def _reset_session_metrics(
+        self, *, total_items: int, started_ts: float | None = None
+    ) -> None:
+        self._session_total_items = max(0, int(total_items))
+        self.session_completed_value.setText("0")
+        self.session_failed_value.setText("0")
+        self.session_success_rate_value.setText("-")
+        self.session_remaining_value.setText(
+            str(self._session_total_items if self._is_downloading else 0)
+        )
+        self.session_speed_value.setText("-")
+        self.session_peak_speed_value.setText("-")
+        self.session_downloaded_value.setText("0 B")
+        self.session_elapsed_value.setText("0:00" if started_ts is not None else "-")
+
+    def _set_session_counts(self, *, completed: int, failed: int) -> None:
+        completed_i = max(0, int(completed))
+        failed_i = max(0, int(failed))
+        processed = completed_i + failed_i
+        self.session_completed_value.setText(str(completed_i))
+        self.session_failed_value.setText(str(failed_i))
+        if processed > 0:
+            self.session_success_rate_value.setText(
+                f"{(completed_i / processed) * 100.0:.0f}%"
+            )
+        else:
+            self.session_success_rate_value.setText("-")
+        remaining = (
+            max(0, self._session_total_items - processed) if self._is_downloading else 0
+        )
+        self.session_remaining_value.setText(str(remaining))
 
     def _clear_last_output_path(self) -> None:
         return
@@ -460,6 +501,67 @@ class TestSourceController(unittest.TestCase):
         ):
             controller.fetch_formats_worker(1, "https://example.com/watch?v=abc")
 
+    def test_on_formats_loaded_ignores_stale_request_id(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc")
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        state = SourceState(
+            active_fetch_request_id=9,
+            is_fetching=True,
+            video_labels=["old-video"],
+            video_lookup={"old-video": {"id": "v-old"}},
+            audio_labels=["old-audio"],
+            audio_lookup={"old-audio": {"id": "a-old"}},
+        )
+        controller = SourceController(window, state=state, ports=ports)
+
+        controller.on_formats_loaded(
+            request_id=8,
+            url="https://example.com/watch?v=abc",
+            payload={
+                "collections": {
+                    "video_labels": ["new-video"],
+                    "video_lookup": {"new-video": {"id": "v-new"}},
+                    "audio_labels": ["new-audio"],
+                    "audio_lookup": {"new-audio": {"id": "a-new"}},
+                },
+                "preview_title": "New title",
+            },
+            error=False,
+            is_playlist=False,
+        )
+
+        self.assertTrue(state.is_fetching)
+        self.assertEqual(state.video_labels, ["old-video"])
+        self.assertEqual(state.audio_labels, ["old-audio"])
+        self.assertEqual(window.preview_title, "")
+
+    def test_on_formats_loaded_deduplicates_error_popup_by_reason(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc")
+        window._last_error_log = "HTTP Error 403: Forbidden"
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        state = SourceState(active_fetch_request_id=3, is_fetching=True)
+        controller = SourceController(window, state=state, ports=ports)
+
+        controller.on_formats_loaded(
+            request_id=3,
+            url="https://example.com/watch?v=abc",
+            payload={},
+            error=True,
+            is_playlist=False,
+        )
+        controller.on_formats_loaded(
+            request_id=3,
+            url="https://example.com/watch?v=abc",
+            payload={},
+            error=True,
+            is_playlist=False,
+        )
+
+        self.assertEqual(len(window.popups), 1)
+        self.assertTrue(state.last_formats_error_popup_key.startswith("https://example.com/watch?v=abc|"))
+
 
 class TestRunQueueController(unittest.TestCase):
     def test_on_start_sets_single_run_state_and_submits_worker(self) -> None:
@@ -552,6 +654,40 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(kwargs["index"], 1)
         self.assertEqual(kwargs["total"], 1)
 
+    def test_on_start_prefers_queue_when_queue_items_exist(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("")
+        state = RunQueueState(
+            queue_items=[
+                {
+                    "url": "https://example.com/watch?v=queued",
+                    "settings": {
+                        "mode": "audio",
+                        "format_filter": "mp3",
+                        "format_label": "High",
+                    },
+                },
+            ]
+        )
+        executor = FakeExecutor()
+        ports, dialogs, _filesystem, clock = build_ports(executor=executor)
+        clock._now_ts = 77.0
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.on_start()
+
+        self.assertEqual(dialogs.critical_calls, [])
+        self.assertTrue(state.queue_active)
+        self.assertEqual(state.queue_index, 0)
+        self.assertEqual(window.status_value.text(), "Downloading queue...")
+        self.assertEqual(len(executor.calls), 1)
+        target, args, kwargs = executor.calls[0]
+        self.assertEqual(target, controller.run_queue_download_worker)
+        self.assertEqual(args, ())
+        self.assertEqual(kwargs["url"], "https://example.com/watch?v=queued")
+        self.assertEqual(kwargs["index"], 1)
+        self.assertEqual(kwargs["total"], 1)
+
     def test_queue_mutation_handlers_update_state_without_qt(self) -> None:
         window = FakeWindow()
         state = RunQueueState(
@@ -613,6 +749,105 @@ class TestRunQueueController(unittest.TestCase):
 
         self.assertFalse(state.is_downloading)
         self.assertEqual(len(dialogs.critical_calls), 1)
+
+    def test_finish_queue_success_updates_status_counts_and_opens_folder(self) -> None:
+        window = FakeWindow()
+        state = RunQueueState(
+            queue_items=[
+                {"url": "https://example.com/watch?v=one", "settings": {}},
+                {"url": "https://example.com/watch?v=two", "settings": {}},
+            ],
+            queue_active=True,
+            queue_index=1,
+            queue_failed_items=0,
+            queue_started_ts=10.0,
+            is_downloading=True,
+            show_progress_item=True,
+            cancel_requested=False,
+            cancel_event=threading.Event(),
+        )
+        ports, _dialogs, _filesystem, clock = build_ports(executor=FakeExecutor())
+        clock._now_ts = 20.0
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.finish_queue(cancelled=False)
+
+        self.assertFalse(state.queue_active)
+        self.assertFalse(state.is_downloading)
+        self.assertFalse(state.show_progress_item)
+        self.assertIsNone(state.queue_started_ts)
+        self.assertEqual(window.status_value.text(), "Queue complete")
+        self.assertEqual(window.session_completed_value.text(), "2")
+        self.assertEqual(window.session_failed_value.text(), "0")
+        self.assertEqual(window.session_success_rate_value.text(), "100%")
+        self.assertEqual(window.session_remaining_value.text(), "0")
+        self.assertEqual(window.open_output_calls, 1)
+        self.assertTrue(any("[queue] finished successfully" in line for line in window.logs))
+
+    def test_finish_queue_failed_shows_warning_popup_and_keeps_failed_count(self) -> None:
+        window = FakeWindow()
+        window._last_error_log = "HTTP Error 429: Too many requests"
+        state = RunQueueState(
+            queue_items=[
+                {"url": "https://example.com/watch?v=one", "settings": {}},
+                {"url": "https://example.com/watch?v=two", "settings": {}},
+                {"url": "https://example.com/watch?v=three", "settings": {}},
+            ],
+            queue_active=True,
+            queue_index=2,
+            queue_failed_items=2,
+            queue_started_ts=30.0,
+            is_downloading=True,
+            show_progress_item=True,
+            cancel_requested=False,
+            cancel_event=threading.Event(),
+        )
+        ports, _dialogs, _filesystem, clock = build_ports(executor=FakeExecutor())
+        clock._now_ts = 50.0
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.finish_queue(cancelled=False)
+
+        self.assertEqual(window.status_value.text(), "Queue finished with errors")
+        self.assertEqual(window.session_completed_value.text(), "1")
+        self.assertEqual(window.session_failed_value.text(), "2")
+        self.assertEqual(window.session_success_rate_value.text(), "33%")
+        self.assertEqual(window.session_remaining_value.text(), "0")
+        self.assertEqual(window.open_output_calls, 1)
+        self.assertEqual(len(window.popups), 1)
+        self.assertEqual(window.popups[0][0], "Queue finished with errors")
+        self.assertFalse(window.popups[0][2])
+
+    def test_finish_queue_cancelled_does_not_open_output_folder(self) -> None:
+        window = FakeWindow()
+        state = RunQueueState(
+            queue_items=[
+                {"url": "https://example.com/watch?v=one", "settings": {}},
+                {"url": "https://example.com/watch?v=two", "settings": {}},
+                {"url": "https://example.com/watch?v=three", "settings": {}},
+            ],
+            queue_active=True,
+            queue_index=1,
+            queue_failed_items=1,
+            queue_started_ts=5.0,
+            is_downloading=True,
+            show_progress_item=True,
+            cancel_requested=True,
+            cancel_event=threading.Event(),
+        )
+        ports, _dialogs, _filesystem, clock = build_ports(executor=FakeExecutor())
+        clock._now_ts = 9.0
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.finish_queue(cancelled=True)
+
+        self.assertEqual(window.status_value.text(), "Queue cancelled")
+        self.assertEqual(window.session_completed_value.text(), "1")
+        self.assertEqual(window.session_failed_value.text(), "1")
+        self.assertEqual(window.session_success_rate_value.text(), "50%")
+        self.assertEqual(window.session_remaining_value.text(), "0")
+        self.assertEqual(window.open_output_calls, 0)
+        self.assertTrue(any("[queue] stopped by cancellation" in line for line in window.logs))
 
 
 if __name__ == "__main__":
