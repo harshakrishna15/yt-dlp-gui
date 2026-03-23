@@ -19,6 +19,7 @@ try:
         QBoxLayout,
         QCheckBox,
         QComboBox,
+        QFrame,
         QGroupBox,
         QLabel,
         QLineEdit,
@@ -1930,11 +1931,12 @@ class TestQtApp(unittest.TestCase):
         self.window._on_mode_change()
         QApplication.processEvents()
 
-        self.assertEqual(self.window.codec_label.text(), "Codec not needed")
+        self.assertEqual(self.window.codec_label.text(), "Codec")
         self.assertEqual(
             self.window.codec_combo.toolTip(),
             "No codec selection is needed for audio-only downloads.",
         )
+        self.assertEqual(self.window.codec_combo.currentText(), "Auto")
         self.assertEqual(self.window.format_label.text(), "Quality")
         self.assertEqual(
             self.window.format_combo.toolTip(),
@@ -2468,6 +2470,38 @@ class TestQtApp(unittest.TestCase):
                         label.minimumSizeHint().height(),
                         f"{label.objectName()} is vertically clipped at {width}x{height}",
                     )
+
+    def test_session_cards_keep_comfortable_inner_padding_in_compact_layout(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window._open_panel("session")
+        self.window.resize(900, 800)
+        QApplication.processEvents()
+
+        activity_layout = self.window.run_activity_card.layout()
+        self.assertIsNotNone(activity_layout)
+        activity_margins = activity_layout.contentsMargins()
+        self.assertGreaterEqual(activity_margins.left(), 8)
+        self.assertGreaterEqual(activity_margins.top(), 8)
+
+        metric_cards = self.window.run_stats_grid.findChildren(QFrame, "sessionMetricCard")
+        self.assertEqual(len(metric_cards), 8)
+        for card in metric_cards:
+            card_layout = card.layout()
+            self.assertIsNotNone(card_layout)
+            margins = card_layout.contentsMargins()
+            self.assertGreaterEqual(margins.left(), 8)
+            self.assertGreaterEqual(margins.right(), 8)
+            self.assertGreaterEqual(margins.top(), 6)
+            self.assertGreaterEqual(margins.bottom(), 6)
+
+        result_layout = self.window.download_result_card.layout()
+        self.assertIsNotNone(result_layout)
+        result_margins = result_layout.contentsMargins()
+        self.assertGreaterEqual(result_margins.left(), 10)
+        self.assertGreaterEqual(result_margins.right(), 10)
+        self.assertGreaterEqual(result_margins.top(), 6)
+        self.assertGreaterEqual(result_margins.bottom(), 6)
 
     def test_session_stat_cards_do_not_overlap_at_wide_sizes(self) -> None:
         self.window.show()
@@ -3014,7 +3048,7 @@ class TestQtApp(unittest.TestCase):
             2,
         )
 
-    def test_classic_top_actions_keep_settings_rightmost(self) -> None:
+    def test_classic_top_actions_keep_session_next_to_settings(self) -> None:
         self.window.show()
         QApplication.processEvents()
         self.window.resize(900, 760)
@@ -3022,17 +3056,17 @@ class TestQtApp(unittest.TestCase):
 
         buttons = (
             self.window.downloads_button,
-            self.window.session_button,
             self.window.queue_button,
             self.window.history_button,
             self.window.logs_button,
+            self.window.session_button,
             self.window.settings_button,
         )
         self.assertTrue(self.window.downloads_button.isVisible())
-        self.assertTrue(self.window.session_button.isVisible())
         self.assertTrue(self.window.queue_button.isVisible())
         self.assertTrue(self.window.history_button.isVisible())
         self.assertTrue(self.window.logs_button.isVisible())
+        self.assertTrue(self.window.session_button.isVisible())
         self.assertTrue(self.window.settings_button.isVisible())
 
         x_positions = {
@@ -3042,12 +3076,10 @@ class TestQtApp(unittest.TestCase):
             for button in buttons
             if button.isVisible()
         }
-        settings_x = x_positions["Settings"]
-        self.assertGreater(settings_x, x_positions["Downloads"])
-        self.assertGreater(settings_x, x_positions["Session"])
-        self.assertGreater(settings_x, x_positions["Queue"])
-        self.assertGreater(settings_x, x_positions["History"])
-        self.assertGreater(settings_x, x_positions["Logs"])
+        self.assertEqual(
+            sorted(x_positions, key=x_positions.get),
+            ["Downloads", "Queue", "History", "Logs", "Session", "Settings"],
+        )
 
     def test_downloads_button_returns_to_main_view(self) -> None:
         self.window._open_panel("queue")
@@ -3072,6 +3104,9 @@ class TestQtApp(unittest.TestCase):
         )
         self.assertTrue(self.window.session_button.isChecked())
         self.assertTrue(self.window.run_activity_card.isVisible())
+        session_panel = self.window.panel_stack.currentWidget()
+        self.assertIsNotNone(session_panel)
+        self.assertIsNone(session_panel.findChild(QFrame, "panelCard"))
 
     def test_downloads_button_is_noop_when_main_view_is_already_active(self) -> None:
         self.assertIsNone(self.window._active_panel_name)
@@ -3397,6 +3432,51 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.progress_bar.value(), 250)
         self.assertEqual(self.window.progress_label.text(), "Progress: 25.0%")
         self.assertEqual(self.window.eta_label.text(), "ETA: Finalizing")
+
+    def test_queue_progress_update_uses_overall_queue_percent(self) -> None:
+        self.window.queue_items = [
+            {"url": "https://example.com/watch?v=one", "settings": {}},
+            {"url": "https://example.com/watch?v=two", "settings": {}},
+            {"url": "https://example.com/watch?v=three", "settings": {}},
+        ]
+        self.window.queue_active = True
+        self.window.queue_index = 1
+        self.window._show_progress_item = True
+
+        self.window._on_progress_update(
+            {
+                "status": "item",
+                "item": "2/3 Example",
+            }
+        )
+        self.window._on_progress_update(
+            {
+                "status": "downloading",
+                "percent": 50.0,
+                "speed": "2.0 MiB/s",
+                "eta": "0:09",
+            }
+        )
+
+        self.assertEqual(self.window.progress_label.text(), "Progress: 50.0%")
+        self.assertEqual(self.window.item_label.text(), "Item: 2/3 - Example")
+
+    def test_prepare_next_queue_item_progress_keeps_completed_queue_share(self) -> None:
+        self.window.queue_items = [
+            {"url": "https://example.com/watch?v=one", "settings": {}},
+            {"url": "https://example.com/watch?v=two", "settings": {}},
+            {"url": "https://example.com/watch?v=three", "settings": {}},
+        ]
+        self.window.queue_active = True
+        self.window.queue_index = 2
+        self.window.speed_label.setText("Speed: 5.0 MiB/s")
+        self.window.eta_label.setText("ETA: 0:01")
+
+        self.window._prepare_next_queue_item_progress()
+
+        self.assertEqual(self.window.progress_label.text(), "Progress: 66.7%")
+        self.assertEqual(self.window.speed_label.text(), "Speed: -")
+        self.assertEqual(self.window.eta_label.text(), "ETA: -")
 
     def test_progress_bar_stays_in_metrics_card_when_idle(self) -> None:
         self.window.show()

@@ -765,7 +765,7 @@ class RunQueueController:
             w._append_log("[queue] cancelled")
             self.finish_queue()
             return
-        w._reset_progress_summary()
+        w._prepare_next_queue_item_progress()
         self.start_next_queue_item()
 
     def finish_queue(self, *, cancelled: bool = False) -> None:

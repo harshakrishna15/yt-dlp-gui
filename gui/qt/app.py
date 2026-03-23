@@ -1296,11 +1296,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         activity_layout = self.run_activity_card.layout()
         if isinstance(activity_layout, QVBoxLayout):
-            activity_margin = 4 if compact_height else 16
+            activity_margin = 10 if compact_height else 16
             activity_layout.setContentsMargins(
                 activity_margin, activity_margin, activity_margin, activity_margin
             )
-            activity_layout.setSpacing(2 if compact_height else 12)
+            activity_layout.setSpacing(6 if compact_height else 12)
 
         metrics_card_layout = self.metrics_card.layout()
         if isinstance(metrics_card_layout, QBoxLayout):
@@ -1317,17 +1317,17 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         stats_layout = self.run_stats_grid.layout()
         if isinstance(stats_layout, QGridLayout):
-            stats_layout.setHorizontalSpacing(4 if compact_height else 10)
-            stats_layout.setVerticalSpacing(0 if compact_height else 10)
+            stats_layout.setHorizontalSpacing(8 if compact_height else 10)
+            stats_layout.setVerticalSpacing(8 if compact_height else 10)
 
         result_layout = self.download_result_card.layout()
         if isinstance(result_layout, QHBoxLayout):
-            result_margin_h = 6 if compact_height else 14
-            result_margin_v = 1 if compact_height else 12
+            result_margin_h = 12 if compact_height else 14
+            result_margin_v = 8 if compact_height else 12
             result_layout.setContentsMargins(
                 result_margin_h, result_margin_v, result_margin_h, result_margin_v
             )
-            result_layout.setSpacing(3 if compact_height else 8)
+            result_layout.setSpacing(6 if compact_height else 8)
 
         for widget in (
             self.start_button,
@@ -1351,12 +1351,12 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             card_layout = card.layout()
             if isinstance(card_layout, QVBoxLayout):
                 card_layout.setContentsMargins(
-                    4 if compact_height else 14,
-                    3 if compact_height else 12,
-                    4 if compact_height else 14,
-                    3 if compact_height else 12,
+                    10 if compact_height else 14,
+                    8 if compact_height else 12,
+                    10 if compact_height else 14,
+                    8 if compact_height else 12,
                 )
-                card_layout.setSpacing(1 if compact_height else 4)
+                card_layout.setSpacing(3 if compact_height else 4)
 
         self._stabilize_run_section_sizing()
 
@@ -2949,23 +2949,27 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.format_combo.setPlaceholderText(placeholder_text)
 
         if mode == "audio":
-            codec_label_text = "Codec not needed"
+            codec_label_text = "Codec"
             codec_tooltip = "No codec selection is needed for audio-only downloads."
             format_label_text = "Quality"
             format_tooltip = "Best audio is selected automatically for audio-only downloads."
             format_visible = True
+            codec_prompt_text = "Auto"
         else:
             codec_label_text = "Codec"
             codec_tooltip = "Choose preferred video codec."
             format_label_text = "Quality"
             format_tooltip = "Choose exact format/quality."
             format_visible = True
+            codec_prompt_text = "Select codec"
 
         visibility_changed = self.format_combo.isVisible() != format_visible
         label_changed = (
             self.codec_label.text() != codec_label_text
             or self.format_label.text() != format_label_text
         )
+        if self.codec_combo.count() > 0 and self.codec_combo.itemText(0) != codec_prompt_text:
+            self.codec_combo.setItemText(0, codec_prompt_text)
         self.format_combo.setVisible(format_visible)
         self.codec_label.setText(codec_label_text)
         self.codec_combo.setToolTip(codec_tooltip)

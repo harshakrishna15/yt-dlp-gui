@@ -637,6 +637,33 @@ class WindowFeedbackMixin:
         self._track_animation(anim)
         anim.start()
 
+    def _queue_overall_progress_percent(
+        self: "QtYtDlpGui", item_percent: float = 0.0
+    ) -> float | None:
+        if not self.queue_active or self.queue_index is None:
+            return None
+        total_items = len(self.queue_items)
+        if total_items <= 0:
+            return None
+        completed_before_current = max(
+            0,
+            min(int(self.queue_index), total_items),
+        )
+        current_ratio = max(0.0, min(100.0, float(item_percent))) / 100.0
+        return (
+            (float(completed_before_current) + current_ratio) / float(total_items)
+        ) * 100.0
+
+    def _prepare_next_queue_item_progress(self: "QtYtDlpGui") -> None:
+        overall_percent = self._queue_overall_progress_percent(0.0)
+        if overall_percent is not None:
+            self._animate_progress_bar_to(overall_percent, immediate=True)
+            self._set_metric_label_text(
+                self.progress_label, f"Progress: {overall_percent:.1f}%"
+            )
+        self._set_metric_label_text(self.speed_label, "Speed: -")
+        self._set_metric_label_text(self.eta_label, "ETA: -")
+
     def _reset_progress_summary(self: "QtYtDlpGui") -> None:
         self._stop_progress_animation()
         self.progress_bar.setValue(0)
@@ -659,9 +686,13 @@ class WindowFeedbackMixin:
             playlist_eta = str(payload.get("playlist_eta") or "").strip()
             downloaded_bytes = payload.get("downloaded_bytes")
             if isinstance(percent, (int, float)):
-                self._animate_progress_bar_to(float(percent))
+                display_percent = float(percent)
+                queue_percent = self._queue_overall_progress_percent(display_percent)
+                if queue_percent is not None:
+                    display_percent = queue_percent
+                self._animate_progress_bar_to(display_percent)
                 self._set_metric_label_text(
-                    self.progress_label, f"Progress: {float(percent):.1f}%"
+                    self.progress_label, f"Progress: {display_percent:.1f}%"
                 )
             if isinstance(speed, str):
                 self._set_metric_label_text(self.speed_label, f"Speed: {speed or '-'}")
@@ -682,6 +713,14 @@ class WindowFeedbackMixin:
         elif status == "item":
             if not self._show_progress_item:
                 return
+            queue_percent = self._queue_overall_progress_percent(0.0)
+            if queue_percent is not None:
+                self._animate_progress_bar_to(queue_percent, immediate=True)
+                self._set_metric_label_text(
+                    self.progress_label, f"Progress: {queue_percent:.1f}%"
+                )
+                self._set_metric_label_text(self.speed_label, "Speed: -")
+                self._set_metric_label_text(self.eta_label, "ETA: -")
             item = str(payload.get("item") or "").strip()
             if item:
                 if item != self._session_progress_item_key:
@@ -690,6 +729,12 @@ class WindowFeedbackMixin:
                 self._set_current_item_from_text(item)
         elif status == "finished":
             self._finalize_session_downloaded_bytes()
+            queue_percent = self._queue_overall_progress_percent(100.0)
+            if queue_percent is not None:
+                self._animate_progress_bar_to(queue_percent, immediate=True)
+                self._set_metric_label_text(
+                    self.progress_label, f"Progress: {queue_percent:.1f}%"
+                )
             self._set_metric_label_text(self.eta_label, "ETA: Finalizing")
             self._refresh_session_metrics()
         elif status == "cancelled":

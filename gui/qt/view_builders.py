@@ -314,17 +314,17 @@ class TopBarBuilder:
             classic_layout.setContentsMargins(4, 4, 4, 4)
             classic_layout.setSpacing(4)
         downloads_button = QPushButton("Downloads", classic_actions)
-        session_button = QPushButton("Session", classic_actions)
         queue_button = QPushButton("Queue", classic_actions)
         history_button = QPushButton("History", classic_actions)
         logs_button = QPushButton("Logs", classic_actions)
+        session_button = QPushButton("Session", classic_actions)
         settings_button = QPushButton("Settings", classic_actions)
         for button in (
             downloads_button,
-            session_button,
             queue_button,
             history_button,
             logs_button,
+            session_button,
             settings_button,
         ):
             button.setCheckable(True)

@@ -93,20 +93,27 @@ def _build_panel_shell(
     parent: QWidget,
     title: str,
     subtitle: str,
+    framed: bool = True,
 ) -> _PanelShellRefs:
     panel = QWidget(parent)
     panel.setObjectName("panelPage")
     root_layout = QVBoxLayout(panel)
     root_layout.setContentsMargins(0, 0, 0, 0)
-    root_layout.setSpacing(0)
+    root_layout.setSpacing(14 if not framed else 0)
 
-    card = QFrame(panel)
-    card.setObjectName("panelCard")
-    card_layout = QVBoxLayout(card)
-    card_layout.setContentsMargins(16, 16, 16, 16)
-    card_layout.setSpacing(14)
+    container: QWidget = panel
+    container_layout: QVBoxLayout = root_layout
+    if framed:
+        card = QFrame(panel)
+        card.setObjectName("panelCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        card_layout.setSpacing(14)
+        root_layout.addWidget(card, stretch=1)
+        container = card
+        container_layout = card_layout
 
-    header = QWidget(card)
+    header = QWidget(container)
     header_layout = QVBoxLayout(header)
     header_layout.setContentsMargins(0, 0, 0, 0)
     header_layout.setSpacing(3)
@@ -119,14 +126,13 @@ def _build_panel_shell(
         subtitle_label.setWordWrap(True)
         header_layout.addWidget(subtitle_label)
 
-    body = QWidget(card)
+    body = QWidget(container)
     body_layout = QVBoxLayout(body)
     body_layout.setContentsMargins(0, 0, 0, 0)
     body_layout.setSpacing(10)
 
-    card_layout.addWidget(header)
-    card_layout.addWidget(body, stretch=1)
-    root_layout.addWidget(card, stretch=1)
+    container_layout.addWidget(header)
+    container_layout.addWidget(body, stretch=1)
     return _PanelShellRefs(panel=panel, body_layout=body_layout)
 
 
@@ -375,6 +381,7 @@ def build_session_panel(
         parent=parent,
         title="Session",
         subtitle="Track current run totals and the latest completed download.",
+        framed=False,
     )
     shell.body_layout.addWidget(session_card)
     shell.body_layout.addStretch(1)

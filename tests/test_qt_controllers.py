@@ -142,6 +142,7 @@ class FakeWindow:
         self.audio_languages: list[str] = []
         self.metrics_visible = False
         self.progress_resets = 0
+        self.queue_progress_preps = 0
         self.queue_refreshes = 0
         self.controls_refreshes = 0
         self.source_detail_refreshes = 0
@@ -196,6 +197,9 @@ class FakeWindow:
 
     def _reset_progress_summary(self) -> None:
         self.progress_resets += 1
+
+    def _prepare_next_queue_item_progress(self) -> None:
+        self.queue_progress_preps += 1
 
     def _reset_session_metrics(
         self, *, total_items: int, started_ts: float | None = None
@@ -736,6 +740,29 @@ class TestRunQueueController(unittest.TestCase):
             "h264",
         )
         self.assertEqual(window.status_value.text(), "Added recent download back to queue")
+
+    def test_on_queue_item_done_prepares_next_item_without_full_progress_reset(self) -> None:
+        window = FakeWindow()
+        state = RunQueueState(
+            queue_items=[
+                {"url": "https://example.com/watch?v=one", "settings": {}},
+                {"url": "https://example.com/watch?v=two", "settings": {}},
+            ],
+            queue_active=True,
+            queue_index=0,
+            is_downloading=True,
+            show_progress_item=True,
+            cancel_event=threading.Event(),
+        )
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.on_queue_item_done(had_error=False, cancelled=False)
+
+        self.assertEqual(state.queue_index, 1)
+        self.assertEqual(window.queue_progress_preps, 1)
+        self.assertEqual(window.progress_resets, 0)
+        self.assertEqual(window.current_item, ("2/2", "Resolving title..."))
 
     def test_on_start_with_missing_url_uses_dialog_port(self) -> None:
         window = FakeWindow()
