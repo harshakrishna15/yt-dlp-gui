@@ -10,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import QCoreApplication, QEasingCurve, QEvent, QRect, Qt
+    from PySide6.QtCore import QEasingCurve, QRect, Qt
     from PySide6.QtGui import QCloseEvent, QFontMetrics
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import (
@@ -26,6 +26,7 @@ try:
         QRadioButton,
         QScrollArea,
         QStyle,
+        QStyleFactory,
         QWidget,
     )
 
@@ -49,31 +50,9 @@ except ModuleNotFoundError:
 
 @unittest.skipUnless(HAS_QT, "PySide6 is required for Qt app tests")
 class TestQtApp(unittest.TestCase):
-    @staticmethod
-    def _drain_qt_cleanup() -> None:
-        app = QApplication.instance()
-        if app is None:
-            return
-        app.processEvents()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
-
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
-        cls._app.setQuitOnLastWindowClosed(False)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        app = QApplication.instance()
-        if app is None:
-            return
-        for widget in list(app.topLevelWidgets()):
-            widget.close()
-            widget.deleteLater()
-        cls._drain_qt_cleanup()
-        app.quit()
-        cls._drain_qt_cleanup()
 
     def setUp(self) -> None:
         self._load_settings_patch = patch(
@@ -93,7 +72,6 @@ class TestQtApp(unittest.TestCase):
         self.window.close()
         self.window.deleteLater()
         self._load_settings_patch.stop()
-        self._drain_qt_cleanup()
 
     def _assert_visible_text_widgets_fit(
         self,
@@ -215,7 +193,13 @@ class TestQtApp(unittest.TestCase):
     def test_tooltip_delay_proxy_style_overrides_wake_up_hint(self) -> None:
         app_style = QApplication.instance().style()
         self.assertIsNotNone(app_style)
-        delayed = _TooltipDelayProxyStyle(app_style, wake_up_delay_ms=1250)
+        base_style = QStyleFactory.create("Fusion")
+        if base_style is None and app_style is not None:
+            base_style = QStyleFactory.create(app_style.objectName())
+        self.assertIsNotNone(base_style)
+        assert base_style is not None
+        delayed = _TooltipDelayProxyStyle(base_style, wake_up_delay_ms=1250)
+        delayed.setParent(self.window)
         self.assertEqual(
             delayed.styleHint(QStyle.StyleHint.SH_ToolTip_WakeUpDelay),
             1250,
@@ -1654,7 +1638,6 @@ class TestQtApp(unittest.TestCase):
         finally:
             window.close()
             window.deleteLater()
-            self._drain_qt_cleanup()
 
     def test_load_settings_applies_edit_friendly_encoder_preference(self) -> None:
         with patch(
@@ -1671,7 +1654,6 @@ class TestQtApp(unittest.TestCase):
         finally:
             window.close()
             window.deleteLater()
-            self._drain_qt_cleanup()
 
     def test_open_folder_after_download_prefers_latest_output_folder(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
