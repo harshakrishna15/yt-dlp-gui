@@ -67,7 +67,7 @@ def compute_control_state(
     can_start_single = (
         single_ready
         and filter_chosen
-        and format_selected
+        and ((is_audio_mode and format_available) or format_selected)
         and (is_audio_mode or codec_chosen)
         and (not mixed_prompt_active)
     )
@@ -77,10 +77,10 @@ def compute_control_state(
     can_fetch_formats = url_present and (not is_fetching) and (not is_downloading) and (not mixed_prompt_active)
     mode_enabled = url_present and formats_ready and (not is_downloading)
 
-    show_convert = container_value == "webm"
-    convert_enabled = input_ready and filter_chosen and show_convert
+    show_convert = False
+    convert_enabled = False
     format_enabled = (
-        single_ready and filter_chosen and format_available and (is_audio_mode or codec_chosen)
+        single_ready and filter_chosen and format_available and is_video_mode and codec_chosen
     )
 
     return ControlState(

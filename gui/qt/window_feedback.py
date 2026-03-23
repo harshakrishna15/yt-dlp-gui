@@ -287,6 +287,7 @@ class WindowFeedbackMixin:
                     shown_text = f"{prefix}{shown_title}"
         self.item_label.setText(shown_text)
         self.item_label.setToolTip(str(self._current_item_title_tooltip or "-"))
+        self._refresh_ready_summary_text()
 
     def _set_current_item_display(
         self: "QtYtDlpGui", *, progress: str, title: str

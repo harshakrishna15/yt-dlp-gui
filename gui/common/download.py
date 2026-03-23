@@ -47,6 +47,18 @@ def _youtube_dl_class():
     return YtDlpYoutubeDL
 
 AUDIO_OUTPUT_CODECS = {"m4a", "mp3", "opus", "wav", "flac"}
+THUMBNAIL_EMBED_CONTAINERS = {
+    "flac",
+    "m4a",
+    "m4v",
+    "mka",
+    "mkv",
+    "mov",
+    "mp3",
+    "mp4",
+    "ogg",
+    "opus",
+}
 DOWNLOAD_SUCCESS = "success"
 DOWNLOAD_ERROR = "error"
 DOWNLOAD_CANCELLED = "cancelled"
@@ -77,6 +89,20 @@ EDIT_FRIENDLY_HARDWARE_VIDEO_CODECS = (
     "h264_amf",
     "h264_qsv",
 )
+
+
+def _thumbnail_embed_container(
+    *,
+    is_audio_only: bool,
+    preferred_audio_codec: str,
+    target_container: str | None,
+    merge_output_format: str | None,
+) -> str | None:
+    if is_audio_only:
+        candidate = (preferred_audio_codec or "").strip().lower()
+        return candidate if candidate in THUMBNAIL_EMBED_CONTAINERS else None
+    candidate = (merge_output_format or target_container or "").strip().lower()
+    return candidate if candidate in THUMBNAIL_EMBED_CONTAINERS else None
 
 
 def build_ydl_opts(
@@ -126,6 +152,7 @@ def build_ydl_opts(
     postprocessors: list[dict[str, Any]] = []
     pp_args: list[str] = []
     merge_output_format = target_container if target_container in {"mp4", "webm"} else None
+    preferred_audio_codec = ""
 
     if is_audio_only or fmt == "bestaudio/best":
         merge_output_format = None
@@ -211,9 +238,15 @@ def build_ydl_opts(
         "continuedl": True,
     }
 
-    # Always pull and embed artwork for both audio and video outputs.
-    opts["writethumbnail"] = True
-    postprocessors.append({"key": "EmbedThumbnail"})
+    thumbnail_container = _thumbnail_embed_container(
+        is_audio_only=is_audio_only or fmt == "bestaudio/best",
+        preferred_audio_codec=preferred_audio_codec,
+        target_container=target_container,
+        merge_output_format=merge_output_format,
+    )
+    if thumbnail_container is not None:
+        opts["writethumbnail"] = True
+        postprocessors.append({"key": "EmbedThumbnail"})
 
     if write_subtitles:
         opts["writesubtitles"] = True

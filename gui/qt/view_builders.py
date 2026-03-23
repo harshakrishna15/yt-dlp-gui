@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QProgressBar,
     QPushButton,
-    QRadioButton,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -143,19 +142,22 @@ class DownloadsViewRefs:
     format_card: QGroupBox
     format_layout: QVBoxLayout
     mode_row_layout: QHBoxLayout
-    video_radio: QRadioButton
-    audio_radio: QRadioButton
+    video_radio: QPushButton
+    audio_radio: QPushButton
     content_type_label: QLabel
+    content_type_row: QWidget
     container_combo: _NativeComboBox
     convert_check: QCheckBox
     container_label: QLabel
     post_process_label: QLabel
+    post_process_row: QWidget
     codec_combo: _NativeComboBox
     codec_label: QLabel
     format_combo: _NativeComboBox
     format_label: QLabel
     output_form_labels: list[QLabel]
     output_form_rows: list[QWidget]
+    format_row: QWidget
     save_card: QWidget
     save_layout: QVBoxLayout
     filename_edit: QLineEdit
@@ -253,19 +255,22 @@ class _OutputSectionRefs:
     format_card: QGroupBox
     format_layout: QVBoxLayout
     mode_row_layout: QHBoxLayout
-    video_radio: QRadioButton
-    audio_radio: QRadioButton
+    video_radio: QPushButton
+    audio_radio: QPushButton
     content_type_label: QLabel
+    content_type_row: QWidget
     container_combo: _NativeComboBox
     convert_check: QCheckBox
     container_label: QLabel
     post_process_label: QLabel
+    post_process_row: QWidget
     codec_combo: _NativeComboBox
     codec_label: QLabel
     format_combo: _NativeComboBox
     format_label: QLabel
     output_form_labels: list[QLabel]
     output_form_rows: list[QWidget]
+    format_row: QWidget
     save_card: QWidget
     save_layout: QVBoxLayout
     filename_edit: QLineEdit
@@ -604,6 +609,21 @@ def _workspace_tab_selection_rect(button: QPushButton) -> QRect:
     )
 
 
+def _content_mode_selection_rect(button: QPushButton) -> QRect:
+    rect = button.geometry()
+    horizontal_inset = min(1, max(0, (rect.width() - 1) // 2))
+    vertical_inset = min(1, max(0, (rect.height() - 1) // 2))
+    inset_rect = rect.adjusted(
+        horizontal_inset,
+        vertical_inset,
+        -horizontal_inset,
+        -vertical_inset,
+    )
+    if inset_rect.width() <= 0 or inset_rect.height() <= 0:
+        return rect
+    return inset_rect
+
+
 def _add_labeled_row(
     parent: QWidget,
     layout: QVBoxLayout,
@@ -611,6 +631,7 @@ def _add_labeled_row(
     field: QWidget,
     *,
     field_spacing: int = 20,
+    field_alignment: Qt.Alignment | None = None,
 ) -> QWidget:
     block = QWidget(parent)
     block.setObjectName("outputCardBlock")
@@ -627,7 +648,10 @@ def _add_labeled_row(
     field_host_layout = QVBoxLayout(field_host)
     field_host_layout.setContentsMargins(0, 0, 0, 0)
     field_host_layout.setSpacing(0)
-    field_host_layout.addWidget(field)
+    if field_alignment is None:
+        field_host_layout.addWidget(field)
+    else:
+        field_host_layout.addWidget(field, 0, field_alignment)
 
     row_layout.addWidget(label)
     row_layout.addWidget(field_host, stretch=1)
@@ -746,16 +770,19 @@ class DownloadsViewBuilder:
             video_radio=output.video_radio,
             audio_radio=output.audio_radio,
             content_type_label=output.content_type_label,
+            content_type_row=output.content_type_row,
             container_combo=output.container_combo,
             convert_check=output.convert_check,
             container_label=output.container_label,
             post_process_label=output.post_process_label,
+            post_process_row=output.post_process_row,
             codec_combo=output.codec_combo,
             codec_label=output.codec_label,
             format_combo=output.format_combo,
             format_label=output.format_label,
             output_form_labels=output.output_form_labels,
             output_form_rows=output.output_form_rows,
+            format_row=output.format_row,
             save_card=output.save_card,
             save_layout=output.save_layout,
             filename_edit=output.filename_edit,
@@ -1129,113 +1156,117 @@ class DownloadsViewBuilder:
         mode_row = AnimatedSegmentedRail(
             format_card,
             selection_frame_object_name="contentModeSelection",
+            selection_rect_getter=_content_mode_selection_rect,
         )
         mode_row.setObjectName("contentModeSegment")
         mode_row.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
         mode_row_layout = mode_row.layout()
         if isinstance(mode_row_layout, QHBoxLayout):
-            mode_row_layout.setContentsMargins(6, 6, 6, 6)
+            mode_row_layout.setContentsMargins(3, 3, 3, 3)
             mode_row_layout.setSpacing(6)
-        video_radio = QRadioButton("Video and Audio", mode_row)
-        audio_radio = QRadioButton("Audio only", mode_row)
-        video_radio.setObjectName("contentModeButton")
-        audio_radio.setObjectName("contentModeButton")
-        video_radio.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        audio_radio.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        video_radio = QPushButton("Video and Audio", mode_row)
+        audio_radio = QPushButton("Audio only", mode_row)
+        for button in (video_radio, audio_radio):
+            button.setCheckable(True)
+            button.setAutoExclusive(True)
+            button.setObjectName("contentModeButton")
+            button.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
         def _handle_mode_toggle(checked: bool) -> None:
             if checked:
                 callbacks.on_mode_change()
 
         video_radio.toggled.connect(_handle_mode_toggle)
         audio_radio.toggled.connect(_handle_mode_toggle)
-        mode_row.add_button(video_radio, stretch=1)
-        mode_row.add_button(audio_radio, stretch=1)
+        mode_row.add_button(video_radio)
+        mode_row.add_button(audio_radio)
         content_type_label = QLabel("Content type", format_card)
 
-        container_row = QWidget(format_card)
-        container_row_layout = QVBoxLayout(container_row)
-        container_row_layout.setContentsMargins(0, 0, 0, 0)
-        container_row_layout.setSpacing(8)
-        container_combo = _NativeComboBox(container_row)
+        container_combo = _NativeComboBox(format_card)
         register_native_combo(container_combo)
         container_combo.setMinimumWidth(190)
+        container_combo.setFixedHeight(45)
         container_combo.currentIndexChanged.connect(callbacks.on_container_change)
-        convert_check = QCheckBox("Convert WebM to MP4", container_row)
+        convert_check = QCheckBox("Convert WebM to MP4", format_card)
         convert_check.stateChanged.connect(
             lambda _state: callbacks.on_update_controls_state()
         )
-        container_row_layout.addWidget(container_combo)
-        container_row_layout.addWidget(convert_check)
         container_label = QLabel("Container", format_card)
         post_process_label = QLabel("Post-process", format_card)
-        post_process_label.hide()
 
         codec_combo = _NativeComboBox(format_card)
         register_native_combo(codec_combo)
         codec_combo.setMinimumWidth(190)
+        codec_combo.setFixedHeight(45)
         codec_combo.addItem("Select codec", "")
         codec_combo.addItem("avc1 (H.264)", "avc1")
         codec_combo.addItem("av01 (AV1)", "av01")
         codec_combo.currentIndexChanged.connect(callbacks.on_codec_change)
-        codec_label = QLabel("Codec & quality", format_card)
+        codec_label = QLabel("Codec", format_card)
 
         format_combo = _NativeComboBox(format_card)
         register_native_combo(format_combo)
         format_combo.setMinimumWidth(260)
+        format_combo.setFixedHeight(45)
         format_combo.setPlaceholderText("Analyze a URL to load quality.")
         format_combo.currentIndexChanged.connect(
             lambda _idx: callbacks.on_update_controls_state()
         )
-        format_label = QLabel("Format", format_card)
-        format_label.hide()
-
-        quality_row = QWidget(format_card)
-        quality_row_layout = QVBoxLayout(quality_row)
-        quality_row_layout.setContentsMargins(0, 0, 0, 0)
-        quality_row_layout.setSpacing(8)
-        quality_row_layout.addWidget(codec_combo)
-        quality_row_layout.addWidget(format_combo)
+        format_label = QLabel("Quality", format_card)
 
         output_form_labels = [
             content_type_label,
             container_label,
             codec_label,
+            format_label,
         ]
         for label in output_form_labels:
             label.setObjectName("outputFormLabel")
 
-        output_form_rows = [
-            _add_labeled_row(
-                format_card,
-                format_layout,
-                content_type_label,
-                mode_row,
-            ),
-        ]
+        content_type_row = _add_labeled_row(
+            format_card,
+            format_layout,
+            content_type_label,
+            mode_row,
+            field_alignment=Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignVCenter,
+        )
+        output_form_rows = [content_type_row]
         output_form_rows.append(
             _add_labeled_row(
                 format_card,
                 format_layout,
                 container_label,
-                container_row,
+                container_combo,
             )
         )
+        post_process_row = _add_labeled_row(
+            format_card,
+            format_layout,
+            post_process_label,
+            convert_check,
+        )
+        post_process_row.hide()
+        output_form_rows.append(post_process_row)
         output_form_rows.append(
             _add_labeled_row(
                 format_card,
                 format_layout,
                 codec_label,
-                quality_row,
+                codec_combo,
             )
         )
+        format_row = _add_labeled_row(
+            format_card,
+            format_layout,
+            format_label,
+            format_combo,
+        )
+        output_form_rows.append(format_row)
 
-        format_layout.addSpacing(8)
         save_card = QWidget(format_card)
         save_card.setObjectName("saveSection")
         save_card.setMinimumWidth(0)
@@ -1243,8 +1274,8 @@ class DownloadsViewBuilder:
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         save_layout = QVBoxLayout(save_card)
-        save_layout.setContentsMargins(0, 6, 0, 0)
-        save_layout.setSpacing(12)
+        save_layout.setContentsMargins(0, 0, 0, 0)
+        save_layout.setSpacing(format_layout.spacing())
         save_layout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         filename_edit = QLineEdit(save_card)
         filename_edit.setPlaceholderText("Optional...")
@@ -1346,14 +1377,11 @@ class DownloadsViewBuilder:
         ready_summary_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        ready_summary_label.setMaximumWidth(240)
+        ready_summary_label.setMinimumWidth(0)
         ready_summary_label.setToolTip(
             "Current output summary based on selected format and save folder."
         )
-        metrics_details_layout.addWidget(
-            ready_summary_label,
-            alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-        )
+        ready_summary_label.hide()
         metrics_card_layout.addWidget(progress_bar)
         metrics_card_layout.addWidget(metrics_details)
         output_layout.addWidget(format_card)
@@ -1370,16 +1398,19 @@ class DownloadsViewBuilder:
             video_radio=video_radio,
             audio_radio=audio_radio,
             content_type_label=content_type_label,
+            content_type_row=content_type_row,
             container_combo=container_combo,
             convert_check=convert_check,
             container_label=container_label,
             post_process_label=post_process_label,
+            post_process_row=post_process_row,
             codec_combo=codec_combo,
             codec_label=codec_label,
             format_combo=format_combo,
             format_label=format_label,
             output_form_labels=output_form_labels,
             output_form_rows=output_form_rows,
+            format_row=format_row,
             save_card=save_card,
             save_layout=save_layout,
             filename_edit=filename_edit,

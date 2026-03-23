@@ -227,6 +227,54 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertEqual(opts["merge_output_format"], "mp4")
 
     @patch("gui.common.download.resolve_binary")
+    def test_build_opts_mp4_target_converts_webm_source_without_manual_toggle(
+        self,
+        mock_resolve_binary,
+    ) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "248", "vcodec": "vp9", "acodec": "none", "ext": "webm"},
+            fmt_label="Fallback WEBM",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+        )
+        self.assertEqual(opts["merge_output_format"], "mp4")
+        self.assertEqual(opts["postprocessors"][0]["key"], "FFmpegVideoConvertor")
+        self.assertEqual(opts["postprocessors"][0]["preferedformat"], "mp4")
+        self.assertTrue(opts["writethumbnail"])
+        self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
+
+    @patch("gui.common.download.resolve_binary")
+    def test_build_opts_webm_target_skips_thumbnail_embedding(
+        self,
+        mock_resolve_binary,
+    ) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/video",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "248", "vcodec": "vp9", "acodec": "opus", "ext": "webm"},
+            fmt_label="Video WEBM",
+            format_filter="webm",
+            convert_to_mp4=False,
+            playlist_enabled=False,
+            playlist_items=None,
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+        )
+        self.assertEqual(opts["merge_output_format"], "webm")
+        self.assertNotIn("writethumbnail", opts)
+        self.assertNotIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
+
+    @patch("gui.common.download.resolve_binary")
     def test_build_opts_uses_custom_filename_for_single_video(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (None, "missing")
         opts = download.build_ydl_opts(

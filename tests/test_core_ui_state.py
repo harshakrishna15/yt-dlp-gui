@@ -29,6 +29,30 @@ class TestUiState(unittest.TestCase):
         self.assertFalse(state.can_start_single)
         self.assertTrue(state.can_start_queue)
 
+    def test_audio_mode_does_not_require_manual_quality_selection(self) -> None:
+        state = ui_state.compute_control_state(
+            url_present=True,
+            has_formats_data=True,
+            mode="audio",
+            container_value="mp3",
+            codec_value="",
+            format_available=True,
+            format_selected=False,
+            queue_ready=False,
+            queue_active=False,
+            is_fetching=False,
+            is_downloading=False,
+            cancel_requested=False,
+            is_playlist_url=False,
+            mixed_prompt_active=False,
+            playlist_items_requested=False,
+            allow_queue_input_context=False,
+            audio_containers=("m4a", "mp3"),
+            video_containers=("mp4", "webm"),
+        )
+        self.assertTrue(state.can_start_single)
+        self.assertFalse(state.format_enabled)
+
     def test_video_mode_enables_start_when_required_inputs_present(self) -> None:
         state = ui_state.compute_control_state(
             url_present=True,
@@ -133,6 +157,30 @@ class TestUiState(unittest.TestCase):
         self.assertFalse(state.format_enabled)
         self.assertFalse(state.can_start_single)
         self.assertFalse(state.can_fetch_formats)
+
+    def test_video_mode_keeps_legacy_convert_toggle_hidden(self) -> None:
+        state = ui_state.compute_control_state(
+            url_present=True,
+            has_formats_data=True,
+            mode="video",
+            container_value="webm",
+            codec_value="av01",
+            format_available=True,
+            format_selected=True,
+            queue_ready=False,
+            queue_active=False,
+            is_fetching=False,
+            is_downloading=False,
+            cancel_requested=False,
+            is_playlist_url=False,
+            mixed_prompt_active=False,
+            playlist_items_requested=False,
+            allow_queue_input_context=False,
+            audio_containers=("m4a", "mp3"),
+            video_containers=("mp4", "webm"),
+        )
+        self.assertFalse(state.show_convert)
+        self.assertFalse(state.convert_enabled)
 
 
 if __name__ == "__main__":

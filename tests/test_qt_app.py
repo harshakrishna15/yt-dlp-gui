@@ -40,7 +40,12 @@ try:
         QtYtDlpGui,
         _TooltipDelayProxyStyle,
     )
-    from gui.qt.constants import MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, PANEL_SWITCH_FADE_MS
+    from gui.qt.constants import (
+        MIN_WINDOW_HEIGHT,
+        MIN_WINDOW_WIDTH,
+        PANEL_SWITCH_FADE_MS,
+        ROOMY_CONTENT_LAYOUT_MIN_HEIGHT,
+    )
     from gui.qt import style as qt_style
 
     HAS_QT = True
@@ -256,6 +261,70 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(margins.top(), 0)
         self.assertEqual(margins.right(), 0)
         self.assertEqual(margins.bottom(), 0)
+
+    def test_output_form_rows_keep_uniform_vertical_spacing(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        for height in (MIN_WINDOW_HEIGHT, ROOMY_CONTENT_LAYOUT_MIN_HEIGHT):
+            with self.subTest(height=height):
+                self.window.resize(MIN_WINDOW_WIDTH, height)
+                QApplication.processEvents()
+
+                self.assertEqual(
+                    self.window.save_layout.spacing(),
+                    self.window.format_layout.spacing(),
+                )
+                margins = self.window.save_layout.contentsMargins()
+                self.assertEqual(margins.left(), 0)
+                self.assertEqual(margins.top(), 0)
+                self.assertEqual(margins.right(), 0)
+                self.assertEqual(margins.bottom(), 0)
+
+                save_index = self.window.format_layout.indexOf(self.window.save_card)
+                self.assertGreater(save_index, 0)
+                self.assertIs(
+                    self.window.format_layout.itemAt(save_index - 1).widget(),
+                    self.window.format_row,
+                )
+
+    def test_output_bars_keep_uniform_vertical_gaps(self) -> None:
+        self.window.show()
+        self.window.video_radio.setChecked(True)
+        QApplication.processEvents()
+
+        for height in (MIN_WINDOW_HEIGHT, ROOMY_CONTENT_LAYOUT_MIN_HEIGHT):
+            with self.subTest(height=height):
+                self.window.resize(MIN_WINDOW_WIDTH, height)
+                QApplication.processEvents()
+
+                bars = (
+                    self.window.video_radio.parentWidget(),
+                    self.window.container_combo,
+                    self.window.codec_combo,
+                    self.window.format_combo,
+                    self.window.filename_edit,
+                    self.window.output_dir_edit,
+                )
+                positions = []
+                for widget in bars:
+                    self.assertIsNotNone(widget)
+                    assert widget is not None
+                    top = widget.mapTo(
+                        self.window.format_card,
+                        widget.rect().topLeft(),
+                    ).y()
+                    positions.append((top, widget.height()))
+
+                gaps = [
+                    next_top - (top + height_px)
+                    for (top, height_px), (next_top, _next_height) in zip(
+                        positions,
+                        positions[1:],
+                    )
+                ]
+                self.assertTrue(gaps)
+                self.assertLessEqual(max(gaps) - min(gaps), 1)
 
     def test_url_input_is_visible_in_source_row(self) -> None:
         self.window.show()
@@ -669,7 +738,7 @@ class TestQtApp(unittest.TestCase):
             label="logs panel filled state",
         )
 
-    def test_ready_summary_stays_hidden_until_output_choices_exist(self) -> None:
+    def test_ready_summary_stays_hidden(self) -> None:
         self.window.show()
         QApplication.processEvents()
 
@@ -680,7 +749,19 @@ class TestQtApp(unittest.TestCase):
         self.window._refresh_ready_summary()
         QApplication.processEvents()
 
-        self.assertTrue(self.window.ready_summary_label.isVisible())
+        self.assertFalse(self.window.ready_summary_label.isVisible())
+
+        self.window._is_downloading = True
+        self.window._refresh_ready_summary()
+        QApplication.processEvents()
+
+        self.assertFalse(self.window.ready_summary_label.isVisible())
+
+        self.window._is_downloading = False
+        self.window._refresh_ready_summary()
+        QApplication.processEvents()
+
+        self.assertFalse(self.window.ready_summary_label.isVisible())
 
     def test_switching_modes_does_not_refresh_preview_for_empty_intermediate_state(
         self,
@@ -1051,7 +1132,7 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.output_section.height(), before_output_height)
         self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
 
-    def test_convert_check_only_appears_for_webm_container(self) -> None:
+    def test_convert_check_stays_hidden_for_video_containers(self) -> None:
         self.window.show()
         QApplication.processEvents()
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
@@ -1069,11 +1150,13 @@ class TestQtApp(unittest.TestCase):
         self.window._update_controls_state()
         QApplication.processEvents()
         self.assertFalse(self.window.convert_check.isVisible())
+        self.assertFalse(self.window.post_process_row.isVisible())
 
         self.window.container_combo.setCurrentIndex(webm_index)
         self.window._update_controls_state()
         QApplication.processEvents()
-        self.assertTrue(self.window.convert_check.isVisible())
+        self.assertFalse(self.window.convert_check.isVisible())
+        self.assertFalse(self.window.post_process_row.isVisible())
 
     def test_source_preview_card_stays_hidden_after_metric_change(self) -> None:
         self.window.show()
@@ -1138,7 +1221,7 @@ class TestQtApp(unittest.TestCase):
     def test_source_row_buttons_remain_visible_at_min_width(self) -> None:
         self.window.show()
         QApplication.processEvents()
-        self.window.resize(900, 760)
+        self.window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.window.url_edit.setText(
             "https://www.youtube.com/watch?v="
             "abc1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -1168,7 +1251,7 @@ class TestQtApp(unittest.TestCase):
     def test_source_row_controls_keep_visible_gap_at_min_width(self) -> None:
         self.window.show()
         QApplication.processEvents()
-        self.window.resize(900, 760)
+        self.window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.window.url_edit.setText(
             "https://www.youtube.com/watch?v="
             "abc1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -1808,13 +1891,14 @@ class TestQtApp(unittest.TestCase):
             return QRect(top_left, bottom_right).normalized()
 
         self.assertTrue(self.window.format_combo.isVisible())
-        self.assertEqual(self.window.codec_label.text(), "Codec & quality")
+        self.assertEqual(self.window.codec_label.text(), "Codec")
+        self.assertEqual(self.window.format_label.text(), "Quality")
         for label, field in (
             (self.window.content_type_label, self.window.video_radio),
             (self.window.content_type_label, self.window.audio_radio),
             (self.window.container_label, self.window.container_combo),
             (self.window.codec_label, self.window.codec_combo),
-            (self.window.codec_label, self.window.format_combo),
+            (self.window.format_label, self.window.format_combo),
         ):
             overlap = map_rect_to_output(label).intersected(map_rect_to_output(field))
             self.assertFalse(
@@ -1827,13 +1911,38 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
 
         self.assertTrue(self.window.format_combo.isVisible())
-        overlap = map_rect_to_output(self.window.codec_label).intersected(
+        overlap = map_rect_to_output(self.window.format_label).intersected(
             map_rect_to_output(self.window.format_combo)
         )
         self.assertFalse(
             overlap.width() > 2 and overlap.height() > 2,
-            "Codec label overlaps the quality picker after quality options load",
+            "Quality label overlaps the quality picker after quality options load",
         )
+
+    def test_audio_mode_marks_codec_as_not_needed(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._audio_labels = ["Best audio only"]
+        self.window._audio_lookup = {"Best audio only": {"acodec": "opus"}}
+        self.window.audio_radio.setChecked(True)
+        self.window._on_mode_change()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.codec_label.text(), "Codec not needed")
+        self.assertEqual(
+            self.window.codec_combo.toolTip(),
+            "No codec selection is needed for audio-only downloads.",
+        )
+        self.assertEqual(self.window.format_label.text(), "Quality")
+        self.assertEqual(
+            self.window.format_combo.toolTip(),
+            "Best audio is selected automatically for audio-only downloads.",
+        )
+        self.assertTrue(self.window.format_combo.isVisible())
+        self.assertFalse(self.window.format_combo.isEnabled())
+        self.assertEqual(self.window.format_combo.currentText(), "Auto")
 
     def test_output_form_split_layout_uses_right_aligned_label_column(self) -> None:
         self.window.show()
@@ -2241,7 +2350,7 @@ class TestQtApp(unittest.TestCase):
     def test_min_window_downloads_view_fits_without_vertical_scroll(self) -> None:
         self.window.show()
         QApplication.processEvents()
-        self.window.resize(900, 760)
+        self.window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         QApplication.processEvents()
 
         bottom = self.window.output_section.mapTo(
@@ -2796,10 +2905,13 @@ class TestQtApp(unittest.TestCase):
         self.assertIsNotNone(selection)
         assert selection is not None
         self.assertTrue(selection.isVisible())
+        self.assertLess(selection.width(), self.window.video_radio.width())
+        self.assertLess(selection.height(), self.window.video_radio.height())
 
         initial_center = selection.geometry().center()
         video_center = self.window.video_radio.geometry().center()
         self.assertLess(abs(initial_center.x() - video_center.x()), 4)
+        self.assertLess(abs(initial_center.y() - video_center.y()), 4)
 
         self.window.audio_radio.setChecked(True)
         QTest.qWait(260)
@@ -2808,7 +2920,99 @@ class TestQtApp(unittest.TestCase):
         audio_center = self.window.audio_radio.geometry().center()
         selection_center = selection.geometry().center()
         self.assertLess(abs(selection_center.x() - audio_center.x()), 4)
+        self.assertLess(abs(selection_center.y() - audio_center.y()), 4)
         self.assertTrue(self.window.audio_radio.isChecked())
+
+    def test_content_mode_buttons_are_vertically_centered_in_segment(self) -> None:
+        self.window.show()
+        self.window.video_radio.setChecked(True)
+        QApplication.processEvents()
+
+        mode_row = self.window.video_radio.parentWidget()
+        self.assertIsNotNone(mode_row)
+        assert mode_row is not None
+
+        for button in (self.window.video_radio, self.window.audio_radio):
+            with self.subTest(button=button.text()):
+                top_gap = button.geometry().top()
+                bottom_gap = mode_row.height() - (button.geometry().bottom() + 1)
+                self.assertLessEqual(abs(top_gap - bottom_gap), 1)
+
+        self.assertLessEqual(
+            abs(self.window.video_radio.width() - self.window.audio_radio.width()),
+            1,
+        )
+
+    def test_output_fields_share_uniform_height(self) -> None:
+        self.window.show()
+        self.window.video_radio.setChecked(True)
+        QApplication.processEvents()
+
+        for height in (MIN_WINDOW_HEIGHT, ROOMY_CONTENT_LAYOUT_MIN_HEIGHT):
+            with self.subTest(height=height):
+                self.window.resize(MIN_WINDOW_WIDTH, height)
+                QApplication.processEvents()
+
+                controls = (
+                    self.window.container_combo,
+                    self.window.codec_combo,
+                    self.window.format_combo,
+                    self.window.filename_edit,
+                    self.window.output_dir_edit,
+                    self.window.browse_button,
+                )
+                control_heights = [control.height() for control in controls if control.isVisible()]
+                self.assertTrue(control_heights)
+                self.assertLessEqual(max(control_heights) - min(control_heights), 1)
+
+    def test_content_mode_control_is_more_compact_than_other_output_fields(self) -> None:
+        self.window.show()
+        self.window.video_radio.setChecked(True)
+        QApplication.processEvents()
+
+        mode_row = self.window.video_radio.parentWidget()
+        self.assertIsNotNone(mode_row)
+        assert mode_row is not None
+
+        for height in (MIN_WINDOW_HEIGHT, ROOMY_CONTENT_LAYOUT_MIN_HEIGHT):
+            with self.subTest(height=height):
+                self.window.resize(MIN_WINDOW_WIDTH, height)
+                QApplication.processEvents()
+
+                self.assertLess(mode_row.height(), self.window.container_combo.height())
+
+    def test_content_mode_control_stays_left_aligned_within_its_field_host(self) -> None:
+        self.window.show()
+        self.window.video_radio.setChecked(True)
+        QApplication.processEvents()
+
+        mode_row = self.window.video_radio.parentWidget()
+        self.assertIsNotNone(mode_row)
+        assert mode_row is not None
+
+        block_layout = self.window.content_type_row.layout()
+        self.assertIsNotNone(block_layout)
+        assert block_layout is not None
+
+        row = block_layout.itemAt(0).widget()
+        self.assertIsNotNone(row)
+        assert row is not None
+
+        row_layout = row.layout()
+        self.assertIsNotNone(row_layout)
+        assert row_layout is not None
+
+        field_host = row_layout.itemAt(1).widget()
+        self.assertIsNotNone(field_host)
+        assert field_host is not None
+
+        self.assertLess(mode_row.width(), field_host.width())
+        mode_row_left = mode_row.mapToGlobal(mode_row.rect().topLeft()).x()
+        field_host_left = field_host.mapToGlobal(field_host.rect().topLeft()).x()
+        self.assertLessEqual(
+            abs(mode_row_left - field_host_left),
+            2,
+        )
 
     def test_classic_top_actions_keep_settings_rightmost(self) -> None:
         self.window.show()

@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..common import settings_store
+from ..common import format_pipeline
 from ..app_meta import (
     APP_BUNDLE_IDENTIFIER,
     APP_DESCRIPTION,
@@ -198,6 +199,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._latest_output_path: Path | None = None
         self._preview_title_raw = ""
         self._source_summary_data: dict[str, str] | None = None
+        self._ready_summary_full_text = ""
         self._current_item_progress = "-"
         self._current_item_title = "-"
         self._current_item_title_tooltip = "-"
@@ -593,16 +595,19 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.video_radio = downloads.video_radio
         self.audio_radio = downloads.audio_radio
         self.content_type_label = downloads.content_type_label
+        self.content_type_row = downloads.content_type_row
         self.container_combo = downloads.container_combo
         self.convert_check = downloads.convert_check
         self.container_label = downloads.container_label
         self.post_process_label = downloads.post_process_label
+        self.post_process_row = downloads.post_process_row
         self.codec_combo = downloads.codec_combo
         self.codec_label = downloads.codec_label
         self.format_combo = downloads.format_combo
         self.format_label = downloads.format_label
         self._output_form_labels = list(downloads.output_form_labels)
         self._output_form_rows = list(downloads.output_form_rows)
+        self.format_row = downloads.format_row
         self.save_card = downloads.save_card
         self.save_layout = downloads.save_layout
         self.filename_edit = downloads.filename_edit
@@ -888,24 +893,57 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             control_height if compact_height else control_height + 4
         )
 
-        toggles = (
+        content_mode_buttons = (
             self.video_radio,
             self.audio_radio,
-            self.convert_check,
         )
+        content_mode_button_height = max(28, control_height - 8)
+        content_mode_button_width = max(
+            max(button.minimumSizeHint().width(), button.sizeHint().width())
+            for button in content_mode_buttons
+        )
+        for button in content_mode_buttons:
+            button.setFixedHeight(content_mode_button_height)
+            button.setFixedWidth(content_mode_button_width)
+        mode_row = self.video_radio.parentWidget()
+        if mode_row is not None:
+            mode_row_layout = mode_row.layout()
+            vertical_inset = 0
+            horizontal_inset = 0
+            spacing_total = 0
+            if mode_row_layout is not None:
+                margins = mode_row_layout.contentsMargins()
+                vertical_inset = margins.top() + margins.bottom()
+                horizontal_inset = margins.left() + margins.right()
+                spacing_total = max(0, mode_row_layout.spacing()) * max(
+                    0, len(content_mode_buttons) - 1
+                )
+            mode_row.setFixedSize(
+                (content_mode_button_width * len(content_mode_buttons))
+                + horizontal_inset
+                + spacing_total,
+                content_mode_button_height + vertical_inset,
+            )
+
         toggle_height = max(
             23 if compact_height else 25,
-            *(
-                max(toggle.minimumSizeHint().height(), toggle.sizeHint().height())
-                for toggle in toggles
+            max(
+                self.convert_check.minimumSizeHint().height(),
+                self.convert_check.sizeHint().height(),
             ),
         )
-        for toggle in toggles:
-            toggle.setMinimumHeight(toggle_height)
+        self.convert_check.setMinimumHeight(toggle_height)
 
+        compact_label = getattr(self, "content_type_label", None)
         for label in getattr(self, "_output_form_labels", []):
+            if label is compact_label:
+                label.setMinimumHeight(
+                    max(label.minimumSizeHint().height(), label.sizeHint().height())
+                )
+                continue
             label.setMinimumHeight(
                 max(
+                    control_height,
                     toggle_height,
                     label.minimumSizeHint().height(),
                     label.sizeHint().height(),
@@ -1210,28 +1248,23 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             if compact_height
             else OUTPUT_CARD_STACK_GAP
         )
-        card_spacing = 5 if compact_height else 10
+        card_spacing = 8 if compact_height else 10
         card_side_margin = 10 if compact_height else 14
         card_top_margin = 9 if compact_height else 14
         card_bottom_margin = 10 if compact_height else 14
         self.output_layout.setSpacing(outer_spacing)
         self.format_layout.setSpacing(card_spacing)
-        self.save_layout.setSpacing(6 if compact_height else max(6, card_spacing - 2))
+        self.save_layout.setSpacing(card_spacing)
         self.format_layout.setContentsMargins(
             card_side_margin,
             card_top_margin,
             card_side_margin,
             card_bottom_margin,
         )
-        self.save_layout.setContentsMargins(
-            0,
-            2 if compact_height else 4,
-            0,
-            0,
-        )
+        self.save_layout.setContentsMargins(0, 0, 0, 0)
         self._set_output_form_label_width()
         self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.mode_row_layout.setSpacing(10 if stacked_mode else 14)
+        self.mode_row_layout.setSpacing(6 if stacked_mode else 8)
         self.folder_row_layout.setDirection(
             QBoxLayout.Direction.TopToBottom
             if stacked_mode
@@ -1697,15 +1730,17 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.codec_combo.minimumHeight(),
                 self.format_combo.minimumHeight(),
             )
-        quality_row = None
-        if len(getattr(self, "_output_form_rows", [])) >= 3:
-            quality_row = self._output_form_rows[2]
+        compact_row = getattr(self, "content_type_row", None)
+        quality_row = getattr(self, "format_row", None)
         for row in getattr(self, "_output_form_rows", []):
             layout = row.layout()
             if layout is not None:
                 layout.invalidate()
                 layout.activate()
-            target_height = max(control_height, row.minimumSizeHint().height())
+            if row is compact_row:
+                target_height = max(row.minimumSizeHint().height(), row.sizeHint().height())
+            else:
+                target_height = max(control_height, row.minimumSizeHint().height())
             if expand_visible_quality_row and row is quality_row:
                 target_height = max(target_height, row.sizeHint().height())
             row.setMinimumHeight(
@@ -1847,6 +1882,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             main_layout.invalidate()
             main_layout.activate()
         self._sync_current_panel_geometry()
+        self._refresh_ready_summary_text()
 
     def _queue_deferred_resize_sync(self) -> None:
         self._resize_sync_timer.start(0)
@@ -1880,32 +1916,118 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             layout.activate()
 
     def _refresh_ready_summary(self) -> None:
-        show_summary = any(
-            (
-                bool(self._current_mode()),
-                bool(self._current_container()),
-                bool(self._current_codec()),
-                bool(self._selected_format_label()),
-            )
-        )
-        visibility_changed = self.ready_summary_label.isVisible() != show_summary
-        self.ready_summary_label.setVisible(show_summary)
-        if not show_summary:
-            self._refresh_queue_preview_card()
-            if visibility_changed:
-                self._refresh_downloads_page_geometry()
-            return
-        container = self._current_container()
-        container_text = container.upper() if container else "Container"
-        codec_text = self._ready_summary_codec()
-        quality_text = self._ready_summary_quality(self._selected_format_label())
-        folder_text = self._ready_summary_folder()
-        self.ready_summary_label.setText(
-            f"{container_text} • {codec_text} • {quality_text} • {folder_text}"
-        )
+        visibility_changed = self.ready_summary_label.isVisible()
+        self._ready_summary_full_text = ""
+        self.ready_summary_label.hide()
+        self.ready_summary_label.clear()
+        self.ready_summary_label.setToolTip("")
         self._refresh_queue_preview_card()
         if visibility_changed:
             self._refresh_downloads_page_geometry()
+
+    def _current_item_full_text(self) -> str:
+        progress_clean = str(self._current_item_progress or "-").strip() or "-"
+        title_clean = re.sub(r"\s+", " ", str(self._current_item_title or "-").strip()) or "-"
+        prefix = "Item: " if progress_clean == "-" else f"Item: {progress_clean} - "
+        return f"{prefix}{title_clean}"
+
+    def _current_item_floor_text(self) -> str:
+        progress_clean = str(self._current_item_progress or "-").strip() or "-"
+        if progress_clean == "-":
+            return "Item: -"
+        return f"Item: {progress_clean} - ..."
+
+    def _ready_summary_width_cap(self, text: str) -> int:
+        clean = str(text or "")
+        if not clean:
+            return 0
+        summary_metrics = QFontMetrics(self.ready_summary_label.font())
+        summary_ideal = max(0, summary_metrics.horizontalAdvance(clean) + 2)
+        parent = self.ready_summary_label.parentWidget()
+        total_width = 0
+        if parent is not None:
+            total_width = parent.contentsRect().width()
+            if total_width <= 0:
+                total_width = parent.width()
+        if total_width <= 0:
+            return summary_ideal
+
+        details_layout = parent.layout() if parent is not None else None
+        outer_spacing = details_layout.spacing() if details_layout is not None else 0
+
+        strip_layout = self.metrics_strip.layout()
+        strip_margins = (
+            strip_layout.contentsMargins() if strip_layout is not None else None
+        )
+        fixed_strip_width = 0
+        if strip_margins is not None:
+            fixed_strip_width += strip_margins.left() + strip_margins.right()
+        strip_spacing = strip_layout.spacing() if strip_layout is not None else 0
+        fixed_strip_width += max(0, strip_spacing) * 3
+        for label in (self.progress_label, self.speed_label, self.eta_label):
+            fixed_strip_width += max(
+                label.width(),
+                label.minimumWidth(),
+                label.sizeHint().width(),
+            )
+
+        flexible_width = max(0, total_width - fixed_strip_width - max(0, outer_spacing))
+        if flexible_width <= 0:
+            return 0
+
+        item_metrics = QFontMetrics(self.item_label.font())
+        item_floor = max(
+            0,
+            item_metrics.horizontalAdvance(self._current_item_floor_text()) + 2,
+        )
+        item_ideal = max(
+            item_floor,
+            item_metrics.horizontalAdvance(self._current_item_full_text()) + 2,
+        )
+        summary_floor = min(summary_ideal, summary_metrics.horizontalAdvance("...") + 2)
+        base_total = item_floor + summary_floor
+        if base_total <= 0:
+            return min(summary_ideal, flexible_width)
+        if flexible_width <= base_total:
+            return max(
+                0,
+                min(
+                    summary_ideal,
+                    int(round(flexible_width * (summary_floor / base_total))),
+                ),
+            )
+
+        extra_room = flexible_width - base_total
+        summary_extra = max(0, summary_ideal - summary_floor)
+        item_extra = max(0, item_ideal - item_floor)
+        extras_total = summary_extra + item_extra
+        if extras_total <= 0:
+            return min(summary_ideal, flexible_width)
+
+        summary_share = int(round(extra_room * (summary_extra / extras_total)))
+        return max(0, min(summary_ideal, summary_floor + summary_share, flexible_width))
+
+    def _refresh_ready_summary_text(self, full_text: str | None = None) -> None:
+        if full_text is not None:
+            self._ready_summary_full_text = str(full_text or "")
+        text = self._ready_summary_full_text
+        if not text:
+            self.ready_summary_label.setMaximumWidth(16777215)
+            self.ready_summary_label.clear()
+            self.ready_summary_label.setToolTip("")
+            return
+        available_width = self._ready_summary_width_cap(text)
+        self.ready_summary_label.setMaximumWidth(max(0, available_width))
+        shown_text = text
+        if available_width > 0:
+            metrics = QFontMetrics(self.ready_summary_label.font())
+            shown_text = metrics.elidedText(
+                text,
+                Qt.TextElideMode.ElideLeft,
+                max(0, available_width - 2),
+            )
+        self.ready_summary_label.setText(shown_text)
+        self.ready_summary_label.setToolTip(text)
 
     def _workspace_view_index(self, name: str) -> int:
         mapping = {
@@ -2787,19 +2909,37 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         current = self.format_combo.currentText().strip()
         self.format_combo.blockSignals(True)
         self.format_combo.clear()
-        for label in self._filtered_labels:
-            self.format_combo.addItem(label)
-        if current and current in self._filtered_labels:
-            self.format_combo.setCurrentText(current)
+        if mode == "audio":
+            self.format_combo.addItem("Auto")
+            self.format_combo.setCurrentIndex(0)
+        else:
+            for label in self._filtered_labels:
+                self.format_combo.addItem(label)
+            if current and current in self._filtered_labels:
+                self.format_combo.setCurrentText(current)
         self.format_combo.blockSignals(False)
         self._sync_format_combo_visibility()
 
     def _selected_format_label(self) -> str:
-        return self.format_combo.currentText().strip()
+        label = self.format_combo.currentText().strip()
+        if label and not (self._current_mode() == "audio" and label == "Auto"):
+            return label
+        if self._current_mode() != "audio":
+            return ""
+        if format_pipeline.BEST_AUDIO_LABEL in self._filtered_lookup:
+            return format_pipeline.BEST_AUDIO_LABEL
+        if self._filtered_labels:
+            return str(self._filtered_labels[0] or "").strip()
+        if format_pipeline.BEST_AUDIO_LABEL in self._audio_lookup:
+            return format_pipeline.BEST_AUDIO_LABEL
+        if self._audio_labels:
+            return str(self._audio_labels[0] or "").strip()
+        return format_pipeline.BEST_AUDIO_LABEL
 
     def _sync_format_combo_visibility(self) -> None:
         has_quality_options = self.format_combo.count() > 0
         has_formats_data = bool(self._video_labels or self._audio_labels)
+        mode = self._current_mode()
         if has_quality_options:
             placeholder_text = "Choose exact format/quality."
         elif has_formats_data:
@@ -2808,22 +2948,49 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             placeholder_text = "Analyze a URL to load quality."
         self.format_combo.setPlaceholderText(placeholder_text)
 
-        label_text = "Codec & quality"
-        visibility_changed = not self.format_combo.isVisible()
-        label_changed = self.codec_label.text() != label_text
-        self.format_combo.setVisible(True)
-        self.codec_label.setText(label_text)
+        if mode == "audio":
+            codec_label_text = "Codec not needed"
+            codec_tooltip = "No codec selection is needed for audio-only downloads."
+            format_label_text = "Quality"
+            format_tooltip = "Best audio is selected automatically for audio-only downloads."
+            format_visible = True
+        else:
+            codec_label_text = "Codec"
+            codec_tooltip = "Choose preferred video codec."
+            format_label_text = "Quality"
+            format_tooltip = "Choose exact format/quality."
+            format_visible = True
+
+        visibility_changed = self.format_combo.isVisible() != format_visible
+        label_changed = (
+            self.codec_label.text() != codec_label_text
+            or self.format_label.text() != format_label_text
+        )
+        self.format_combo.setVisible(format_visible)
+        self.codec_label.setText(codec_label_text)
+        self.codec_combo.setToolTip(codec_tooltip)
+        self.format_label.setText(format_label_text)
+        self.format_combo.setToolTip(format_tooltip)
         if visibility_changed or label_changed:
             self._sync_output_form_row_heights(
-                expand_visible_quality_row=True
+                expand_visible_quality_row=format_visible
             )
             self._refresh_downloads_page_geometry()
 
     def _selected_format_info(self) -> dict | None:
         label = self._selected_format_label()
         if not label:
-            return None
-        return self._filtered_lookup.get(label)
+            return (
+                dict(format_pipeline.BEST_AUDIO_INFO)
+                if self._current_mode() == "audio"
+                else None
+            )
+        info = self._filtered_lookup.get(label)
+        if info is not None:
+            return info
+        if self._current_mode() == "audio":
+            return self._audio_lookup.get(label) or dict(format_pipeline.BEST_AUDIO_INFO)
+        return None
 
     def _snapshot_download_options(self) -> DownloadOptions:
         return app_service.build_download_options(

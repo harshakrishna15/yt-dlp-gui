@@ -263,7 +263,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: __surface__;
             border: 1px solid __border_soft__;
             border-radius: 18px;
-            padding: 10px 16px;
+            padding: 8px 16px;
             color: __field_text__;
             font-size: 16px;
             selection-background-color: __accent_wash_strong__;
@@ -279,7 +279,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-family: "Arial Rounded MT Bold", "Avenir Next";
             font-size: 14px;
             font-weight: 700;
-            padding: 10px 16px;
+            padding: 8px 16px;
         }
         QWidget#commandBar QPushButton:hover {
             background: __surface__;
@@ -294,7 +294,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __text_inverse__;
             border: 1px solid __accent__;
             font-weight: 700;
-            padding: 10px 16px;
+            padding: 8px 16px;
             min-height: 0px;
             border-radius: 18px;
         }
@@ -784,13 +784,13 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __field_text__;
         }
         QLineEdit, QComboBox {
-            padding: 10px 16px;
+            padding: 8px 16px;
         }
         QPlainTextEdit, QListWidget {
             padding: 8px 12px;
         }
         QComboBox {
-            padding: 9px 16px;
+            padding: 7px 16px;
             padding-right: 46px;
             selection-background-color: __surface_selected_strong__;
             selection-color: __field_text__;
@@ -1229,7 +1229,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __field_disabled_border__;
         }
         QPushButton#compactButton {
-            padding: 8px 14px;
+            padding: 6px 14px;
         }
         QCheckBox {
             color: __button_text__;
@@ -1244,22 +1244,23 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QWidget#contentModeSegment {
             background: __surface_soft_glass__;
             border: 1px solid __border_soft__;
-            border-radius: 22px;
+            border-radius: 16px;
         }
         QFrame#contentModeSelection {
             background: __accent__;
-            border: 1px solid __accent__;
-            border-radius: 18px;
+            border: 1px solid __accent_border__;
+            border-radius: 11px;
         }
-        QRadioButton#contentModeButton {
+        QRadioButton#contentModeButton, QPushButton#contentModeButton {
             background: transparent;
             border: none;
-            border-radius: 18px;
+            border-radius: 12px;
             color: __nav_text__;
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 700;
             spacing: 0px;
-            padding: 12px 18px;
+            padding: 0px 16px;
+            text-align: center;
         }
         QRadioButton#contentModeButton::indicator {
             width: 0px;
@@ -1267,16 +1268,16 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             background: transparent;
         }
-        QRadioButton#contentModeButton:hover {
+        QRadioButton#contentModeButton:hover, QPushButton#contentModeButton:hover {
             color: __button_hover_text__;
         }
-        QRadioButton#contentModeButton:checked {
+        QRadioButton#contentModeButton:checked, QPushButton#contentModeButton:checked {
             color: __text_inverse__;
         }
-        QRadioButton#contentModeButton:disabled {
+        QRadioButton#contentModeButton:disabled, QPushButton#contentModeButton:disabled {
             color: __field_disabled_text__;
         }
-        QRadioButton#contentModeButton:checked:disabled {
+        QRadioButton#contentModeButton:checked:disabled, QPushButton#contentModeButton:checked:disabled {
             color: rgba(246, 242, 234, 180);
         }
         QCheckBox:hover, QRadioButton:hover {

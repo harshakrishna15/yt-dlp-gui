@@ -42,6 +42,8 @@ def queue_settings_issue(settings: Mapping[str, Any]) -> str | None:
         return "codec"
     if not settings.get("format_filter"):
         return "container"
+    if mode == "audio":
+        return None
     if not settings.get("format_label"):
         return "format"
     return None

@@ -18,11 +18,10 @@ class TestCoreQueueLogic(unittest.TestCase):
             ),
             "container",
         )
-        self.assertEqual(
+        self.assertIsNone(
             queue_logic.queue_settings_issue(
                 {"mode": "audio", "format_filter": "mp3", "format_label": ""}
-            ),
-            "format",
+            )
         )
         self.assertIsNone(
             queue_logic.queue_settings_issue(

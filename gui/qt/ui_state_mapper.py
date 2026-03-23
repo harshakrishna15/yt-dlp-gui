@@ -24,6 +24,7 @@ def apply_control_state(
 
     window.container_combo.setEnabled(state.container_enabled)
     window.codec_combo.setEnabled(state.codec_enabled)
+    window.post_process_row.setVisible(state.show_convert)
     window.convert_check.setVisible(state.show_convert)
     window.convert_check.setEnabled(state.convert_enabled)
     if not window.convert_check.isEnabled():
