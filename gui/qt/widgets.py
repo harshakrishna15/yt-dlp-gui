@@ -648,16 +648,67 @@ class QueueEmptyStateWidget(QWidget):
         self._stack.setCurrentIndex(self._recent_index)
 
 
-def _style_combo_popup(combo: QComboBox, *, border_color: str = "#505049") -> None:
+def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> None:
     popup = combo.view().window()
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
     popup.setAutoFillBackground(True)
     popup.setContentsMargins(0, 0, 0, 0)
     popup.setStyleSheet(
         f"""
-        background: #20201d;
-        border: 1px solid {border_color};
-        border-radius: 22px;
+        QWidget {{
+            background: #111210;
+            border: none;
+            border-radius: 24px;
+        }}
+        QListView#nativeComboView {{
+            background: #272724;
+            border: 1px solid {border_color};
+            border-radius: 20px;
+            padding: 6px;
+            outline: 0;
+            margin: 0px;
+        }}
+        QListView#nativeComboView::item {{
+            background: transparent;
+            min-height: 30px;
+            padding: 7px 12px;
+            border-radius: 12px;
+            color: #f2ede5;
+            font-weight: 600;
+        }}
+        QListView#nativeComboView::item:hover {{
+            background: #30302c;
+            color: #f1eee7;
+        }}
+        QListView#nativeComboView::item:selected {{
+            background: #314d45;
+            color: #86d7b7;
+        }}
+        QListView#nativeComboView QScrollBar:vertical {{
+            background: transparent;
+            width: 10px;
+            margin: 2px 0px 2px 0px;
+            border: none;
+        }}
+        QListView#nativeComboView QScrollBar::handle:vertical {{
+            background: #62625c;
+            border-radius: 5px;
+            min-height: 24px;
+        }}
+        QListView#nativeComboView QScrollBar::handle:vertical:hover {{
+            background: #7d7d75;
+        }}
+        QListView#nativeComboView QScrollBar::sub-line:vertical,
+        QListView#nativeComboView QScrollBar::add-line:vertical,
+        QListView#nativeComboView QScrollBar::up-arrow:vertical,
+        QListView#nativeComboView QScrollBar::down-arrow:vertical {{
+            height: 0px;
+            width: 0px;
+        }}
+        QListView#nativeComboView QScrollBar::add-page:vertical,
+        QListView#nativeComboView QScrollBar::sub-page:vertical {{
+            background: transparent;
+        }}
         """
     )
 

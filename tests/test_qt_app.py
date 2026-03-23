@@ -3108,6 +3108,27 @@ class TestQtApp(unittest.TestCase):
         self.assertIsNotNone(session_panel)
         self.assertIsNone(session_panel.findChild(QFrame, "panelCard"))
 
+    def test_settings_button_opens_preferences_panel_without_outer_card(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.settings_button.click()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window._active_panel_name, "settings")
+        self.assertEqual(
+            self.window.panel_stack.currentIndex(),
+            self.window._panel_name_to_index["settings"],
+        )
+        self.assertTrue(self.window.settings_button.isChecked())
+        settings_panel = self.window.panel_stack.currentWidget()
+        self.assertIsNotNone(settings_panel)
+        self.assertIsNone(settings_panel.findChild(QFrame, "panelCard"))
+        form_card = settings_panel.findChild(QFrame, "panelFormCard")
+        self.assertIsNotNone(form_card)
+        assert form_card is not None
+        margins = form_card.layout().contentsMargins()
+        self.assertEqual((margins.left(), margins.top(), margins.right(), margins.bottom()), (0, 0, 0, 0))
+
     def test_downloads_button_is_noop_when_main_view_is_already_active(self) -> None:
         self.assertIsNone(self.window._active_panel_name)
         self.assertEqual(
@@ -3289,6 +3310,25 @@ class TestQtApp(unittest.TestCase):
             )
             combo.hidePopup()
             QApplication.processEvents()
+
+    def test_settings_combo_popup_uses_custom_surface_styling(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        combo = self.window.edit_friendly_encoder_combo
+        combo.showPopup()
+        QApplication.processEvents()
+
+        self.assertTrue(combo.view().window().isVisible())
+        popup_stylesheet = combo.view().window().styleSheet()
+        self.assertIn("QListView#nativeComboView", popup_stylesheet)
+        self.assertIn("background: #272724;", popup_stylesheet)
+        self.assertIn("border-radius: 20px;", popup_stylesheet)
+
+        combo.hidePopup()
+        QApplication.processEvents()
 
     def test_close_event_while_downloading_requests_cancel(self) -> None:
         self.window._is_downloading = True

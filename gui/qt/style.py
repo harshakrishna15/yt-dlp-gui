@@ -1004,18 +1004,20 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
         }
         QListView#nativeComboView {
-            background: __surface_glass_strong__;
+            background: __surface__;
             border: 1px solid __border_soft__;
-            border-radius: __input_radius__;
-            padding: 4px;
+            border-radius: 20px;
+            padding: 6px;
             outline: 0;
             margin: 0px;
         }
         QListView#nativeComboView::item {
-            min-height: 28px;
-            padding: 5px 9px;
-            border-radius: 9px;
+            background: transparent;
+            min-height: 30px;
+            padding: 7px 12px;
+            border-radius: 12px;
             color: __field_text__;
+            font-weight: 600;
         }
         QListView#nativeComboView::item:hover {
             background: __surface_soft_alt__;

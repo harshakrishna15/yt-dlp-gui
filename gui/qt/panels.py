@@ -213,12 +213,13 @@ def build_settings_panel(
         parent=parent,
         title="Preferences",
         subtitle="",
+        framed=False,
     )
 
     form_card = QFrame(shell.panel)
     form_card.setObjectName("panelFormCard")
     form_card_layout = QVBoxLayout(form_card)
-    form_card_layout.setContentsMargins(16, 16, 16, 16)
+    form_card_layout.setContentsMargins(0, 0, 0, 0)
     form_card_layout.setSpacing(12)
 
     settings_stack = QWidget(form_card)
@@ -234,6 +235,7 @@ def build_settings_panel(
     encode_title = QLabel("Edit-friendly encode", encode_card)
     encode_title.setObjectName("settingsRowTitle")
     edit_friendly_encoder_combo = _NativeComboBox(encode_card)
+    edit_friendly_encoder_combo.setObjectName("settingsComboBox")
     register_native_combo(edit_friendly_encoder_combo)
     edit_friendly_encoder_combo.addItem("Automatic (recommended)", "auto")
     edit_friendly_encoder_combo.addItem("Apple hardware encoder", "apple")
@@ -241,8 +243,8 @@ def build_settings_panel(
     edit_friendly_encoder_combo.addItem("AMD hardware encoder", "amd")
     edit_friendly_encoder_combo.addItem("Intel hardware encoder", "intel")
     edit_friendly_encoder_combo.addItem("CPU software encoder", "cpu")
-    edit_friendly_encoder_combo.setMinimumWidth(280)
-    edit_friendly_encoder_combo.setMaximumWidth(460)
+    edit_friendly_encoder_combo.setMinimumWidth(340)
+    edit_friendly_encoder_combo.setMaximumWidth(560)
     encode_card_layout.addWidget(encode_title)
     encode_card_layout.addWidget(
         edit_friendly_encoder_combo, alignment=Qt.AlignmentFlag.AlignLeft
