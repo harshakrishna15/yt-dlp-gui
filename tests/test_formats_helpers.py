@@ -144,6 +144,35 @@ class TestTooling(unittest.TestCase):
         self.assertEqual(str(path), "/usr/local/bin/ffmpeg")
         self.assertEqual(source, "system")
 
+    @patch("gui.common.tooling.subprocess.run")
+    def test_available_ffmpeg_encoders_parses_requested_candidates(
+        self,
+        mock_run,
+    ) -> None:
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout=" V....D h264_nvenc\n V....D libx264\n",
+            stderr="",
+        )
+
+        encoders = tooling.available_ffmpeg_encoders(
+            Path("/usr/local/bin/ffmpeg"),
+            candidates=("h264_nvenc", "libx264", "h264_qsv"),
+        )
+
+        self.assertEqual(encoders, {"h264_nvenc", "libx264"})
+
+    @patch("gui.common.tooling.subprocess.run", side_effect=OSError("missing"))
+    def test_available_ffmpeg_encoders_returns_empty_on_subprocess_error(
+        self,
+        _mock_run,
+    ) -> None:
+        encoders = tooling.available_ffmpeg_encoders(
+            Path("/usr/local/bin/ffmpeg"),
+            candidates=("h264_nvenc", "libx264"),
+        )
+        self.assertEqual(encoders, set())
+
     @patch("gui.common.tooling.resolve_binary")
     def test_missing_required_binaries(self, mock_resolve_binary) -> None:
         def _fake(tool: str):

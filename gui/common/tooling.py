@@ -1,5 +1,8 @@
+import re
 import shutil
+import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Tuple
 
@@ -23,6 +26,32 @@ def resolve_binary(tool: str) -> Tuple[Path | None, str]:
             if _is_executable(candidate):
                 return candidate, "system"
     return None, "missing"
+
+
+def available_ffmpeg_encoders(
+    ffmpeg_path: Path,
+    *,
+    candidates: Iterable[str],
+) -> set[str]:
+    cmd = [str(ffmpeg_path), "-hide_banner", "-encoders"]
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return set()
+    if result.returncode != 0:
+        return set()
+    text = f"{result.stdout}\n{result.stderr}"
+    found: set[str] = set()
+    for codec in set(candidates):
+        if re.search(rf"\b{re.escape(codec)}\b", text):
+            found.add(codec)
+    return found
 
 
 def missing_required_binaries() -> list[str]:

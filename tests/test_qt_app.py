@@ -10,8 +10,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import QEasingCurve, QRect, Qt
-    from PySide6.QtGui import QCloseEvent, QFontMetrics
+    from PySide6.QtCore import QEvent, QPoint, QRect, Qt
+    from PySide6.QtGui import QCloseEvent, QFontMetrics, QHelpEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import (
         QApplication,
@@ -26,28 +26,38 @@ try:
         QPushButton,
         QRadioButton,
         QScrollArea,
+        QSizePolicy,
         QStyle,
         QStyleFactory,
         QWidget,
     )
 
     from gui.common import download
-    from gui.app_meta import APP_DISPLAY_NAME, APP_VERSION
+    from gui.app_meta import (
+        APP_DESCRIPTION,
+        APP_DISPLAY_NAME,
+        APP_PRIVACY_NOTE,
+        APP_SHORTCUT_LINES,
+        APP_VERSION,
+    )
     from gui.core import urls as core_urls
     from gui.qt.app import (
-        PREVIEW_TITLE_TOOLTIP_DEFAULT,
         SOURCE_DETAILS_NONE_INDEX,
         SOURCE_DETAILS_PLAYLIST_INDEX,
         QtYtDlpGui,
+        _TooltipBlocker,
         _TooltipDelayProxyStyle,
+        _disable_tooltips,
+        _apply_tooltip_delay_style,
     )
     from gui.qt.constants import (
         MIN_WINDOW_HEIGHT,
         MIN_WINDOW_WIDTH,
-        PANEL_SWITCH_FADE_MS,
         ROOMY_CONTENT_LAYOUT_MIN_HEIGHT,
+        TOOLTIP_WAKE_UP_DELAY_MS,
     )
     from gui.qt import style as qt_style
+    from gui.qt.widgets import QUEUE_META_ROLE, QUEUE_TITLE_ROLE
 
     HAS_QT = True
 except ModuleNotFoundError:
@@ -69,7 +79,17 @@ class TestQtApp(unittest.TestCase):
                 "open_folder_after_download": False,
             },
         )
+        self._resolve_ffmpeg_patch = patch(
+            "gui.qt.window_settings.tooling.resolve_binary",
+            return_value=(Path("/usr/local/bin/ffmpeg"), "system"),
+        )
+        self._available_encoders_patch = patch(
+            "gui.qt.window_settings.tooling.available_ffmpeg_encoders",
+            return_value={"h264_nvenc", "libx264"},
+        )
         self._load_settings_patch.start()
+        self._resolve_ffmpeg_patch.start()
+        self._available_ffmpeg_encoders = self._available_encoders_patch.start()
         self.window = QtYtDlpGui()
 
     def tearDown(self) -> None:
@@ -78,6 +98,8 @@ class TestQtApp(unittest.TestCase):
         self.window.close()
         self.window.deleteLater()
         self._load_settings_patch.stop()
+        self._resolve_ffmpeg_patch.stop()
+        self._available_encoders_patch.stop()
 
     def _assert_visible_text_widgets_fit(
         self,
@@ -211,6 +233,49 @@ class TestQtApp(unittest.TestCase):
             1250,
         )
 
+    def test_apply_tooltip_delay_style_uses_configured_wake_up_delay(self) -> None:
+        app = QApplication.instance()
+        self.assertIsNotNone(app)
+        assert app is not None
+
+        current_style = app.style()
+        base_style = QStyleFactory.create("Fusion")
+        if base_style is None and current_style is not None:
+            base_style = QStyleFactory.create(current_style.objectName())
+        self.assertIsNotNone(base_style)
+        assert base_style is not None
+
+        app.setStyle(base_style)
+        _apply_tooltip_delay_style(app)
+
+        delayed_style = app.style()
+        self.assertIsInstance(delayed_style, _TooltipDelayProxyStyle)
+        self.assertEqual(
+            delayed_style.styleHint(QStyle.StyleHint.SH_ToolTip_WakeUpDelay),
+            TOOLTIP_WAKE_UP_DELAY_MS,
+        )
+
+    def test_disable_tooltips_installs_blocker_and_filters_tooltip_events(self) -> None:
+        app = QApplication.instance()
+        self.assertIsNotNone(app)
+        assert app is not None
+
+        _disable_tooltips(app)
+        blocker = app.findChild(_TooltipBlocker, "_tooltipBlocker")
+        self.assertIsNotNone(blocker)
+
+        tooltip_event = QHelpEvent(
+            QEvent.Type.ToolTip,
+            QPoint(4, 4),
+            self.window.analyze_button.mapToGlobal(QPoint(4, 4)),
+        )
+        self.window.analyze_button.setToolTip("Analyze")
+
+        with patch("gui.qt.app.QToolTip.hideText") as hide_text_mock:
+            QApplication.sendEvent(self.window.analyze_button, tooltip_event)
+
+        hide_text_mock.assert_called_once_with()
+
     def test_source_defaults_hide_playlist_items_and_prompt(self) -> None:
         self.assertEqual(
             self.window.source_details_stack.currentIndex(),
@@ -226,7 +291,7 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.analyze_button.text(), "Analyze URL")
         self.assertFalse(self.window.analyze_button.isEnabled())
         self.assertEqual(
-            self.window.source_feedback_label.text(),
+            self.window._current_source_feedback_message,
             "Paste a video or playlist URL to load available formats.",
         )
 
@@ -239,6 +304,15 @@ class TestQtApp(unittest.TestCase):
         self.assertRegex(
             stylesheet,
             r"QFrame#panelCard\s*\{[^}]*border-radius:\s*24px;",
+        )
+
+    def test_panel_stack_paints_opaque_background_behind_transparent_pages(self) -> None:
+        self.assertEqual(self.window.panel_stack.objectName(), "panelStack")
+
+        stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
+        self.assertRegex(
+            stylesheet,
+            r"QStackedWidget#panelStack\s*\{[^}]*background:\s*#[0-9a-fA-F]{6};[^}]*border:\s*none;",
         )
 
     def test_output_section_shell_is_transparent_in_all_stages(self) -> None:
@@ -379,7 +453,11 @@ class TestQtApp(unittest.TestCase):
         stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
         self.assertRegex(
             stylesheet,
-            r"QLineEdit, QComboBox\s*\{[^}]*qlineargradient",
+            r"QLineEdit\s*\{[^}]*qlineargradient",
+        )
+        self.assertRegex(
+            stylesheet,
+            r"QComboBox\s*\{[^}]*qlineargradient",
         )
         self.assertRegex(
             stylesheet,
@@ -390,43 +468,24 @@ class TestQtApp(unittest.TestCase):
             r"QComboBox::drop-down\s*\{[^}]*width:\s*32px;",
         )
 
-    def test_source_preview_card_is_not_rendered(self) -> None:
+    def test_downloads_state_host_replaces_legacy_source_workspace_shell(self) -> None:
         self.window.show()
         QApplication.processEvents()
 
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
-
-        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
-        self.window._refresh_queue_preview_card()
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
-        self.assertEqual(self.window.source_preview_badge.text(), "URL")
-        self.assertEqual(self.window.preview_title_label.text(), "Next queue item")
-        self.assertEqual(
-            self.window.source_preview_placeholder.text(),
-            "Analyze the URL to confirm formats and availability.",
+        self.assertIsNone(
+            self.window.main_page.findChild(QWidget, "legacySourceStateHost")
         )
-        self.assertEqual(self.window.source_preview_detail_one.text(), "Choose mode")
-        self.assertEqual(
-            self.window.source_preview_detail_two.text(),
-            "Downloads folder",
-        )
-        self.assertEqual(self.window.source_preview_detail_three.text(), "Queue empty")
+        self.assertIsNone(self.window.main_page.findChild(QWidget, "sourceSection"))
+        self.assertIsNone(self.window.main_page.findChild(QWidget, "sourceViewStack"))
+        self.assertIsNone(self.window.main_page.findChild(QWidget, "workspaceTabBar"))
 
-    def test_legacy_source_state_is_hosted_off_page(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        legacy_host = self.window.main_page.findChild(QWidget, "legacySourceStateHost")
-        self.assertIsNotNone(legacy_host)
-        assert legacy_host is not None
-        self.assertFalse(legacy_host.isVisible())
-
-        source_section = legacy_host.findChild(QWidget, "sourceSection")
-        self.assertIsNotNone(source_section)
-        assert source_section is not None
-        self.assertFalse(source_section.isVisibleTo(self.window.main_page))
+        state_host = self.window.main_page.findChild(QWidget, "downloadsStateHost")
+        self.assertIsNotNone(state_host)
+        assert state_host is not None
+        self.assertFalse(state_host.isVisible())
+        self.assertEqual(state_host.width(), 0)
+        self.assertEqual(state_host.height(), 0)
+        self.assertLess(state_host.geometry().right(), 0)
 
     def test_queue_empty_state_defaults_to_centered_placeholder(self) -> None:
         self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
@@ -438,132 +497,6 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(
             len(self.window.queue_empty_state.findChildren(QPushButton, "historyAgainButton")),
             0,
-        )
-
-    def test_queue_empty_state_shows_recent_downloads_and_requeues_item(self) -> None:
-        self.window._effects.clock.now = lambda: datetime(2026, 3, 15, 12, 0, 0)
-        self.window.download_history = [
-            {
-                "timestamp": "2026-03-14 10:00:00",
-                "path": "/tmp/video-a.mp4",
-                "name": "video-a.mp4",
-                "title": "Example video A",
-                "format_label": "1080p",
-                "file_size_bytes": 78_900_000,
-                "source_url": "https://example.com/watch?v=a",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "codec_filter": "h264",
-                    "format_label": "1080p",
-                },
-            },
-            {
-                "timestamp": "2026-03-13 10:00:00",
-                "path": "/tmp/video-b.mp4",
-                "name": "video-b.mp4",
-                "title": "Example video B",
-                "format_label": "720p",
-                "file_size_bytes": 48_100_000,
-                "source_url": "https://example.com/watch?v=b",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "codec_filter": "h264",
-                    "format_label": "720p",
-                },
-            },
-            {
-                "timestamp": "2026-03-12 10:00:00",
-                "path": "/tmp/audio-c.mp3",
-                "name": "audio-c.mp3",
-                "title": "Example audio C",
-                "format_label": "Audio only",
-                "file_size_bytes": 22_400_000,
-                "source_url": "https://example.com/watch?v=c",
-                "queue_settings": {
-                    "mode": "audio",
-                    "format_filter": "mp3",
-                    "format_label": "Audio only",
-                },
-            },
-            {
-                "timestamp": "2026-03-11 10:00:00",
-                "path": "/tmp/video-d.mp4",
-                "name": "video-d.mp4",
-                "title": "Example video D",
-                "format_label": "480p",
-                "file_size_bytes": 10_000_000,
-                "source_url": "https://example.com/watch?v=d",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "format_label": "480p",
-                },
-            },
-        ]
-
-        self.window._refresh_queue_empty_state()
-        QApplication.processEvents()
-
-        buttons = self.window.queue_empty_state.findChildren(QPushButton, "historyAgainButton")
-        titles = self.window.queue_empty_state.findChildren(QLabel, "recentDownloadTitle")
-        meta = self.window.queue_empty_state.findChildren(QLabel, "recentDownloadMeta")
-        workspace_buttons = self.window.queue_summary_empty.findChildren(
-            QPushButton, "historyAgainButton"
-        )
-        self.assertEqual(len(buttons), 3)
-        self.assertEqual(len(workspace_buttons), 3)
-        self.assertEqual([label.text() for label in titles], ["Example video A", "Example video B", "Example audio C"])
-        self.assertIn("MP4", meta[0].text())
-        self.assertIn("yesterday", meta[0].text())
-
-        workspace_buttons[0].click()
-        QApplication.processEvents()
-
-        self.assertEqual(len(self.window.queue_items), 1)
-        self.assertEqual(self.window.queue_items[0]["url"], "https://example.com/watch?v=a")
-        self.assertEqual(self.window.queue_items[0]["settings"]["codec_filter"], "h264")
-        self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_content_index)
-
-    def test_source_preview_card_stays_hidden_after_url_entry(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
-        self.window._refresh_queue_preview_card()
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
-        self.assertEqual(self.window.preview_title_label.text(), "Next queue item")
-        self.assertEqual(
-            self.window.source_preview_detail_three.text(),
-            "Queue empty",
-        )
-
-    def test_source_preview_card_remains_hidden_with_loaded_metadata(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        self.window._set_preview_title(
-            "How did they fit an entire PC in this?? - HP @ CES 2026"
-        )
-        self.window._set_source_summary(
-            {
-                "badge_text": "VID",
-                "eyebrow_text": "Video ready",
-                "subtitle_text": "ShortCircuit",
-                "detail_one_text": "Formats ready",
-                "detail_two_text": "5m 32s",
-                "detail_three_text": "13 video formats",
-            }
-        )
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
-        self.assertFalse(self.window.source_preview_badge.isVisible())
-        self.assertEqual(
-            self.window.preview_value.text(),
-            "How did they fit an entire PC in this?? - HP @ CES 2026",
         )
 
     def test_source_row_buttons_are_not_vertically_clipped(self) -> None:
@@ -605,10 +538,6 @@ class TestQtApp(unittest.TestCase):
         self._assert_visible_text_widgets_fit(
             self.window.main_page,
             label="downloads summary",
-        )
-
-        self.window.queue_workspace_stack.setCurrentIndex(
-            self.window._queue_workspace_preview_index
         )
         self.window._set_source_feedback(
             "Formats are ready. Choose options and start the download.",
@@ -667,62 +596,11 @@ class TestQtApp(unittest.TestCase):
             label="queue panel empty state",
         )
 
-        self.window._effects.clock.now = lambda: datetime(2026, 3, 15, 12, 0, 0)
-        self.window.download_history = [
-            {
-                "timestamp": "2026-03-14 10:00:00",
-                "path": "/tmp/video-a.mp4",
-                "name": "video-a.mp4",
-                "title": "Example video A",
-                "format_label": "1080p",
-                "file_size_bytes": 78_900_000,
-                "source_url": "https://example.com/watch?v=a",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "codec_filter": "h264",
-                    "format_label": "1080p",
-                },
-            }
-        ]
-        self.window._refresh_queue_empty_state()
+        self.window.downloads_button.click()
         QApplication.processEvents()
         self._assert_visible_text_widgets_fit(
-            self.window.panel_stack.currentWidget(),
-            label="queue panel recent downloads",
-        )
-
-        self.window._open_panel("session")
-        QApplication.processEvents()
-        self._assert_visible_text_widgets_fit(
-            self.window.panel_stack.currentWidget(),
-            label="session panel",
-        )
-
-        self.window._open_panel("history")
-        QApplication.processEvents()
-        self._assert_visible_text_widgets_fit(
-            self.window.panel_stack.currentWidget(),
-            label="history panel empty state",
-        )
-
-        self.window._record_download_output(
-            Path("/tmp/example.mp4"),
-            "https://example.com/watch?v=a",
-            {
-                "title": "Some title",
-                "format_label": "1080p",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "format_label": "1080p",
-                },
-            },
-        )
-        QApplication.processEvents()
-        self._assert_visible_text_widgets_fit(
-            self.window.panel_stack.currentWidget(),
-            label="history panel filled state",
+            self.window.run_actions_card,
+            label="run actions card",
         )
 
         self.window._open_panel("logs")
@@ -738,31 +616,6 @@ class TestQtApp(unittest.TestCase):
             self.window.panel_stack.currentWidget(),
             label="logs panel filled state",
         )
-
-    def test_ready_summary_stays_hidden(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.ready_summary_label.isVisible())
-
-        self.window.video_radio.setChecked(True)
-        self.window._on_mode_change()
-        self.window._refresh_ready_summary()
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.ready_summary_label.isVisible())
-
-        self.window._is_downloading = True
-        self.window._refresh_ready_summary()
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.ready_summary_label.isVisible())
-
-        self.window._is_downloading = False
-        self.window._refresh_ready_summary()
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.ready_summary_label.isVisible())
 
     def test_switching_modes_does_not_refresh_preview_for_empty_intermediate_state(
         self,
@@ -825,75 +678,6 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(geometry_refreshes, 0)
 
-    def test_switching_modes_keeps_loaded_preview_geometry_stable(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self._load_ready_preview_with_formats(queue_ready=True)
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        before_preview_height = self.window.source_preview_card.height()
-        before_preview_top = self.window.source_preview_card.mapTo(
-            self.window.main_page,
-            self.window.source_preview_card.rect().topLeft(),
-        ).y()
-        before_output_height = self.window.output_section.height()
-
-        self.window.audio_radio.click()
-        QApplication.processEvents()
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.source_preview_card.height(), before_preview_height)
-        self.assertEqual(
-            self.window.source_preview_card.mapTo(
-                self.window.main_page,
-                self.window.source_preview_card.rect().topLeft(),
-            ).y(),
-            before_preview_top,
-        )
-        self.assertEqual(self.window.output_section.height(), before_output_height)
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
-
-        self.window.video_radio.click()
-        QApplication.processEvents()
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.source_preview_card.height(), before_preview_height)
-        self.assertEqual(
-            self.window.source_preview_card.mapTo(
-                self.window.main_page,
-                self.window.source_preview_card.rect().topLeft(),
-            ).y(),
-            before_preview_top,
-        )
-
-    def test_switching_modes_does_not_reset_queue_workspace_stack_when_preview_stays_active(
-        self,
-    ) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self._load_ready_preview_with_formats(queue_ready=True)
-
-        with patch.object(
-            self.window.queue_workspace_stack,
-            "setCurrentIndex",
-            wraps=self.window.queue_workspace_stack.setCurrentIndex,
-        ) as set_index_mock:
-            self.window.audio_radio.click()
-            QApplication.processEvents()
-            self.window.video_radio.click()
-            QApplication.processEvents()
-
-        self.assertEqual(set_index_mock.call_count, 0)
-
     def test_switching_modes_with_loaded_preview_avoid_full_geometry_refresh(
         self,
     ) -> None:
@@ -911,77 +695,28 @@ class TestQtApp(unittest.TestCase):
             self.window.video_radio.click()
             QApplication.processEvents()
 
-        self.assertEqual(geometry_refresh_mock.call_count, 2)
+        self.assertEqual(geometry_refresh_mock.call_count, 0)
 
-    def test_queue_summary_list_stays_scrollable_when_items_exist(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self._load_ready_preview_with_formats(queue_ready=True)
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.queue_summary_list.count(), 1)
-        self.assertEqual(
-            self.window.queue_summary_list.verticalScrollBarPolicy(),
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
-        )
-        self.assertEqual(
-            self.window.queue_summary_list.horizontalScrollBarPolicy(),
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-        )
-
-    def test_history_workspace_list_is_scrollable(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        self.window._record_download_output(
-            Path("/tmp/example.mp4"),
-            "https://example.com/watch?v=a",
-            {
-                "title": "Some title",
-                "format_label": "1080p",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "format_label": "1080p",
-                },
-            },
-        )
-        QApplication.processEvents()
-
-        self.assertEqual(self.window.history_summary_list.count(), 1)
-        self.assertEqual(
-            self.window.history_summary_list.verticalScrollBarPolicy(),
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
-        )
-        self.assertEqual(
-            self.window.history_summary_list.horizontalScrollBarPolicy(),
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-        )
 
     def test_workspace_defaults_keep_downloads_tab_active(self) -> None:
         self.window.show()
         QApplication.processEvents()
 
-        self.assertEqual(
-            self.window.source_view_stack.currentIndex(),
-            self.window._queue_view_index,
-        )
-        self.assertEqual(self.window._active_workspace_name, "queue")
         self.assertTrue(self.window.downloads_button.isChecked())
         self.assertTrue(self.window.downloads_button.isVisible())
-        self.assertTrue(self.window.session_button.isVisible())
         self.assertTrue(self.window.queue_button.isVisible())
-        self.assertTrue(self.window.history_button.isVisible())
-        self.assertFalse(self.window.session_button.isChecked())
         self.assertFalse(self.window.queue_button.isChecked())
-        self.assertFalse(self.window.history_button.isChecked())
-        self.assertFalse(self.window.queue_view_button.isVisible())
-        self.assertFalse(self.window.history_view_button.isVisible())
+        self.assertIsNone(self.window.main_page.findChild(QWidget, "sourceViewStack"))
+        self.assertIsNone(self.window.main_page.findChild(QWidget, "workspaceTabBar"))
+        self.assertNotIn(
+            "Session",
+            [
+                button.text()
+                for button in self.window.classic_actions.findChildren(QPushButton)
+            ],
+        )
 
-    def test_top_nav_selection_animates_between_downloads_and_history_tabs(self) -> None:
+    def test_top_nav_selection_animates_between_downloads_and_queue_tabs(self) -> None:
         self.window.show()
         QApplication.processEvents()
 
@@ -992,11 +727,11 @@ class TestQtApp(unittest.TestCase):
 
         start_x = selection.geometry().center().x()
         downloads_x = self.window.downloads_button.geometry().center().x()
-        target_x = self.window.history_button.geometry().center().x()
+        target_x = self.window.queue_button.geometry().center().x()
         self.assertLess(abs(start_x - downloads_x), 4)
         self.assertLess(start_x, target_x)
 
-        self.window.history_button.click()
+        self.window.queue_button.click()
         QTest.qWait(80)
         QApplication.processEvents()
 
@@ -1009,7 +744,7 @@ class TestQtApp(unittest.TestCase):
 
         final_x = selection.geometry().center().x()
         self.assertLess(abs(final_x - target_x), 4)
-        self.assertTrue(self.window.history_button.isChecked())
+        self.assertTrue(self.window.queue_button.isChecked())
 
     def test_top_panel_switch_keeps_source_header_geometry_stable(self) -> None:
         self.window.show()
@@ -1017,121 +752,31 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
 
         downloads_tab_rect = self.window.downloads_button.geometry()
-        session_tab_rect = self.window.session_button.geometry()
         queue_tab_rect = self.window.queue_button.geometry()
-        history_tab_rect = self.window.history_button.geometry()
         source_width = self.window.source_row.parentWidget().width()
 
-        self.window.history_button.click()
+        self.window.queue_button.click()
         QApplication.processEvents()
 
         self.assertEqual(self.window.downloads_button.geometry(), downloads_tab_rect)
-        self.assertEqual(self.window.session_button.geometry(), session_tab_rect)
         self.assertEqual(self.window.queue_button.geometry(), queue_tab_rect)
-        self.assertEqual(self.window.history_button.geometry(), history_tab_rect)
         self.assertEqual(self.window.source_row.parentWidget().width(), source_width)
-        self.assertEqual(self.window._active_panel_name, "history")
+        self.assertEqual(self.window._active_panel_name, "queue")
         self.assertEqual(
             self.window.panel_stack.currentIndex(),
-            self.window._panel_name_to_index["history"],
+            self.window._panel_name_to_index["queue"],
         )
-        self.assertTrue(self.window.history_button.isChecked())
+        self.assertTrue(self.window.queue_button.isChecked())
 
         self.window.downloads_button.click()
         QApplication.processEvents()
 
-        self.assertEqual(
-            self.window.source_view_stack.currentIndex(),
-            self.window._queue_view_index,
-        )
         self.assertIsNone(self.window._active_panel_name)
         self.assertEqual(
             self.window.panel_stack.currentIndex(),
             self.window._main_page_index,
         )
-        self.assertEqual(self.window._active_workspace_name, "queue")
         self.assertTrue(self.window.downloads_button.isChecked())
-
-    def test_queue_workspace_keeps_preview_page_for_empty_and_filled_queue(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.queue_summary_list.count(), 0)
-
-        self.window.queue_items = [
-            {
-                "url": "https://www.youtube.com/watch?v=abc123",
-                "settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "codec_filter": "h264",
-                    "format_label": "1080p",
-                },
-            }
-        ]
-        self.window._refresh_queue_panel()
-        QApplication.processEvents()
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.queue_summary_list.count(), 1)
-
-        self.window.queue_items = []
-        self.window._refresh_queue_panel()
-        QApplication.processEvents()
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.queue_summary_list.count(), 0)
-
-    def test_loaded_source_preview_keeps_empty_queue_workspace_visible(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        self._load_ready_preview_with_formats()
-
-        self.assertEqual(
-            self.window.queue_workspace_stack.currentIndex(),
-            self.window._queue_workspace_preview_index,
-        )
-        self.assertEqual(self.window.preview_title_label.text(), "Ready to queue")
-        self.assertEqual(self.window.preview_value.text(), "Sample")
-
-    def test_source_preview_keeps_output_section_stable_when_metadata_arrives(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        before_preview_height = self.window.source_preview_card.height()
-        before_output_height = self.window.output_section.height()
-
-        self.window._set_preview_title(
-            "How did they fit an entire PC in this?? - HP @ CES 2026"
-        )
-        self.window._set_source_summary(
-            {
-                "badge_text": "VID",
-                "eyebrow_text": "Video ready",
-                "subtitle_text": "ShortCircuit",
-                "detail_one_text": "Formats ready",
-                "detail_two_text": "5m 32s",
-                "detail_three_text": "13 video formats",
-            }
-        )
-        QApplication.processEvents()
-
-        self.assertGreaterEqual(
-            self.window.source_preview_card.height(), before_preview_height
-        )
-        self.assertEqual(self.window.output_section.height(), before_output_height)
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
 
     def test_convert_check_stays_hidden_for_video_containers(self) -> None:
         self.window.show()
@@ -1159,43 +804,13 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window.convert_check.isVisible())
         self.assertFalse(self.window.post_process_row.isVisible())
 
-    def test_source_preview_card_stays_hidden_after_metric_change(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-
-        for chip in (
-            self.window.source_preview_detail_one,
-            self.window.source_preview_detail_two,
-            self.window.source_preview_detail_three,
-        ):
-            chip.setStyleSheet(
-                "font-size: 14px; padding: 6px 10px; border: 1px solid #000;"
-            )
-
-        self.window._set_preview_title(
-            "How did they fit an entire PC in this?? - HP @ CES 2026"
-        )
-        self.window._set_source_summary(
-            {
-                "badge_text": "VID",
-                "eyebrow_text": "Video ready",
-                "subtitle_text": "ShortCircuit",
-                "detail_one_text": "Formats ready",
-                "detail_two_text": "5m 32s",
-                "detail_three_text": "13 video formats",
-            }
-        )
-        QApplication.processEvents()
-
-        self.assertFalse(self.window.source_preview_card.isVisibleTo(self.window.main_page))
-
     def test_url_entry_enables_analyze_action_without_auto_fetching(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
 
         self.assertTrue(self.window.analyze_button.isEnabled())
         self.assertEqual(self.window.analyze_button.text(), "Analyze URL")
         self.assertFalse(self.window._fetch_timer.isActive())
-        self.assertIn("Analyze URL", self.window.source_feedback_label.text())
+        self.assertIn("Analyze URL", self.window._current_source_feedback_message)
 
     def test_url_entry_does_not_resize_source_row_controls(self) -> None:
         self.window.show()
@@ -1387,12 +1002,54 @@ class TestQtApp(unittest.TestCase):
             self.window.analyze_button.sizeHint().height(),
         )
 
+    def test_analyze_button_width_stays_stable_across_source_states(self) -> None:
+        self.window.show()
+        self.window.resize(1180, 820)
+        QApplication.processEvents()
+
+        self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        baseline_width = self.window.analyze_button.width()
+        baseline_left = self.window.analyze_button.mapTo(
+            self.window.source_row,
+            self.window.analyze_button.rect().topLeft(),
+        ).x()
+        baseline_url_width = self.window.url_edit.width()
+
+        self.window._video_labels = ["1080p"]
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.analyze_button.text(), "Refresh formats")
+        self.assertEqual(self.window.analyze_button.width(), baseline_width)
+        self.assertEqual(
+            self.window.analyze_button.mapTo(
+                self.window.source_row,
+                self.window.analyze_button.rect().topLeft(),
+            ).x(),
+            baseline_left,
+        )
+        self.assertEqual(self.window.url_edit.width(), baseline_url_width)
+
+        self.window._is_fetching = True
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.analyze_button.text(), "Analyzing...")
+        self.assertEqual(self.window.analyze_button.width(), baseline_width)
+        self.assertEqual(
+            self.window.analyze_button.mapTo(
+                self.window.source_row,
+                self.window.analyze_button.rect().topLeft(),
+            ).x(),
+            baseline_left,
+        )
+        self.assertEqual(self.window.url_edit.width(), baseline_url_width)
+
     def test_secondary_panels_start_with_empty_states(self) -> None:
         self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
-        self.assertEqual(
-            self.window.history_stack.currentIndex(),
-            self.window._history_empty_index,
-        )
 
         self.window._clear_logs()
 
@@ -1402,82 +1059,6 @@ class TestQtApp(unittest.TestCase):
         )
         self.assertEqual(self.window.logs_view.toPlainText(), "")
         self.assertFalse(self.window.logs_clear_button.isEnabled())
-
-    def test_empty_state_cards_are_not_vertically_clipped(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self.window._clear_logs()
-        QApplication.processEvents()
-
-        for panel_name, stack in (("history", self.window.history_stack),):
-            self.window._open_panel(panel_name)
-            QApplication.processEvents()
-            page = stack.currentWidget()
-            self.assertIsNotNone(page)
-            assert page is not None
-            labels = [
-                label
-                for label in page.findChildren(QLabel)
-                if label.objectName()
-                in {
-                    "panelEmptyBadge",
-                    "panelEmptyTitle",
-                    "panelEmptyDescription",
-                    "panelEmptyHint",
-                }
-            ]
-            self.assertTrue(labels, f"No empty-state labels found for {panel_name}")
-            for label in labels:
-                self.assertGreaterEqual(
-                    label.geometry().height(),
-                    label.sizeHint().height(),
-                    (
-                        f"{panel_name} empty-state label {label.objectName()} "
-                        "is vertically clipped"
-                    ),
-                )
-
-    def test_empty_state_cards_are_left_aligned(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self.window._clear_logs()
-        QApplication.processEvents()
-
-        for panel_name, stack in (("history", self.window.history_stack),):
-            self.window._open_panel(panel_name)
-            QApplication.processEvents()
-            page = stack.currentWidget()
-            self.assertIsNotNone(page)
-            assert page is not None
-
-            layout = page.layout()
-            self.assertIsNotNone(layout)
-            assert layout is not None
-            card_item = layout.itemAt(1)
-            self.assertIsNotNone(card_item)
-            assert card_item is not None
-            self.assertTrue(
-                bool(card_item.alignment() & Qt.AlignmentFlag.AlignLeft),
-                f"{panel_name} empty-state card is not left aligned",
-            )
-
-            labels = [
-                label
-                for label in page.findChildren(QLabel)
-                if label.objectName()
-                in {
-                    "panelEmptyBadge",
-                    "panelEmptyTitle",
-                    "panelEmptyDescription",
-                    "panelEmptyHint",
-                }
-            ]
-            self.assertTrue(labels, f"No empty-state labels found for {panel_name}")
-            for label in labels:
-                self.assertTrue(
-                    bool(label.alignment() & Qt.AlignmentFlag.AlignLeft),
-                    f"{panel_name} empty-state label {label.objectName()} is not left aligned",
-                )
 
     def test_source_feedback_routes_messages_to_logs(self) -> None:
         self.window._clear_logs()
@@ -1527,7 +1108,6 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
         QTest.qWait(350)
         QApplication.processEvents()
-        self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertTrue(self.window.source_feedback_toast.isVisible())
         self.assertEqual(self.window.source_feedback_toast_message.text(), loading_message)
         self.assertEqual(self.window.source_feedback_toast_title.text(), "Loading formats")
@@ -1541,7 +1121,6 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
         QTest.qWait(350)
         QApplication.processEvents()
-        self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertTrue(self.window.source_feedback_toast.isVisible())
         self.assertEqual(self.window.source_feedback_toast_message.text(), message)
         self.assertEqual(self.window.source_feedback_toast_title.text(), "Formats ready")
@@ -1555,14 +1134,12 @@ class TestQtApp(unittest.TestCase):
             tone="neutral",
         )
         QApplication.processEvents()
-        self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertFalse(self.window.source_feedback_toast.isVisible())
         self.assertEqual(len(self.window._visible_source_feedback_toasts()), 0)
 
         self.window._set_source_feedback("", tone="hidden")
         self.window._apply_responsive_layout()
         QApplication.processEvents()
-        self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertFalse(self.window.source_feedback_toast.isVisible())
 
     def test_source_feedback_toasts_stack_newest_first(self) -> None:
@@ -1606,7 +1183,6 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
 
         self.assertTrue(self.window.source_feedback_toast.isVisible())
-        self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertEqual(self.window.source_feedback_toast_message.text(), message)
         self.assertEqual(self.window.source_feedback_toast_title.text(), "Loading formats")
 
@@ -1618,10 +1194,6 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
 
         before_row_y = self.window.source_row.geometry().y()
-        before_preview_top = self.window.source_preview_card.mapTo(
-            self.window.main_page,
-            self.window.source_preview_card.rect().topLeft(),
-        ).y()
         root = self.window.centralWidget()
         self.assertIsNotNone(root)
         assert root is not None
@@ -1637,14 +1209,8 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
         target_rect = self.window._source_feedback_toast_target_rect()
         toast_rect = self.window.source_feedback_toast.geometry()
-        preview_top = self.window.source_preview_card.mapTo(
-            self.window.main_page,
-            self.window.source_preview_card.rect().topLeft(),
-        ).y()
 
         self.assertEqual(self.window.source_row.geometry().y(), before_row_y)
-        self.assertEqual(preview_top, before_preview_top)
-        self.assertFalse(self.window.source_feedback_label.isVisible())
         self.assertTrue(self.window.source_feedback_toast.isVisible())
         self.assertEqual(toast_rect, target_rect)
         self.assertTrue(root_rect.contains(toast_rect))
@@ -1698,6 +1264,28 @@ class TestQtApp(unittest.TestCase):
 
         self.assertFalse(self.window.source_feedback_toast.isVisible())
 
+    def test_source_feedback_uses_custom_toast_title_when_provided(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        with patch.object(self.window, "_source_feedback_toast_timeout_ms", return_value=0):
+            self.window._set_source_feedback(
+                "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+                tone="success",
+                title="Added to queue",
+            )
+            QApplication.processEvents()
+            QTest.qWait(350)
+            QApplication.processEvents()
+
+        self.assertTrue(self.window.source_feedback_toast.isVisible())
+        self.assertEqual(self.window.source_feedback_toast_title.text(), "Added to queue")
+        self.assertEqual(
+            self.window.source_feedback_toast_message.text(),
+            "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+        )
+
     def test_about_dialog_uses_app_metadata(self) -> None:
         with patch.object(self.window._effects.dialogs, "information") as info_mock:
             self.window._show_about_dialog()
@@ -1707,6 +1295,9 @@ class TestQtApp(unittest.TestCase):
         self.assertIn(APP_DISPLAY_NAME, title)
         self.assertIn(APP_DISPLAY_NAME, message)
         self.assertIn(APP_VERSION, message)
+        self.assertIn(APP_DESCRIPTION, message)
+        self.assertIn(APP_PRIVACY_NOTE, message)
+        self.assertIn(APP_SHORTCUT_LINES[0], message)
 
     def test_load_settings_applies_saved_output_folder(self) -> None:
         with patch(
@@ -1739,13 +1330,13 @@ class TestQtApp(unittest.TestCase):
             window.close()
             window.deleteLater()
 
-    def test_open_folder_after_download_prefers_latest_output_folder(self) -> None:
+    def test_open_folder_after_download_prefers_post_download_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
             target = Path(output_dir) / "video.mp4"
             target.write_text("x", encoding="utf-8")
             self.window.open_folder_after_download_check.setChecked(True)
             self.window._set_output_dir_text("/tmp/other-folder")
-            self.window._set_last_output_path(target)
+            self.window._set_post_download_output_dir(target.parent)
 
             with patch.object(self.window._effects.desktop, "open_path") as open_mock:
                 self.window._maybe_open_output_folder()
@@ -2203,16 +1794,46 @@ class TestQtApp(unittest.TestCase):
                     f"Run actions drift away from the output section at {width}x{height}",
                 )
 
-    def test_session_panel_hosts_run_activity_card(self) -> None:
+    def test_run_state_host_keeps_activity_card_off_page_after_actions_are_embedded(self) -> None:
         self.window.show()
         QApplication.processEvents()
-        self.window._open_panel("session")
+        self.window.downloads_button.click()
         QApplication.processEvents()
 
-        self.assertEqual(self.window._active_panel_name, "session")
-        self.assertTrue(self.window.session_button.isChecked())
-        self.assertTrue(self.window.run_activity_card.isVisible())
-        self.assertIsNot(self.window.run_activity_card.parentWidget(), self.window.main_page)
+        self.assertIsNone(self.window._active_panel_name)
+        self.assertTrue(self.window.downloads_button.isChecked())
+        self.assertIs(
+            self.window.run_activity_card.parentWidget(),
+            self.window.run_state_host,
+        )
+        self.assertFalse(self.window.run_state_host.isVisible())
+        self.assertFalse(self.window.run_activity_card.isVisibleTo(self.window.main_page))
+        self.assertEqual(self.window.run_state_host.width(), 0)
+        self.assertEqual(self.window.run_state_host.height(), 0)
+        self.assertLess(self.window.run_state_host.geometry().right(), 0)
+
+    def test_hidden_run_state_widgets_do_not_overlap_source_row(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        row_rect = QRect(
+            self.window.source_row.mapTo(
+                self.window.main_page,
+                self.window.source_row.rect().topLeft(),
+            ),
+            self.window.source_row.size(),
+        )
+        for widget in (
+            self.window.run_state_host,
+            self.window.run_activity_card,
+        ):
+            with self.subTest(widget=widget.objectName() or type(widget).__name__):
+                geom = QRect(
+                    widget.mapTo(self.window.main_page, widget.rect().topLeft()),
+                    widget.size(),
+                )
+                self.assertFalse(widget.isVisibleTo(self.window.main_page))
+                self.assertFalse(geom.intersects(row_rect))
 
     def test_output_section_fills_right_column_height(self) -> None:
         self.window.show()
@@ -2269,8 +1890,12 @@ class TestQtApp(unittest.TestCase):
 
         scan_types = (QLineEdit, QComboBox, QPushButton, QCheckBox, QRadioButton)
 
-        for section in (self.window.output_section,):
-            section_rect = section.rect().adjusted(0, 0, -1, -1)
+        for section in (
+            self.window.format_card,
+            self.window.save_card,
+            self.window.run_actions_card,
+        ):
+            section_rect = section.rect().adjusted(-2, -2, 1, 1)
             controls = []
             for control_type in scan_types:
                 controls.extend(
@@ -2306,9 +1931,6 @@ class TestQtApp(unittest.TestCase):
                         ),
                     )
 
-        self.window._open_panel("session")
-        QApplication.processEvents()
-
         section = self.window.run_activity_card
         section_rect = section.rect().adjusted(0, 0, -1, -1)
         controls = []
@@ -2325,7 +1947,7 @@ class TestQtApp(unittest.TestCase):
             mapped.append((widget, rect))
             self.assertTrue(
                 section_rect.contains(rect),
-                f"{type(widget).__name__} is clipped outside {section.objectName()} in the session panel",
+                f"{type(widget).__name__} is clipped outside {section.objectName()} in the run activity card",
             )
 
         for idx, (left_widget, left_rect) in enumerate(mapped):
@@ -2339,7 +1961,7 @@ class TestQtApp(unittest.TestCase):
                 self.assertFalse(
                     overlap.width() > 2 and overlap.height() > 2,
                     (
-                        "Unexpected overlap in the session panel layout: "
+                        "Unexpected overlap in the run activity card layout: "
                         f"{type(left_widget).__name__} vs {type(right_widget).__name__}"
                     ),
                 )
@@ -2408,7 +2030,6 @@ class TestQtApp(unittest.TestCase):
             self.window.cancel_button.geometry().left(),
             self.window.add_queue_button.geometry().left(),
         )
-        self.assertFalse(self.window.start_queue_button.isVisible())
         start_left = self.window.start_button.mapTo(
             self.window.run_actions_card,
             self.window.start_button.rect().topLeft(),
@@ -2441,40 +2062,19 @@ class TestQtApp(unittest.TestCase):
             self.window.analyze_button.minimumHeight(),
         )
 
-    def test_session_stats_stay_visible_without_clipping_at_compact_heights(self) -> None:
+    def test_run_activity_card_omits_session_stats_cards(self) -> None:
         self.window.show()
         QApplication.processEvents()
-        self.window._open_panel("session")
-        QApplication.processEvents()
 
-        for width, height in ((900, 760), (900, 800), (1220, 820)):
-            with self.subTest(size=f"{width}x{height}"):
-                self.window.resize(width, height)
-                QApplication.processEvents()
+        self.assertIsNone(self.window.run_activity_card.findChild(QWidget, "runStatsGrid"))
+        self.assertEqual(
+            self.window.run_activity_card.findChildren(QWidget, "sessionMetricCard"),
+            [],
+        )
 
-                self.assertTrue(self.window.session_title_label.isVisible())
-                self.assertTrue(self.window.run_stats_grid.isVisible())
-
-                for label in (
-                    self.window.session_completed_value,
-                    self.window.session_failed_value,
-                    self.window.session_success_rate_value,
-                    self.window.session_remaining_value,
-                    self.window.session_speed_value,
-                    self.window.session_peak_speed_value,
-                    self.window.session_downloaded_value,
-                    self.window.session_elapsed_value,
-                ):
-                    self.assertGreaterEqual(
-                        label.geometry().height(),
-                        label.minimumSizeHint().height(),
-                        f"{label.objectName()} is vertically clipped at {width}x{height}",
-                    )
-
-    def test_session_cards_keep_comfortable_inner_padding_in_compact_layout(self) -> None:
+    def test_run_activity_card_keeps_comfortable_inner_padding_in_compact_layout(self) -> None:
         self.window.show()
         QApplication.processEvents()
-        self.window._open_panel("session")
         self.window.resize(900, 800)
         QApplication.processEvents()
 
@@ -2483,65 +2083,6 @@ class TestQtApp(unittest.TestCase):
         activity_margins = activity_layout.contentsMargins()
         self.assertGreaterEqual(activity_margins.left(), 8)
         self.assertGreaterEqual(activity_margins.top(), 8)
-
-        metric_cards = self.window.run_stats_grid.findChildren(QFrame, "sessionMetricCard")
-        self.assertEqual(len(metric_cards), 8)
-        for card in metric_cards:
-            card_layout = card.layout()
-            self.assertIsNotNone(card_layout)
-            margins = card_layout.contentsMargins()
-            self.assertGreaterEqual(margins.left(), 8)
-            self.assertGreaterEqual(margins.right(), 8)
-            self.assertGreaterEqual(margins.top(), 6)
-            self.assertGreaterEqual(margins.bottom(), 6)
-
-        result_layout = self.window.download_result_card.layout()
-        self.assertIsNotNone(result_layout)
-        result_margins = result_layout.contentsMargins()
-        self.assertGreaterEqual(result_margins.left(), 10)
-        self.assertGreaterEqual(result_margins.right(), 10)
-        self.assertGreaterEqual(result_margins.top(), 6)
-        self.assertGreaterEqual(result_margins.bottom(), 6)
-
-    def test_session_stat_cards_do_not_overlap_at_wide_sizes(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self.window._open_panel("session")
-        QApplication.processEvents()
-
-        for width, height in ((1220, 900), (1500, 900), (1700, 960)):
-            with self.subTest(size=f"{width}x{height}"):
-                self.window.resize(width, height)
-                QApplication.processEvents()
-
-                cards = self.window.run_stats_grid.findChildren(QWidget, "sessionMetricCard")
-                self.assertEqual(len(cards), 8)
-                mapped = [
-                    (
-                        card,
-                        QRect(
-                            card.mapTo(
-                                self.window.run_stats_grid,
-                                card.rect().topLeft(),
-                            ),
-                            card.mapTo(
-                                self.window.run_stats_grid,
-                                card.rect().bottomRight(),
-                            ),
-                        ).normalized(),
-                    )
-                    for card in cards
-                ]
-                for idx, (left_card, left_rect) in enumerate(mapped):
-                    for right_card, right_rect in mapped[idx + 1 :]:
-                        overlap = left_rect.intersected(right_rect)
-                        self.assertFalse(
-                            overlap.width() > 2 and overlap.height() > 2,
-                            (
-                                f"Session metric cards overlap at {width}x{height}: "
-                                f"{left_card.objectName()} vs {right_card.objectName()}"
-                            ),
-                        )
 
     def test_combined_output_card_keeps_save_controls_nested_at_compact_or_default_heights(self) -> None:
         self.window.show()
@@ -2790,9 +2331,7 @@ class TestQtApp(unittest.TestCase):
 
         controls = [
             self.window.downloads_button,
-            self.window.session_button,
             self.window.queue_button,
-            self.window.history_button,
             self.window.logs_button,
             self.window.settings_button,
         ]
@@ -2851,9 +2390,7 @@ class TestQtApp(unittest.TestCase):
         actions_rect = self.window.top_actions.rect().adjusted(0, 0, -1, -1)
         for button in (
             self.window.downloads_button,
-            self.window.session_button,
             self.window.queue_button,
-            self.window.history_button,
             self.window.logs_button,
             self.window.settings_button,
         ):
@@ -2869,7 +2406,7 @@ class TestQtApp(unittest.TestCase):
                 f"{button.text()} shifted outside the top actions rail",
             )
 
-    def test_top_nav_selection_card_tracks_visible_section(self) -> None:
+    def test_top_nav_selection_card_tracks_visible_section_and_hides_for_settings(self) -> None:
         self.window.show()
         QApplication.processEvents()
 
@@ -2895,9 +2432,7 @@ class TestQtApp(unittest.TestCase):
         QTest.qWait(260)
         QApplication.processEvents()
 
-        settings_center = self.window.settings_button.geometry().center()
-        selection_center = selection.geometry().center()
-        self.assertLess(abs(selection_center.x() - settings_center.x()), 4)
+        self.assertFalse(selection.isVisible())
         self.assertTrue(self.window.settings_button.isChecked())
 
     def test_top_nav_selection_card_animates_between_sections(self) -> None:
@@ -3048,38 +2583,47 @@ class TestQtApp(unittest.TestCase):
             2,
         )
 
-    def test_classic_top_actions_keep_session_next_to_settings(self) -> None:
+    def test_classic_top_actions_remove_session_and_keep_settings_separate_on_right(self) -> None:
         self.window.show()
         QApplication.processEvents()
         self.window.resize(900, 760)
         QApplication.processEvents()
 
-        buttons = (
-            self.window.downloads_button,
-            self.window.queue_button,
-            self.window.history_button,
-            self.window.logs_button,
-            self.window.session_button,
-            self.window.settings_button,
-        )
         self.assertTrue(self.window.downloads_button.isVisible())
         self.assertTrue(self.window.queue_button.isVisible())
-        self.assertTrue(self.window.history_button.isVisible())
         self.assertTrue(self.window.logs_button.isVisible())
-        self.assertTrue(self.window.session_button.isVisible())
         self.assertTrue(self.window.settings_button.isVisible())
+        self.assertNotIn(
+            "Session",
+            [
+                button.text()
+                for button in self.window.classic_actions.findChildren(QPushButton)
+            ],
+        )
+        self.assertNotIn(
+            self.window.settings_button,
+            self.window.classic_actions.findChildren(QPushButton),
+        )
 
         x_positions = {
             button.text(): button.mapTo(
                 self.window.top_actions, button.rect().topLeft()
             ).x()
-            for button in buttons
+            for button in (
+                self.window.downloads_button,
+                self.window.queue_button,
+                self.window.logs_button,
+            )
             if button.isVisible()
         }
         self.assertEqual(
             sorted(x_positions, key=x_positions.get),
-            ["Downloads", "Queue", "History", "Logs", "Session", "Settings"],
+            ["Downloads", "Queue", "Logs"],
         )
+        settings_x = self.window.settings_button.mapTo(
+            self.window.top_actions, self.window.settings_button.rect().topLeft()
+        ).x()
+        self.assertGreater(settings_x, x_positions["Logs"])
 
     def test_downloads_button_returns_to_main_view(self) -> None:
         self.window._open_panel("queue")
@@ -3091,22 +2635,53 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.panel_stack.currentIndex(), self.window._main_page_index)
         self.assertTrue(self.window.downloads_button.isChecked())
 
-    def test_session_button_opens_session_panel(self) -> None:
-        self.window.show()
-        QApplication.processEvents()
-        self.window.session_button.click()
+    def test_queue_labels_use_title_case_and_panel_has_no_remove_button(self) -> None:
+        self.window._open_panel("queue")
         QApplication.processEvents()
 
-        self.assertEqual(self.window._active_panel_name, "session")
-        self.assertEqual(
-            self.window.panel_stack.currentIndex(),
-            self.window._panel_name_to_index["session"],
+        queue_panel = self.window.panel_stack.currentWidget()
+        self.assertIsNotNone(queue_panel)
+        assert queue_panel is not None
+        self.assertIsNone(queue_panel.findChild(QFrame, "panelCard"))
+        self.assertFalse(
+            any(
+                button.text() in {"Remove", "Move up", "Move down", "Clear"}
+                for button in queue_panel.findChildren(QPushButton)
+            )
         )
-        self.assertTrue(self.window.session_button.isChecked())
-        self.assertTrue(self.window.run_activity_card.isVisible())
-        session_panel = self.window.panel_stack.currentWidget()
-        self.assertIsNotNone(session_panel)
-        self.assertIsNone(session_panel.findChild(QFrame, "panelCard"))
+        self.assertIn(
+            "Download Queue",
+            [
+                label.text()
+                for label in queue_panel.findChildren(QLabel)
+                if label.text()
+            ],
+        )
+
+    def test_panels_do_not_render_header_subtitles(self) -> None:
+        for panel_name in ("queue", "logs", "settings"):
+            with self.subTest(panel=panel_name):
+                self.window._open_panel(panel_name)
+                QApplication.processEvents()
+
+                panel = self.window.panel_stack.currentWidget()
+                self.assertIsNotNone(panel)
+                assert panel is not None
+                self.assertEqual(panel.findChildren(QLabel, "panelHeaderSubtitle"), [])
+
+    def test_session_button_is_removed_from_top_actions(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        self.assertNotIn("session", self.window._panel_name_to_index)
+        self.assertNotIn("history", self.window._panel_name_to_index)
+        self.assertNotIn(
+            "Session",
+            [
+                button.text()
+                for button in self.window.classic_actions.findChildren(QPushButton)
+            ],
+        )
 
     def test_settings_button_opens_preferences_panel_without_outer_card(self) -> None:
         self.window.show()
@@ -3129,6 +2704,99 @@ class TestQtApp(unittest.TestCase):
         margins = form_card.layout().contentsMargins()
         self.assertEqual((margins.left(), margins.top(), margins.right(), margins.bottom()), (0, 0, 0, 0))
 
+    def test_settings_cards_remove_outer_layout_padding(self) -> None:
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        settings_panel = self.window.panel_stack.currentWidget()
+        self.assertIsNotNone(settings_panel)
+        assert settings_panel is not None
+
+        cards = settings_panel.findChildren(QFrame, "settingsRowCard")
+        app_card = settings_panel.findChild(QFrame, "settingsAppCard")
+        if app_card is not None:
+            cards.append(app_card)
+
+        self.assertGreaterEqual(len(cards), 3)
+        for card in cards:
+            with self.subTest(card=card.objectName()):
+                layout = card.layout()
+                self.assertIsNotNone(layout)
+                assert layout is not None
+                margins = layout.contentsMargins()
+                self.assertEqual(
+                    (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                    (0, 0, 0, 0),
+                )
+
+    def test_settings_cards_use_transparent_cardless_styling(self) -> None:
+        stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
+        self.assertRegex(
+            stylesheet,
+            r"QFrame#settingsRowCard, QFrame#settingsAppCard\s*\{[^}]*background:\s*transparent;[^}]*border:\s*none;[^}]*border-radius:\s*0px;",
+        )
+
+    def test_settings_panel_shows_only_basic_app_details_and_no_about_button(self) -> None:
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        settings_panel = self.window.panel_stack.currentWidget()
+        self.assertIsNotNone(settings_panel)
+        assert settings_panel is not None
+
+        self.assertFalse(
+            any(
+                button.text() == "About"
+                for button in settings_panel.findChildren(QPushButton)
+            )
+        )
+
+        label_text = [
+            label.text()
+            for label in settings_panel.findChildren(QLabel)
+            if label.text().strip()
+        ]
+        self.assertIn(APP_DISPLAY_NAME, label_text)
+        self.assertIn(f"Version {APP_VERSION}", label_text)
+        self.assertNotIn(APP_DESCRIPTION, label_text)
+        self.assertNotIn(APP_PRIVACY_NOTE, label_text)
+        self.assertNotIn("Shortcuts:", label_text)
+        self.assertNotIn("\n".join(APP_SHORTCUT_LINES), label_text)
+        self.assertIsNone(settings_panel.findChild(QLabel, "settingsAppIcon"))
+
+    def test_settings_app_footer_is_bottom_centered_without_app_heading(self) -> None:
+        self.window.show()
+        self.window.resize(900, 760)
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        settings_panel = self.window.panel_stack.currentWidget()
+        self.assertIsNotNone(settings_panel)
+        assert settings_panel is not None
+
+        form_card = settings_panel.findChild(QFrame, "panelFormCard")
+        app_card = settings_panel.findChild(QFrame, "settingsAppCard")
+        self.assertIsNotNone(form_card)
+        self.assertIsNotNone(app_card)
+        assert form_card is not None
+        assert app_card is not None
+
+        self.assertIsNone(app_card.findChild(QLabel, "settingsRowTitle"))
+
+        app_rect = QRect(
+            app_card.mapTo(form_card, app_card.rect().topLeft()),
+            app_card.size(),
+        )
+        form_rect = form_card.rect()
+        self.assertLessEqual(
+            abs(app_rect.center().x() - form_rect.center().x()),
+            4,
+        )
+        self.assertLessEqual(
+            abs(app_rect.bottom() - form_rect.bottom()),
+            4,
+        )
+
     def test_downloads_button_is_noop_when_main_view_is_already_active(self) -> None:
         self.assertIsNone(self.window._active_panel_name)
         self.assertEqual(
@@ -3146,16 +2814,12 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(self.window.downloads_button.isChecked())
         self.assertEqual(len(self.window._active_animations), before)
 
-    def test_panel_switch_uses_smoother_fade_timing(self) -> None:
+    def test_panel_switch_does_not_start_transition_animation(self) -> None:
+        before = len(self.window._active_animations)
         self.window._open_panel("queue")
+        QApplication.processEvents()
 
-        self.assertTrue(self.window._active_animations)
-        animation = self.window._active_animations[-1]
-        self.assertEqual(animation.duration(), PANEL_SWITCH_FADE_MS)
-        self.assertEqual(
-            animation.easingCurve().type(),
-            QEasingCurve.Type.InOutCubic,
-        )
+        self.assertEqual(len(self.window._active_animations), before)
 
     def test_on_url_changed_invalidates_fetch_and_resets_selection_state(self) -> None:
         self.window.video_radio.setChecked(True)
@@ -3201,13 +2865,6 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(
             self.window.status_value.text().startswith("Could not fetch formats")
         )
-        self.assertEqual(self.window.preview_value.text(), "-")
-        self.assertEqual(
-            self.window.preview_value.toolTip(),
-            PREVIEW_TITLE_TOOLTIP_DEFAULT,
-        )
-        self.assertEqual(self.window.source_preview_badge.text(), "URL")
-        self.assertEqual(self.window.preview_title_label.text(), "Next queue item")
 
     def test_fetching_state_keeps_format_controls_disabled_until_ready(self) -> None:
         self.window.url_edit.setText("https://www.youtube.com/watch?v=abc123")
@@ -3259,13 +2916,6 @@ class TestQtApp(unittest.TestCase):
             payload=payload,
             error=False,
             is_playlist=False,
-        )
-        self.assertEqual(self.window.source_preview_badge.text(), "VID")
-        self.assertEqual(self.window.preview_title_label.text(), "Ready to queue")
-        self.assertEqual(self.window.preview_value.text(), "Sample")
-        self.assertEqual(
-            self.window.source_preview_subtitle.text(),
-            "Example Channel · 5m 42s",
         )
         mp4_index = self.window.container_combo.findData("mp4")
         self.assertGreaterEqual(mp4_index, 0)
@@ -3330,6 +2980,70 @@ class TestQtApp(unittest.TestCase):
         combo.hidePopup()
         QApplication.processEvents()
 
+    def test_stylesheet_uses_one_shared_combo_box_shape(self) -> None:
+        stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
+        self.assertRegex(
+            stylesheet,
+            r"QComboBox\s*\{[^}]*border-radius:\s*16px;",
+        )
+
+    def test_settings_encoder_combo_matches_dropdown_box_height(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+
+        downloads_height = self.window.container_combo.height()
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.edit_friendly_encoder_combo.height(), downloads_height)
+
+    def test_settings_encoder_combo_disables_unavailable_encoders(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        combo = self.window.edit_friendly_encoder_combo
+        model = combo.model()
+
+        self.assertFalse(model.item(combo.findData("apple")).isEnabled())
+        self.assertTrue(model.item(combo.findData("nvidia")).isEnabled())
+        self.assertFalse(model.item(combo.findData("amd")).isEnabled())
+        self.assertFalse(model.item(combo.findData("intel")).isEnabled())
+        self.assertTrue(model.item(combo.findData("cpu")).isEnabled())
+
+    def test_add_to_queue_shows_counted_success_feedback(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats(queue_ready=True)
+        self.window._on_mode_change()
+        QApplication.processEvents()
+        mp4_index = self.window.container_combo.findData("mp4")
+        self.assertGreaterEqual(mp4_index, 0)
+        self.window.container_combo.setCurrentIndex(mp4_index)
+        avc1_index = self.window.codec_combo.findData("avc1")
+        self.assertGreaterEqual(avc1_index, 0)
+        self.window.codec_combo.setCurrentIndex(avc1_index)
+        self.assertGreater(self.window.format_combo.count(), 0)
+        self.window.format_combo.setCurrentIndex(0)
+        QApplication.processEvents()
+        self.assertTrue(self.window.add_queue_button.isEnabled())
+
+        with patch.object(self.window, "_source_feedback_toast_timeout_ms", return_value=0):
+            QTest.mouseClick(self.window.add_queue_button, Qt.MouseButton.LeftButton)
+            QApplication.processEvents()
+            QTest.qWait(350)
+            QApplication.processEvents()
+
+        self.assertEqual(len(self.window.queue_items), 2)
+        self.assertEqual(self.window.status_value.text(), "Added to queue as item 2")
+        self.assertEqual(self.window.source_feedback_toast_title.text(), "Added to queue")
+        self.assertEqual(
+            self.window.source_feedback_toast_message.text(),
+            "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+        )
+
     def test_close_event_while_downloading_requests_cancel(self) -> None:
         self.window._is_downloading = True
         self.window._cancel_requested = False
@@ -3355,96 +3069,6 @@ class TestQtApp(unittest.TestCase):
 
         close_mock.assert_called_once()
         self.assertFalse(self.window._close_after_cancel)
-
-    def test_download_result_defaults_to_empty_mode(self) -> None:
-        self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(
-            self.window.download_result_title.text(),
-            "No completed download yet.",
-        )
-        self.assertEqual(self.window.download_result_card.property("state"), "empty")
-        self.assertFalse(self.window.copy_output_path_button.isEnabled())
-        self.assertEqual(
-            self.window.download_result_path.text(),
-            "Files will appear here after a download finishes.",
-        )
-
-    def test_record_output_updates_latest_download_card(self) -> None:
-        output_path = Path("/tmp/test-video.mp4")
-
-        self.window._record_download_output(output_path, "https://example.com/video")
-
-        self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(
-            self.window.download_result_title.text(),
-            "Latest completed download",
-        )
-        self.assertEqual(self.window.download_result_card.property("state"), "ready")
-        self.assertTrue(self.window.download_result_path.text().endswith(".mp4"))
-        self.assertEqual(
-            self.window.download_result_path.toolTip(),
-            str(output_path),
-        )
-        self.assertTrue(self.window.copy_output_path_button.isEnabled())
-
-    def test_record_output_while_downloading_keeps_latest_output_available(self) -> None:
-        output_path = Path("/tmp/test-video.mp4")
-        self.window._is_downloading = True
-        self.window._update_controls_state()
-
-        self.window._record_download_output(output_path, "https://example.com/video")
-
-        self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(
-            self.window.download_result_title.text(),
-            "Latest completed download",
-        )
-        self.assertEqual(self.window.download_result_card.property("state"), "ready")
-        self.assertTrue(self.window.copy_output_path_button.isEnabled())
-        self.assertEqual(self.window.download_result_path.toolTip(), str(output_path))
-
-        self.window._on_download_done(download.DOWNLOAD_SUCCESS)
-
-        self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(
-            self.window.download_result_title.text(),
-            "Latest completed download",
-        )
-        self.assertEqual(self.window.download_result_card.property("state"), "ready")
-        self.assertTrue(self.window.copy_output_path_button.isEnabled())
-
-    def test_clearing_latest_output_resets_download_card(self) -> None:
-        output_path = Path("/tmp/test-video.mp4")
-        self.window._record_download_output(output_path, "https://example.com/video")
-        self.assertFalse(self.window.download_result_card.isHidden())
-
-        self.window._clear_last_output_path()
-
-        self.assertFalse(self.window.download_result_card.isHidden())
-        self.assertEqual(
-            self.window.download_result_title.text(),
-            "No completed download yet.",
-        )
-        self.assertEqual(self.window.download_result_card.property("state"), "empty")
-        self.assertEqual(
-            self.window.download_result_path.text(),
-            "Files will appear here after a download finishes.",
-        )
-        self.assertFalse(self.window.copy_output_path_button.isEnabled())
-
-    def test_download_result_card_height_stays_stable_between_empty_and_ready_states(self) -> None:
-        self.window.show()
-        self.window.resize(1220, 820)
-        QApplication.processEvents()
-        self.window._open_panel("session")
-        QApplication.processEvents()
-
-        empty_height = self.window.download_result_card.height()
-
-        self.window._record_download_output(Path("/tmp/test-video.mp4"), "https://example.com/video")
-        QApplication.processEvents()
-
-        self.assertEqual(self.window.download_result_card.height(), empty_height)
 
     def test_on_download_done_resets_progress_details(self) -> None:
         self.window._is_downloading = True
@@ -3637,66 +3261,6 @@ class TestQtApp(unittest.TestCase):
             initial_widths,
         )
 
-    def test_session_stat_cards_keep_same_width_when_values_change(self) -> None:
-        self.window.show()
-        self.window.resize(1220, 820)
-        QApplication.processEvents()
-        self.window._open_panel("session")
-        QApplication.processEvents()
-
-        cards = self.window.run_stats_grid.findChildren(QWidget, "sessionMetricCard")
-        initial_widths = [card.width() for card in cards]
-
-        self.window.session_completed_value.setText("999")
-        self.window.session_failed_value.setText("999")
-        self.window.session_success_rate_value.setText("100%")
-        self.window.session_remaining_value.setText("999")
-        self.window.session_speed_value.setText("9999.99 MiB/s")
-        self.window.session_peak_speed_value.setText("9999.99 MiB/s")
-        self.window.session_downloaded_value.setText("99999.9 GiB")
-        self.window.session_elapsed_value.setText("999:59:59")
-        QApplication.processEvents()
-
-        self.assertEqual([card.width() for card in cards], initial_widths)
-
-    def test_session_stats_track_average_peak_downloaded_and_elapsed(self) -> None:
-        self.window._is_downloading = True
-        self.window._reset_session_metrics(total_items=1, started_ts=10.0)
-
-        with patch.object(self.window._effects.clock, "now_ts", return_value=14.0):
-            self.window._on_progress_update(
-                {
-                    "status": "item",
-                    "item": "Example item",
-                }
-            )
-            self.window._on_progress_update(
-                {
-                    "status": "downloading",
-                    "percent": 25.0,
-                    "speed": "4.00 MiB/s",
-                    "speed_bps": 4 * 1024 * 1024,
-                    "eta": "0:03",
-                    "downloaded_bytes": 3 * 1024 * 1024,
-                }
-            )
-            self.window._on_progress_update(
-                {
-                    "status": "downloading",
-                    "percent": 75.0,
-                    "speed": "2.00 MiB/s",
-                    "speed_bps": 2 * 1024 * 1024,
-                    "eta": "0:01",
-                    "downloaded_bytes": 6 * 1024 * 1024,
-                }
-            )
-            self.window._on_progress_update({"status": "finished"})
-
-        self.assertEqual(self.window.session_speed_value.text(), "3.00 MiB/s")
-        self.assertEqual(self.window.session_peak_speed_value.text(), "4.00 MiB/s")
-        self.assertEqual(self.window.session_downloaded_value.text(), "6.0 MiB")
-        self.assertEqual(self.window.session_elapsed_value.text(), "0:04")
-
     def test_attention_log_shows_logs_alert_icon(self) -> None:
         self.assertFalse(self.window._logs_alert_active)
         self.window._append_log("[error] network timeout")
@@ -3740,6 +3304,44 @@ class TestQtApp(unittest.TestCase):
             QAbstractItemView.DragDropMode.NoDragDrop,
         )
 
+    def test_queue_reorder_preserves_queue_list_scroll_position(self) -> None:
+        self.window.show()
+        self.window.resize(900, 620)
+        self.window._open_panel("queue")
+        self.window.queue_items = [
+            {"url": f"https://example.com/watch?v={idx}", "settings": {}}
+            for idx in range(30)
+        ]
+        self.window._refresh_queue_panel()
+        QApplication.processEvents()
+
+        scrollbar = self.window.queue_list.verticalScrollBar()
+        self.assertIsNotNone(scrollbar)
+        assert scrollbar is not None
+        self.assertGreater(scrollbar.maximum(), 0)
+
+        preserved_value = max(1, scrollbar.maximum() // 2)
+        scrollbar.setValue(preserved_value)
+        QApplication.processEvents()
+
+        reordered = list(range(1, len(self.window.queue_items))) + [0]
+        self.window.queue_list.items_reordered.emit(reordered)
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.queue_list.verticalScrollBar().value(), preserved_value)
+        self.assertEqual(
+            [item.get("url") for item in self.window.queue_items[:3]],
+            [
+                "https://example.com/watch?v=1",
+                "https://example.com/watch?v=2",
+                "https://example.com/watch?v=3",
+            ],
+        )
+
+    def test_queue_list_expands_edge_autoscroll_margin_for_dragging(self) -> None:
+        self.assertTrue(self.window.queue_list.hasAutoScroll())
+        self.assertGreaterEqual(self.window.queue_list.autoScrollMargin(), 48)
+
     def test_queue_list_inline_remove_button_deletes_clicked_item(self) -> None:
         self.window.queue_items = [
             {"url": "a", "settings": {}},
@@ -3765,6 +3367,155 @@ class TestQtApp(unittest.TestCase):
             [item.get("url") for item in self.window.queue_items],
             ["a", "c"],
         )
+
+    def test_queue_list_stores_title_and_settings_metadata(self) -> None:
+        self.window.queue_items = [
+            {
+                "url": "https://example.com/watch?v=abc",
+                "title": "Example queue title",
+                "settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "avc1",
+                    "format_label": "1080p",
+                    "custom_filename": "edited-name",
+                },
+            }
+        ]
+        self.window._refresh_queue_panel()
+
+        item = self.window.queue_list.item(0)
+        self.assertIsNotNone(item)
+        assert item is not None
+        self.assertEqual(item.data(QUEUE_TITLE_ROLE), "Example queue title")
+        self.assertEqual(
+            item.data(QUEUE_META_ROLE),
+            "Video · MP4 · AVC1 · 1080p · Save as edited-name",
+        )
+        self.assertIn("https://example.com/watch?v=abc", item.toolTip())
+
+    def test_queue_list_edit_button_loads_item_into_form_and_updates_it(self) -> None:
+        url = self._load_ready_preview_with_formats()
+        self.window.queue_items = [
+            {
+                "url": url,
+                "title": "Stored queue title",
+                "settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "avc1",
+                    "format_label": "1080p mp4 (avc1)",
+                    "output_dir": "/tmp/queue-edit",
+                    "custom_filename": "queued-name",
+                },
+            }
+        ]
+        self.window._refresh_queue_panel()
+        self.window.show()
+        self.window._open_panel("queue")
+        QApplication.processEvents()
+
+        edit_rect = self.window.queue_list.edit_button_rect(0)
+        self.assertFalse(edit_rect.isNull())
+
+        QTest.mouseClick(
+            self.window.queue_list.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=edit_rect.center(),
+        )
+        QApplication.processEvents()
+
+        self.assertIsNone(self.window._active_panel_name)
+        self.assertEqual(self.window.panel_stack.currentIndex(), self.window._main_page_index)
+        self.assertEqual(self.window.add_queue_button.text(), "Update Queue Item")
+        self.assertEqual(self.window.url_edit.text(), url)
+        self.assertTrue(self.window.video_radio.isChecked())
+        self.assertEqual(self.window.container_combo.currentData(), "mp4")
+        self.assertEqual(self.window.codec_combo.currentData(), "avc1")
+        self.assertEqual(self.window.format_combo.currentText(), "1080p mp4 (avc1)")
+        self.assertEqual(self.window.filename_edit.text(), "queued-name")
+        self.assertEqual(self.window.output_dir_edit.text(), "/tmp/queue-edit")
+
+        self.window.filename_edit.setText("updated-name")
+        self.window._on_add_to_queue()
+        QApplication.processEvents()
+
+        self.assertEqual(len(self.window.queue_items), 1)
+        self.assertEqual(
+            self.window.queue_items[0]["settings"]["custom_filename"],
+            "updated-name",
+        )
+        self.assertEqual(self.window.queue_items[0]["title"], "Sample")
+        self.assertEqual(self.window.add_queue_button.text(), "Add to queue")
+
+    def test_run_action_buttons_keep_geometry_when_queue_edit_label_changes(self) -> None:
+        url = self._load_ready_preview_with_formats()
+        self.window.queue_items = [
+            {
+                "url": url,
+                "title": "Stored queue title",
+                "settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "avc1",
+                    "format_label": "1080p mp4 (avc1)",
+                    "output_dir": "/tmp/queue-edit",
+                    "custom_filename": "queued-name",
+                },
+            }
+        ]
+        self.window._refresh_queue_panel()
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        def snapshot() -> dict[str, tuple[int, int]]:
+            return {
+                "start": (
+                    self.window.start_button.width(),
+                    self.window.start_button.mapTo(
+                        self.window.run_actions_card,
+                        self.window.start_button.rect().topLeft(),
+                    ).x(),
+                ),
+                "add_queue": (
+                    self.window.add_queue_button.width(),
+                    self.window.add_queue_button.mapTo(
+                        self.window.run_actions_card,
+                        self.window.add_queue_button.rect().topLeft(),
+                    ).x(),
+                ),
+                "cancel": (
+                    self.window.cancel_button.width(),
+                    self.window.cancel_button.mapTo(
+                        self.window.run_actions_card,
+                        self.window.cancel_button.rect().topLeft(),
+                    ).x(),
+                ),
+            }
+
+        baseline = snapshot()
+
+        self.window._open_panel("queue")
+        QApplication.processEvents()
+
+        edit_rect = self.window.queue_list.edit_button_rect(0)
+        self.assertFalse(edit_rect.isNull())
+        QTest.mouseClick(
+            self.window.queue_list.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=edit_rect.center(),
+        )
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.add_queue_button.text(), "Update Queue Item")
+        self.assertEqual(snapshot(), baseline)
+
+        self.window._on_add_to_queue()
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.add_queue_button.text(), "Add to queue")
+        self.assertEqual(snapshot(), baseline)
 
     def test_start_queue_download_sets_queue_run_state_and_starts_next_item(self) -> None:
         self.window.queue_items = [
@@ -3927,7 +3678,7 @@ class TestQtApp(unittest.TestCase):
         self.window._show_progress_item = True
         self.window._cancel_requested = True
         self.window._cancel_event = threading.Event()
-        self.window._set_last_output_path(Path("/tmp/test-video.mp4"))
+        self.window._set_post_download_output_dir(Path("/tmp"))
 
         with patch.object(self.window, "_maybe_open_output_folder") as open_folder_mock:
             self.window._finish_queue(cancelled=True)
@@ -3939,7 +3690,7 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window._cancel_requested)
         self.assertIsNone(self.window._cancel_event)
         self.assertEqual(self.window.status_value.text(), "Queue cancelled")
-        self.assertIsNone(self.window._latest_output_path)
+        self.assertIsNone(self.window._post_download_output_dir)
         open_folder_mock.assert_not_called()
 
     def test_export_diagnostics_writes_report_file(self) -> None:

@@ -56,6 +56,14 @@ class TestCoreQueueLogic(unittest.TestCase):
         self.assertIn("codec", log.lower())
         self.assertEqual(queue_logic.queue_start_missing_detail("mode"), "audio/video mode")
 
+    def test_queue_add_success_feedback_includes_position_and_count(self) -> None:
+        status, message = queue_logic.queue_add_success_feedback(2)
+        self.assertEqual(status, "Added to queue as item 2")
+        self.assertEqual(
+            message,
+            "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+        )
+
     def test_queue_add_issue_checks_preconditions_before_settings(self) -> None:
         issue = queue_logic.queue_add_issue(
             url="",

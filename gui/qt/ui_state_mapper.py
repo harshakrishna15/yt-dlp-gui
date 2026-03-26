@@ -16,7 +16,6 @@ def apply_control_state(
 ) -> None:
     window.start_button.setEnabled(state.can_start_single or state.can_start_queue)
     window.add_queue_button.setEnabled(state.can_add_queue)
-    window.start_queue_button.setEnabled(state.can_start_queue)
     window.cancel_button.setEnabled(state.can_cancel)
 
     window.video_radio.setEnabled(state.mode_enabled)

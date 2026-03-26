@@ -1,82 +1,61 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="shadow" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#0d2b26" stop-opacity="0"/>
-      <stop offset="62%" stop-color="#0d2b26" stop-opacity="0.11"/>
-      <stop offset="100%" stop-color="#0d2b26" stop-opacity="0.23"/>
+    <linearGradient id="tile" x1="0.14" y1="0.08" x2="0.86" y2="0.92">
+      <stop offset="0%" stop-color="#fffdf8"/>
+      <stop offset="58%" stop-color="#f7efe1"/>
+      <stop offset="100%" stop-color="#ead8bf"/>
     </linearGradient>
-    <linearGradient id="base" x1="0.18" y1="0.04" x2="0.84" y2="0.96">
-      <stop offset="0%" stop-color="#f4fbf8"/>
-      <stop offset="52%" stop-color="#dcebe5"/>
-      <stop offset="100%" stop-color="#9cc2b8"/>
-    </linearGradient>
-    <radialGradient id="skyGlow" cx="0.28" cy="0.12" r="0.72">
+    <radialGradient id="tileGlow" cx="0.25" cy="0.15" r="0.76">
       <stop offset="0%" stop-color="#ffffff" stop-opacity="0.92"/>
-      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="42%" stop-color="#ffffff" stop-opacity="0.26"/>
       <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="dockShadow" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#0b312d" stop-opacity="0.20"/>
-      <stop offset="100%" stop-color="#0b312d" stop-opacity="0"/>
+    <linearGradient id="tileTint" x1="0.5" y1="0.56" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#f3eadc" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#e6d4bb" stop-opacity="0.28"/>
     </linearGradient>
-    <linearGradient id="dock" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#f8fcfa"/>
-      <stop offset="100%" stop-color="#cfdfd9"/>
-    </linearGradient>
-    <linearGradient id="badgeShadow" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#0a2d29" stop-opacity="0.24"/>
-      <stop offset="100%" stop-color="#0a2d29" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="badge" x1="0.24" y1="0.10" x2="0.76" y2="0.88">
-      <stop offset="0%" stop-color="#25a08f"/>
-      <stop offset="58%" stop-color="#147267"/>
-      <stop offset="100%" stop-color="#0a514c"/>
-    </linearGradient>
-    <radialGradient id="badgeGlow" cx="0.28" cy="0.18" r="0.92">
-      <stop offset="0%" stop-color="#9ef4e0" stop-opacity="0.56"/>
-      <stop offset="40%" stop-color="#9ef4e0" stop-opacity="0.14"/>
-      <stop offset="100%" stop-color="#9ef4e0" stop-opacity="0"/>
+    <radialGradient id="halo" cx="0.5" cy="0.42" r="0.34">
+      <stop offset="0%" stop-color="#baf3cb" stop-opacity="0.42"/>
+      <stop offset="52%" stop-color="#baf3cb" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#baf3cb" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="glyph" x1="0.5" y1="0.12" x2="0.5" y2="0.88">
-      <stop offset="0%" stop-color="#f8fffd"/>
-      <stop offset="100%" stop-color="#dbece6"/>
+    <linearGradient id="glyph" x1="0.32" y1="0.16" x2="0.72" y2="0.88">
+      <stop offset="0%" stop-color="#49cc72"/>
+      <stop offset="58%" stop-color="#239454"/>
+      <stop offset="100%" stop-color="#16693c"/>
+    </linearGradient>
+    <linearGradient id="glyphShadow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#0c4024" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#0c4024" stop-opacity="0"/>
     </linearGradient>
     <clipPath id="tileClip">
       <rect x="92" y="92" width="840" height="840" rx="196"/>
     </clipPath>
   </defs>
-
-  <rect x="120" y="148" width="784" height="776" rx="208" fill="url(#shadow)"/>
-  <rect x="92" y="92" width="840" height="840" rx="196" fill="url(#base)"/>
+  <rect x="92" y="92" width="840" height="840" rx="196" fill="url(#tile)"/>
 
   <g clip-path="url(#tileClip)">
-    <rect x="92" y="92" width="840" height="840" fill="url(#skyGlow)"/>
-    <path d="M92 92H932V422H92Z" fill="#ffffff" fill-opacity="0.05"/>
-    <rect x="92" y="684" width="840" height="248" fill="#5f9b90" fill-opacity="0.08"/>
+    <rect x="92" y="92" width="840" height="840" fill="url(#tileGlow)"/>
+    <path d="M92 92H932V338C756 286 584 270 414 292C304 306 196 332 92 376Z" fill="#ffffff" fill-opacity="0.18"/>
+    <rect x="92" y="596" width="840" height="336" fill="url(#tileTint)"/>
 
-    <rect x="256" y="704" width="512" height="122" rx="61" fill="url(#dockShadow)"/>
-    <rect x="250" y="682" width="524" height="122" rx="61" fill="url(#dock)"/>
-    <path d="M286 706C328 691 414 682 512 682C610 682 696 691 738 706V726H286Z" fill="#ffffff" fill-opacity="0.28"/>
-    <rect x="348" y="736" width="328" height="22" rx="11" fill="#6ca79b" fill-opacity="0.28"/>
-    <rect x="250" y="682" width="524" height="122" rx="61" fill="none" stroke="#ffffff" stroke-opacity="0.34" stroke-width="8"/>
+    <circle cx="512" cy="432" r="214" fill="url(#halo)"/>
+    <ellipse cx="512" cy="756" rx="226" ry="58" fill="url(#glyphShadow)"/>
 
-    <ellipse cx="512" cy="560" rx="178" ry="52" fill="url(#badgeShadow)"/>
-    <circle cx="512" cy="426" r="188" fill="url(#badge)"/>
-    <circle cx="512" cy="426" r="188" fill="url(#badgeGlow)"/>
-    <ellipse cx="444" cy="344" rx="132" ry="104" fill="#c5fff1" fill-opacity="0.12"/>
-    <circle cx="512" cy="426" r="188" fill="none" stroke="#d8fff6" stroke-opacity="0.18" stroke-width="12"/>
-
-    <g transform="translate(0 12)" fill="#083c36" fill-opacity="0.20">
-      <rect x="484" y="312" width="56" height="178" rx="28"/>
-      <path d="M408 468L512 574L616 468Z"/>
-      <rect x="410" y="604" width="204" height="46" rx="23"/>
+    <g transform="translate(0 18)" fill="#1a6b3e" fill-opacity="0.16">
+      <rect x="468" y="258" width="88" height="286" rx="44"/>
+      <path d="M334 478L512 680L690 478Z"/>
+      <rect x="310" y="704" width="404" height="90" rx="45"/>
     </g>
+
     <g fill="url(#glyph)">
-      <rect x="484" y="300" width="56" height="178" rx="28"/>
-      <path d="M408 456L512 562L616 456Z"/>
-      <rect x="410" y="592" width="204" height="46" rx="23"/>
+      <rect x="468" y="240" width="88" height="286" rx="44"/>
+      <path d="M334 460L512 662L690 460Z"/>
+      <rect x="310" y="686" width="404" height="90" rx="45"/>
     </g>
-  </g>
 
-  <rect x="98" y="98" width="828" height="828" rx="190" fill="none" stroke="#f9fffd" stroke-opacity="0.64" stroke-width="8"/>
+    <path d="M468 240H556V302C532 296 501 296 468 302Z" fill="#aef3c0" fill-opacity="0.28"/>
+    <path d="M374 510H650L512 662Z" fill="#8ce4a6" fill-opacity="0.22"/>
+    <rect x="356" y="714" width="312" height="24" rx="12" fill="#d2f7dd" fill-opacity="0.42"/>
+  </g>
 </svg>

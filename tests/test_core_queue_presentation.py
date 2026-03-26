@@ -4,95 +4,29 @@ from gui.core import queue_presentation
 
 
 class TestQueuePresentation(unittest.TestCase):
-    def test_normalize_source_summary_coerces_all_fields_to_clean_strings(self) -> None:
-        normalized = queue_presentation.normalize_source_summary(
+    def test_queue_list_entry_prefers_stored_title_and_settings_summary(self) -> None:
+        entry = queue_presentation.build_queue_list_entry(
             {
-                "badge_text": " vid ",
-                "eyebrow_text": None,
-                "subtitle_text": "  Creator  ",
-                "detail_one_text": 123,
-                "detail_two_text": "  ",
-                "detail_three_text": 456,
-            }
-        )
-
-        self.assertEqual(
-            normalized,
-            {
-                "badge_text": "vid",
-                "eyebrow_text": "",
-                "subtitle_text": "Creator",
-                "detail_one_text": "123",
-                "detail_two_text": "",
-                "detail_three_text": "456",
-            },
-        )
-        self.assertIsNone(queue_presentation.normalize_source_summary(None))
-
-    def test_queue_preview_defaults(self) -> None:
-        model = queue_presentation.build_queue_preview_model(
-            queue_presentation.QueuePreviewInputs(
-                folder_text="Downloads folder",
-            )
-        )
-
-        self.assertEqual(model.badge_text, "PLAN")
-        self.assertEqual(model.heading_text, "Download plan")
-        self.assertEqual(
-            model.placeholder_text,
-            "Paste a URL to build the next queue item.",
-        )
-        self.assertEqual(
-            model.subtitle_text,
-            "Set defaults once, then keep adding items to the queue.",
-        )
-        self.assertEqual(model.detail_one_text, "Choose mode")
-        self.assertEqual(model.detail_two_text, "Downloads folder")
-        self.assertEqual(model.detail_three_text, "Queue empty")
-
-    def test_queue_preview_uses_ready_metadata(self) -> None:
-        model = queue_presentation.build_queue_preview_model(
-            queue_presentation.QueuePreviewInputs(
-                url="https://www.youtube.com/watch?v=abc123",
-                preview_title="Sample video",
-                source_summary={
-                    "badge_text": "VID",
-                    "subtitle_text": "Example Channel",
-                    "detail_two_text": "5m 42s",
+                "url": "https://www.youtube.com/watch?v=abc123",
+                "title": "Stored title",
+                "settings": {
+                    "mode": "video",
+                    "format_filter": "mp4",
+                    "codec_filter": "avc1",
+                    "format_label": "1080p",
+                    "custom_filename": "edited-name",
                 },
-                mode="video",
-                container="mp4",
-                has_filtered_formats=True,
-                selected_quality="1080p",
-                folder_text="Downloads folder",
-                queue_count=3,
-            )
+            },
+            idx=1,
+            active=False,
         )
 
-        self.assertEqual(model.badge_text, "VID")
-        self.assertEqual(model.heading_text, "Ready to queue")
-        self.assertEqual(model.subtitle_text, "Example Channel · 5m 42s")
-        self.assertEqual(model.detail_one_text, "Video • MP4 • 1080p")
-        self.assertEqual(model.detail_two_text, "Downloads folder")
-        self.assertEqual(model.detail_three_text, "3 queued items")
-
-    def test_queue_preview_playlist_scope_uses_requested_items(self) -> None:
-        model = queue_presentation.build_queue_preview_model(
-            queue_presentation.QueuePreviewInputs(
-                url="https://www.youtube.com/playlist?list=PL123",
-                playlist_mode=True,
-                mode="audio",
-                container="mp3",
-                is_fetching=True,
-                folder_text="Podcasts folder",
-                playlist_items="1,3-5",
-            )
+        self.assertEqual(entry.title, "Stored title")
+        self.assertEqual(
+            entry.meta,
+            "Video · MP4 · AVC1 · 1080p · Save as edited-name",
         )
-
-        self.assertEqual(model.badge_text, "LIST")
-        self.assertEqual(model.heading_text, "Next queue item")
-        self.assertEqual(model.detail_one_text, "Audio • MP3 • Loading formats")
-        self.assertEqual(model.detail_three_text, "Items 1,3-5")
+        self.assertIn("https://www.youtube.com/watch?v=abc123", entry.tooltip)
 
     def test_queue_summary_entry_prefers_current_preview_title(self) -> None:
         item = {
@@ -166,6 +100,19 @@ class TestQueuePresentation(unittest.TestCase):
 
         self.assertEqual(entry.title, "youtube.com · abc123")
         self.assertEqual(entry.meta, "Video & audio")
+
+    def test_queue_summary_entry_prefers_stored_title(self) -> None:
+        entry = queue_presentation.build_queue_summary_entry(
+            {
+                "url": "https://www.youtube.com/watch?v=abc123",
+                "title": "Stored title",
+                "settings": {"mode": "video"},
+            },
+            idx=1,
+            active=False,
+        )
+
+        self.assertEqual(entry.title, "Stored title")
 
     def test_metric_value_uses_prefix_and_fallback(self) -> None:
         self.assertEqual(

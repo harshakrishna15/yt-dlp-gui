@@ -76,6 +76,7 @@ class RunQueueState:
     queue_index: int | None = None
     queue_failed_items: int = 0
     queue_started_ts: float | None = None
+    editing_queue_index: int | None = None
 
 
 class SourceController:
@@ -290,6 +291,9 @@ class SourceController:
                 tone="warning",
             )
         w._apply_mode_formats()
+        apply_pending = getattr(w, "_apply_pending_queue_edit_settings", None)
+        if callable(apply_pending):
+            apply_pending()
         w._update_controls_state()
 
 
@@ -347,7 +351,6 @@ class RunQueueController:
             return
 
         options = w._snapshot_download_options()
-        started_ts = self._ports.clock.now_ts()
         s.run_state = RunState.SINGLE
         s.is_downloading = True
         s.cancel_requested = False
@@ -355,8 +358,7 @@ class RunQueueController:
         s.show_progress_item = True
         w._clear_logs()
         w._reset_progress_summary()
-        w._reset_session_metrics(total_items=1, started_ts=started_ts)
-        w._clear_last_output_path()
+        w._clear_post_download_output_dir()
         w._set_metrics_visible(True)
         w._set_status("Downloading...")
         w._set_source_feedback("", tone="hidden")
@@ -379,19 +381,16 @@ class RunQueueController:
             w._append_log(
                 f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
             )
+        w._set_post_download_output_dir(Path(request["output_dir"]))
         self._ports.worker_executor.submit(
             self.run_single_download_worker,
             request=request,
-            history_title=str(getattr(w, "_preview_title_raw", "") or ""),
-            history_settings=dict(w._capture_queue_settings()),
         )
 
     def run_single_download_worker(
         self,
         *,
         request: DownloadRequest,
-        history_title: str,
-        history_settings: QueueSettings,
     ) -> None:
         result = app_service.run_download_request(
             request=request,
@@ -399,17 +398,6 @@ class RunQueueController:
             log=lambda msg: _emit_window_signal(self.window, "log", str(msg)),
             update_progress=lambda payload: _emit_window_signal(
                 self.window, "progress", dict(payload)
-            ),
-            record_output=lambda p: _emit_window_signal(
-                self.window,
-                "record_output",
-                str(p),
-                str(request["url"]),
-                {
-                    "title": str(history_title or ""),
-                    "format_label": str(request.get("fmt_label") or ""),
-                    "queue_settings": dict(history_settings or {}),
-                },
             ),
         )
         _emit_window_signal(self.window, "download_done", str(result))
@@ -427,7 +415,6 @@ class RunQueueController:
         s.show_progress_item = False
         w._reset_progress_summary()
         if result == download.DOWNLOAD_SUCCESS:
-            w._set_session_counts(completed=1, failed=0)
             w._set_status("Download complete")
             w._set_source_feedback(
                 "Download complete. You can paste another URL anytime.",
@@ -435,15 +422,13 @@ class RunQueueController:
             )
             w._maybe_open_output_folder()
         elif result == download.DOWNLOAD_CANCELLED:
-            w._set_session_counts(completed=0, failed=0)
             w._set_status("Cancelled")
             w._set_source_feedback(
                 "Download cancelled. Update settings or URL and try again.",
                 tone="warning",
             )
-            w._clear_last_output_path()
+            w._clear_post_download_output_dir()
         else:
-            w._set_session_counts(completed=0, failed=1)
             failure = core_error_feedback.download_failed_feedback(w._last_error_log)
             w._set_status(failure.status)
             w._set_source_feedback(
@@ -455,7 +440,7 @@ class RunQueueController:
                 message=failure.message,
                 critical=True,
             )
-            w._clear_last_output_path()
+            w._clear_post_download_output_dir()
         w._update_controls_state()
         w._maybe_close_after_cancel()
 
@@ -486,6 +471,10 @@ class RunQueueController:
         normalized = self._normalize_selected_indices(selected_indices)
         if not normalized:
             return
+        s.editing_queue_index = None
+        clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+        if callable(clear_edit):
+            clear_edit()
         s.queue_items = core_queue_logic.remove_selected_queue_items(
             s.queue_items,
             normalized,
@@ -504,6 +493,10 @@ class RunQueueController:
         )
         if not moved:
             return
+        s.editing_queue_index = None
+        clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+        if callable(clear_edit):
+            clear_edit()
         s.queue_items = updated
         w._refresh_queue_panel()
 
@@ -518,6 +511,10 @@ class RunQueueController:
         )
         if not moved:
             return
+        s.editing_queue_index = None
+        clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+        if callable(clear_edit):
+            clear_edit()
         s.queue_items = updated
         w._refresh_queue_panel()
 
@@ -532,6 +529,10 @@ class RunQueueController:
         )
         if not moved:
             return
+        s.editing_queue_index = None
+        clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+        if callable(clear_edit):
+            clear_edit()
         s.queue_items = updated
         w._refresh_queue_panel()
 
@@ -543,27 +544,30 @@ class RunQueueController:
         updated, cleared = core_queue_logic.clear_queue_items(s.queue_items)
         if not cleared:
             return
+        s.editing_queue_index = None
+        clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+        if callable(clear_edit):
+            clear_edit()
         s.queue_items = updated
         w._refresh_queue_panel()
         w._update_controls_state()
 
-    def on_requeue_history_item(self, history_item: dict[str, object]) -> bool:
+    def on_queue_edit_item(self, row: int) -> None:
         s = self.state
         w = self.window
-        if s.is_downloading:
-            return False
-        source_url = core_urls.strip_url_whitespace(
-            str(history_item.get("source_url") or "")
-        )
-        queue_settings = history_item.get("queue_settings")
-        settings = dict(queue_settings) if isinstance(queue_settings, dict) else {}
-        if not source_url or not settings:
-            return False
-        s.queue_items.append(core_queue_logic.queue_item(source_url, settings))
-        w._refresh_queue_panel()
-        w._set_status("Added recent download back to queue")
+        if s.queue_active:
+            return
+        normalized = self._normalize_selected_indices([row])
+        if not normalized:
+            return
+        index = normalized[0]
+        if index < 0 or index >= len(s.queue_items):
+            return
+        s.editing_queue_index = index
+        edit_item = getattr(w, "_edit_queue_item", None)
+        if callable(edit_item):
+            edit_item(index, s.queue_items[index])
         w._update_controls_state()
-        return True
 
     def on_add_to_queue(self) -> None:
         self._refresh_run_state()
@@ -586,13 +590,43 @@ class RunQueueController:
             w._append_log(log_text)
             return
 
-        s.queue_items.append(core_queue_logic.queue_item(url, settings))
+        editing_index = s.editing_queue_index
+        existing_item = (
+            s.queue_items[editing_index]
+            if editing_index is not None and 0 <= editing_index < len(s.queue_items)
+            else {}
+        )
+        item_title = str(getattr(w, "_preview_title_raw", "") or "").strip()
+        if not item_title:
+            item_title = str(existing_item.get("title") or "").strip()
+        queued_item = core_queue_logic.queue_item(url, settings, title=item_title)
+        if editing_index is not None and 0 <= editing_index < len(s.queue_items):
+            s.queue_items[editing_index] = queued_item
+            s.editing_queue_index = None
+            clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+            if callable(clear_edit):
+                clear_edit()
+            status_text = "Queue item updated"
+            feedback_text = (
+                f"Saved changes to queue item {editing_index + 1}. "
+                f"Queue still has {len(s.queue_items)} item"
+                f"{'' if len(s.queue_items) == 1 else 's'}."
+            )
+            success_title = "Queue item updated"
+        else:
+            s.queue_items.append(queued_item)
+            status_text, feedback_text = core_queue_logic.queue_add_success_feedback(
+                len(s.queue_items)
+            )
+            success_title = "Added to queue"
         w._refresh_queue_panel()
-        w._set_status("Added item to queue")
+        w._set_status(status_text)
+        w._set_source_feedback(
+            feedback_text,
+            tone="success",
+            title=success_title,
+        )
         w._update_controls_state()
-
-    def on_start_queue(self) -> None:
-        self.start_queue_download()
 
     def start_queue_download(self) -> None:
         self._refresh_run_state()
@@ -621,17 +655,17 @@ class RunQueueController:
         s.queue_index = 0
         s.queue_failed_items = 0
         s.queue_started_ts = self._ports.clock.now_ts()
+        s.editing_queue_index = None
+        clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
+        if callable(clear_edit):
+            clear_edit()
         s.is_downloading = True
         s.show_progress_item = True
         s.cancel_requested = False
         s.cancel_event = self._ports.cancel_events.new_event()
         w._clear_logs()
         w._reset_progress_summary()
-        w._reset_session_metrics(
-            total_items=len(s.queue_items),
-            started_ts=s.queue_started_ts,
-        )
-        w._clear_last_output_path()
+        w._clear_post_download_output_dir()
         w._set_metrics_visible(True)
         w._set_status("Downloading queue...")
         w._set_source_feedback("", tone="hidden")
@@ -657,6 +691,13 @@ class RunQueueController:
             progress=f"{next_item.display_index}/{next_item.total}",
             title="Resolving title...",
         )
+        next_output_dir = str(
+            next_item.settings.get("output_dir") or w.output_dir_edit.text().strip()
+        ).strip()
+        if next_output_dir:
+            w._set_post_download_output_dir(Path(next_output_dir))
+        else:
+            w._clear_post_download_output_dir()
         w._refresh_queue_panel()
 
         self._ports.worker_executor.submit(
@@ -713,17 +754,6 @@ class RunQueueController:
                 update_progress=lambda payload: _emit_window_signal(
                     self.window, "progress", dict(payload)
                 ),
-                record_output=lambda p: _emit_window_signal(
-                    self.window,
-                    "record_output",
-                    str(p),
-                    url,
-                    {
-                        "title": str(resolved.get("title") or ""),
-                        "format_label": str(request.get("fmt_label") or ""),
-                        "queue_settings": dict(settings or {}),
-                    },
-                ),
                 ensure_output_dir=True,
             )
             had_error = result == download.DOWNLOAD_ERROR
@@ -750,11 +780,6 @@ class RunQueueController:
         )
         s.queue_failed_items = progress.failed_items
         s.cancel_requested = progress.cancel_requested
-        processed_items = int(s.queue_index) + 1
-        w._set_session_counts(
-            completed=max(0, processed_items - progress.failed_items),
-            failed=progress.failed_items,
-        )
         if progress.should_finish:
             if progress.finish_cancelled:
                 w._append_log("[queue] cancelled")
@@ -785,16 +810,6 @@ class RunQueueController:
         s.show_progress_item = False
         s.cancel_requested = False
         s.cancel_event = None
-        if cancelled:
-            w._set_session_counts(
-                completed=max(0, queue_length - failed_items - 1),
-                failed=failed_items,
-            )
-        else:
-            w._set_session_counts(
-                completed=max(0, queue_length - failed_items),
-                failed=failed_items,
-            )
 
         outcome = core_workflow.queue_finish_outcome(
             cancelled=cancelled,
@@ -807,7 +822,7 @@ class RunQueueController:
                 "Queue cancelled. You can adjust items and restart.",
                 tone="warning",
             )
-            w._clear_last_output_path()
+            w._clear_post_download_output_dir()
         elif outcome == "failed":
             w._append_log(f"[queue] finished with {failed_items} failed item(s)")
             failure = core_error_feedback.download_failed_feedback(w._last_error_log)
@@ -832,7 +847,7 @@ class RunQueueController:
             w._append_log("[queue] finished successfully")
             w._set_status("Queue complete")
             w._set_source_feedback(
-                "Queue complete. Paste another URL or review your history.",
+                "Queue complete. Paste another URL anytime.",
                 tone="success",
             )
 

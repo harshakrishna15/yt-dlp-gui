@@ -1,25 +1,29 @@
 from __future__ import annotations
 
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Sequence
 
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QObject,
     QPropertyAnimation,
+    QPointF,
     QRect,
+    QRectF,
     QSize,
     Qt,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
     QAbstractItemView,
     QComboBox,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -41,10 +45,64 @@ class _QtSignals(QObject):
     log = Signal(str)
     download_done = Signal(str)
     queue_item_done = Signal(bool, bool)
-    record_output = Signal(str, str, object)
 
 
 QUEUE_SOURCE_INDEX_ROLE = Qt.ItemDataRole.UserRole
+QUEUE_TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
+QUEUE_META_ROLE = Qt.ItemDataRole.UserRole + 2
+
+
+@dataclass(frozen=True)
+class NativeComboBoxConfig:
+    minimum_width: int
+    items: tuple[tuple[str, object], ...] = ()
+    hint_text: str = ""
+    maximum_width: int | None = None
+    fixed_height: int = 45
+
+
+@dataclass(frozen=True)
+class SourceToastRefs:
+    card: QFrame
+    title_label: QLabel
+    message_label: QLabel
+    dismiss_button: QPushButton
+
+
+@dataclass(frozen=True)
+class ButtonSpec:
+    text: str
+    object_name: str | None = None
+    on_click: Callable[[], None] | None = None
+    on_toggled: Callable[[bool], None] | None = None
+    checkable: bool = False
+    auto_exclusive: bool = False
+    tooltip: str = ""
+    size_policy: tuple[QSizePolicy.Policy, QSizePolicy.Policy] | None = None
+    minimum_width: int | None = None
+    maximum_width: int | None = None
+    fixed_width: int | None = None
+    minimum_height: int | None = None
+    maximum_height: int | None = None
+    fixed_height: int | None = None
+    focus_policy: Qt.FocusPolicy | None = None
+    cursor: Qt.CursorShape | None = None
+    stretch: int = 0
+
+
+@dataclass(frozen=True)
+class SegmentedRailSpec:
+    object_name: str
+    button_specs: Sequence[ButtonSpec]
+    selection_frame_object_name: str = "topNavSelection"
+    selection_rect_getter: Callable[[QAbstractButton], QRect] | None = None
+    size_policy: tuple[QSizePolicy.Policy, QSizePolicy.Policy] = (
+        QSizePolicy.Policy.Fixed,
+        QSizePolicy.Policy.Fixed,
+    )
+    layout_margins: tuple[int, int, int, int] = (0, 0, 0, 0)
+    layout_spacing: int = 0
+    trailing_stretch: bool = False
 
 
 class StableStackedWidget(QStackedWidget):
@@ -65,6 +123,31 @@ class StableStackedWidget(QStackedWidget):
             width = max(width, hint.width())
             height = max(height, hint.height())
         return QSize(width, height)
+
+
+class StableSizeHintButton(QPushButton):
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self._stable_width: int | None = None
+
+    def stable_width(self) -> int | None:
+        return self._stable_width
+
+    def set_stable_width(self, width: int | None) -> None:
+        self._stable_width = None if width is None else max(0, int(width))
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        if self._stable_width is not None:
+            hint.setWidth(self._stable_width)
+        return hint
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        if self._stable_width is not None:
+            hint.setWidth(self._stable_width)
+        return hint
 
 
 class AnimatedSegmentedRail(QWidget):
@@ -223,17 +306,117 @@ class AnimatedSegmentedRail(QWidget):
         self._selection_anim = None
 
 
+def _apply_widget_size(
+    widget: QWidget,
+    *,
+    size_policy: tuple[QSizePolicy.Policy, QSizePolicy.Policy] | None = None,
+    minimum_width: int | None = None,
+    maximum_width: int | None = None,
+    fixed_width: int | None = None,
+    minimum_height: int | None = None,
+    maximum_height: int | None = None,
+    fixed_height: int | None = None,
+) -> None:
+    if size_policy is not None:
+        widget.setSizePolicy(*size_policy)
+
+    if fixed_width is not None:
+        widget.setFixedWidth(fixed_width)
+    else:
+        if minimum_width is not None:
+            widget.setMinimumWidth(minimum_width)
+        if maximum_width is not None:
+            widget.setMaximumWidth(maximum_width)
+
+    if fixed_height is not None:
+        widget.setFixedHeight(fixed_height)
+    else:
+        if minimum_height is not None:
+            widget.setMinimumHeight(minimum_height)
+        if maximum_height is not None:
+            widget.setMaximumHeight(maximum_height)
+
+
+def build_button(parent: QWidget, *, spec: ButtonSpec) -> QPushButton:
+    button = StableSizeHintButton(spec.text, parent)
+    if spec.object_name:
+        button.setObjectName(spec.object_name)
+    button.setCheckable(spec.checkable)
+    if spec.auto_exclusive:
+        button.setAutoExclusive(True)
+    if spec.tooltip:
+        button.setToolTip(spec.tooltip)
+    if spec.focus_policy is not None:
+        button.setFocusPolicy(spec.focus_policy)
+    if spec.cursor is not None:
+        button.setCursor(spec.cursor)
+    _apply_widget_size(
+        button,
+        size_policy=spec.size_policy,
+        minimum_width=spec.minimum_width,
+        maximum_width=spec.maximum_width,
+        fixed_width=spec.fixed_width,
+        minimum_height=spec.minimum_height,
+        maximum_height=spec.maximum_height,
+        fixed_height=spec.fixed_height,
+    )
+    if spec.on_click is not None:
+        button.clicked.connect(spec.on_click)
+    if spec.on_toggled is not None:
+        button.toggled.connect(spec.on_toggled)
+    return button
+
+
+def build_segmented_rail(
+    parent: QWidget,
+    *,
+    spec: SegmentedRailSpec,
+) -> tuple[AnimatedSegmentedRail, tuple[QPushButton, ...]]:
+    rail = AnimatedSegmentedRail(
+        parent,
+        selection_frame_object_name=spec.selection_frame_object_name,
+        selection_rect_getter=spec.selection_rect_getter,
+    )
+    rail.setObjectName(spec.object_name)
+    _apply_widget_size(rail, size_policy=spec.size_policy)
+
+    layout = rail.layout()
+    if isinstance(layout, QHBoxLayout):
+        left, top, right, bottom = spec.layout_margins
+        layout.setContentsMargins(left, top, right, bottom)
+        layout.setSpacing(spec.layout_spacing)
+
+    buttons: list[QPushButton] = []
+    for button_spec in spec.button_specs:
+        button = build_button(rail, spec=button_spec)
+        rail.add_button(button, stretch=button_spec.stretch)
+        buttons.append(button)
+
+    if spec.trailing_stretch and isinstance(layout, QHBoxLayout):
+        layout.addStretch(1)
+
+    return rail, tuple(buttons)
+
+
 class _QueueItemDelegate(QStyledItemDelegate):
+    edit_requested = Signal(int)
     remove_requested = Signal(int)
 
-    _ITEM_HEIGHT = 40
+    _ITEM_HEIGHT = 58
     _TEXT_MARGIN = 12
+    _ITEM_PADDING = 7
     _REMOVE_MARGIN = 10
     _REMOVE_GAP = 10
+    _EDIT_GAP = 8
+    _EDIT_WIDTH = 54
+    _EDIT_HEIGHT = 24
     _REMOVE_SIZE = 22
-    _REMOVE_BG = QColor("#ffffff")
-    _REMOVE_BORDER = QColor("#cad6e1")
-    _REMOVE_TEXT = QColor("#5d7082")
+    _REMOVE_BG = QColor("#322523")
+    _REMOVE_BORDER = QColor("#6e4741")
+    _REMOVE_TEXT = QColor("#f2d6cf")
+    _EDIT_BG = QColor("#223a34")
+    _EDIT_BORDER = QColor("#347c66")
+    _EDIT_TEXT = QColor("#86d7b7")
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
         size = super().sizeHint(option, index)
@@ -245,6 +428,12 @@ class _QueueItemDelegate(QStyledItemDelegate):
         x = rect.x() + rect.width() - self._REMOVE_MARGIN - self._REMOVE_SIZE
         y = rect.y() + max(0, (rect.height() - self._REMOVE_SIZE) // 2)
         return QRect(x, y, self._REMOVE_SIZE, self._REMOVE_SIZE)
+
+    def edit_button_rect(self, rect: QRect) -> QRect:
+        remove_rect = self.remove_button_rect(rect)
+        x = remove_rect.left() - self._EDIT_GAP - self._EDIT_WIDTH
+        y = rect.y() + max(0, (rect.height() - self._EDIT_HEIGHT) // 2)
+        return QRect(x, y, self._EDIT_WIDTH, self._EDIT_HEIGHT)
 
     def _queue_editable(self, widget: object) -> bool:
         checker = getattr(widget, "queue_editable", None)
@@ -261,7 +450,8 @@ class _QueueItemDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         view_option = QStyleOptionViewItem(option)
         self.initStyleOption(view_option, index)
-        text = str(view_option.text or "")
+        title_text = str(index.data(QUEUE_TITLE_ROLE) or view_option.text or "")
+        meta_text = str(index.data(QUEUE_META_ROLE) or "")
         view_option.text = ""
         style = (
             view_option.widget.style()
@@ -277,43 +467,88 @@ class _QueueItemDelegate(QStyledItemDelegate):
 
         editable = self._queue_editable(view_option.widget)
         text_rect = QRect(view_option.rect)
-        text_rect.adjust(self._TEXT_MARGIN, 0, -self._TEXT_MARGIN, 0)
+        text_rect.adjust(
+            self._TEXT_MARGIN,
+            self._ITEM_PADDING,
+            -self._TEXT_MARGIN,
+            -self._ITEM_PADDING,
+        )
         if editable:
-            remove_rect = self.remove_button_rect(view_option.rect)
-            text_rect.setRight(remove_rect.left() - self._REMOVE_GAP)
+            edit_rect = self.edit_button_rect(view_option.rect)
+            text_rect.setRight(edit_rect.left() - self._REMOVE_GAP)
         if text_rect.width() > 0:
-            shown_text = view_option.fontMetrics.elidedText(
-                text,
-                Qt.TextElideMode.ElideMiddle,
-                text_rect.width(),
-            )
-            text_color = (
+            title_color = (
                 view_option.palette.highlightedText().color()
                 if view_option.state & QStyle.StateFlag.State_Selected
                 else view_option.palette.text().color()
             )
-            painter.save()
-            painter.setPen(text_color)
-            painter.drawText(
-                text_rect,
-                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                shown_text,
+            meta_color = QColor(title_color)
+            meta_color.setAlpha(
+                188 if view_option.state & QStyle.StateFlag.State_Selected else 168
             )
+
+            title_font = painter.font()
+            title_font.setBold(True)
+            meta_font = painter.font()
+            meta_font.setPointSize(max(10, meta_font.pointSize() - 1))
+
+            title_rect = QRect(text_rect)
+            title_rect.setHeight(max(0, int(text_rect.height() * 0.55)))
+            meta_rect = QRect(text_rect)
+            meta_rect.setTop(title_rect.bottom() - 1)
+
+            painter.save()
+            painter.setFont(title_font)
+            painter.setPen(title_color)
+            shown_title = painter.fontMetrics().elidedText(
+                title_text,
+                Qt.TextElideMode.ElideRight,
+                title_rect.width(),
+            )
+            painter.drawText(
+                title_rect,
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                shown_title,
+            )
+            if meta_text:
+                painter.setFont(meta_font)
+                painter.setPen(meta_color)
+                shown_meta = painter.fontMetrics().elidedText(
+                    meta_text,
+                    Qt.TextElideMode.ElideRight,
+                    meta_rect.width(),
+                )
+                painter.drawText(
+                    meta_rect,
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    shown_meta,
+                )
             painter.restore()
 
         if editable:
+            edit_rect = self.edit_button_rect(view_option.rect)
             remove_rect = self.remove_button_rect(view_option.rect)
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(self._EDIT_BORDER))
+            painter.setBrush(self._EDIT_BG)
+            painter.drawRoundedRect(edit_rect.adjusted(0, 0, -1, -1), 12, 12)
+            painter.setPen(self._EDIT_TEXT)
+            painter.drawText(
+                edit_rect,
+                int(Qt.AlignmentFlag.AlignCenter),
+                "Edit",
+            )
+            remove_frame = QRectF(remove_rect).adjusted(0.5, 0.5, -0.5, -0.5)
             painter.setPen(QPen(self._REMOVE_BORDER))
             painter.setBrush(self._REMOVE_BG)
-            painter.drawRoundedRect(remove_rect.adjusted(0, 0, -1, -1), 8, 8)
-            painter.setPen(self._REMOVE_TEXT)
-            painter.drawText(
-                remove_rect,
-                int(Qt.AlignmentFlag.AlignCenter),
-                "X",
-            )
+            painter.drawEllipse(remove_frame)
+            icon_pen = QPen(self._REMOVE_TEXT, 1.8)
+            icon_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(icon_pen)
+            icon_bounds = remove_frame.adjusted(5.4, 5.4, -5.4, -5.4)
+            painter.drawLine(icon_bounds.topLeft(), icon_bounds.bottomRight())
+            painter.drawLine(icon_bounds.bottomLeft(), icon_bounds.topRight())
             painter.restore()
 
     def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
@@ -328,6 +563,10 @@ class _QueueItemDelegate(QStyledItemDelegate):
             and event.button() == Qt.MouseButton.LeftButton
         ):
             pos = event.position().toPoint()
+            if self.edit_button_rect(option.rect).contains(pos):
+                if event.type() == QEvent.Type.MouseButtonRelease:
+                    self.edit_requested.emit(index.row())
+                return True
             if self.remove_button_rect(option.rect).contains(pos):
                 if event.type() == QEvent.Type.MouseButtonRelease:
                     self.remove_requested.emit(index.row())
@@ -336,6 +575,9 @@ class _QueueItemDelegate(QStyledItemDelegate):
 
 
 class QueueListWidget(QListWidget):
+    _DRAG_EDGE_AUTOSCROLL_MARGIN = 56
+
+    edit_requested = Signal(int)
     remove_requested = Signal(int)
     items_reordered = Signal(list)
 
@@ -344,9 +586,15 @@ class QueueListWidget(QListWidget):
         self._queue_editable = True
         self._delegate = _QueueItemDelegate(self)
         self.setItemDelegate(self._delegate)
+        self._delegate.edit_requested.connect(self._emit_edit_requested)
         self._delegate.remove_requested.connect(self._emit_remove_requested)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setAutoScroll(True)
+        self.setAutoScrollMargin(self._DRAG_EDGE_AUTOSCROLL_MARGIN)
         self.set_queue_editable(True)
+
+    def _emit_edit_requested(self, row: int) -> None:
+        self.edit_requested.emit(int(row))
 
     def _emit_remove_requested(self, row: int) -> None:
         self.remove_requested.emit(int(row))
@@ -373,6 +621,12 @@ class QueueListWidget(QListWidget):
         if item is None:
             return QRect()
         return self._delegate.remove_button_rect(self.visualItemRect(item))
+
+    def edit_button_rect(self, row: int) -> QRect:
+        item = self.item(int(row))
+        if item is None:
+            return QRect()
+        return self._delegate.edit_button_rect(self.visualItemRect(item))
 
     def item_order(self) -> list[int]:
         order: list[int] = []
@@ -482,6 +736,18 @@ class WorkspaceSummaryWidget(QFrame):
         self._status_label.setText(clean)
         self._status_label.setVisible(bool(clean.strip()))
 
+    def set_tone(self, tone: str) -> None:
+        self.setProperty("tone", str(tone or "default"))
+        style = self.style()
+        style.unpolish(self)
+        style.polish(self)
+        for child in self.findChildren(QWidget):
+            child_style = child.style()
+            child_style.unpolish(child)
+            child_style.polish(child)
+            child.update()
+        self.update()
+
     def set_progress_percent(self, percent: float | None) -> None:
         visible = percent is not None
         self._progress_bar.setVisible(visible)
@@ -491,65 +757,7 @@ class WorkspaceSummaryWidget(QFrame):
         self._progress_bar.setValue(int(round(clamped * 10)))
 
 
-class RecentDownloadRowWidget(QFrame):
-    again_requested = Signal(int)
-
-    def __init__(
-        self,
-        *,
-        history_index: int,
-        badge_text: str,
-        title: str,
-        meta: str,
-        can_requeue: bool,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._history_index = int(history_index)
-        self.setObjectName("recentDownloadCard")
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(14)
-
-        badge_label = QLabel(str(badge_text or "VID"), self)
-        badge_label.setObjectName("recentDownloadBadge")
-        badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge_label.setFixedSize(48, 48)
-        layout.addWidget(badge_label, alignment=Qt.AlignmentFlag.AlignTop)
-
-        copy_col = QWidget(self)
-        copy_col.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        copy_col_layout = QVBoxLayout(copy_col)
-        copy_col_layout.setContentsMargins(0, 0, 0, 0)
-        copy_col_layout.setSpacing(3)
-
-        title_label = QLabel(str(title or "Downloaded item"), copy_col)
-        title_label.setObjectName("recentDownloadTitle")
-        title_label.setWordWrap(True)
-        meta_label = QLabel(str(meta or ""), copy_col)
-        meta_label.setObjectName("recentDownloadMeta")
-        meta_label.setWordWrap(True)
-        meta_label.setVisible(bool(str(meta or "").strip()))
-        copy_col_layout.addWidget(title_label)
-        copy_col_layout.addWidget(meta_label)
-        layout.addWidget(copy_col, stretch=1)
-
-        again_button = QPushButton("↓ Again", self)
-        again_button.setObjectName("historyAgainButton")
-        again_button.setEnabled(bool(can_requeue))
-        again_button.clicked.connect(self._emit_again_requested)
-        layout.addWidget(again_button, alignment=Qt.AlignmentFlag.AlignVCenter)
-
-    def _emit_again_requested(self) -> None:
-        self.again_requested.emit(self._history_index)
-
-
 class QueueEmptyStateWidget(QWidget):
-    again_requested = Signal(int)
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setSizePolicy(
@@ -560,17 +768,11 @@ class QueueEmptyStateWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
+        root_layout.setContentsMargins(24, 24, 24, 24)
+        root_layout.setSpacing(10)
+        root_layout.addStretch(1)
 
-        self._stack = QStackedWidget(self)
-        root_layout.addWidget(self._stack, stretch=1)
-
-        placeholder_page = QWidget(self._stack)
-        placeholder_layout = QVBoxLayout(placeholder_page)
-        placeholder_layout.setContentsMargins(24, 24, 24, 24)
-        placeholder_layout.setSpacing(10)
-        placeholder_layout.addStretch(1)
-
-        placeholder_card = QFrame(placeholder_page)
+        placeholder_card = QFrame(self)
         placeholder_card.setObjectName("queueEmptyPlaceholder")
         placeholder_card.setMaximumWidth(360)
         placeholder_card.setSizePolicy(
@@ -600,52 +802,11 @@ class QueueEmptyStateWidget(QWidget):
         )
         placeholder_card_layout.addWidget(self.placeholder_title)
         placeholder_card_layout.addWidget(self.placeholder_description)
-        placeholder_layout.addWidget(
+        root_layout.addWidget(
             placeholder_card,
             alignment=Qt.AlignmentFlag.AlignHCenter,
         )
-        placeholder_layout.addStretch(1)
-        self._placeholder_index = self._stack.addWidget(placeholder_page)
-
-        recent_page = QWidget(self._stack)
-        recent_layout = QVBoxLayout(recent_page)
-        recent_layout.setContentsMargins(0, 8, 0, 0)
-        recent_layout.setSpacing(12)
-
-        recent_title = QLabel("Recent downloads", recent_page)
-        recent_title.setObjectName("recentDownloadsTitle")
-        recent_layout.addWidget(recent_title)
-
-        self._rows_layout = QVBoxLayout()
-        self._rows_layout.setContentsMargins(0, 0, 0, 0)
-        self._rows_layout.setSpacing(10)
-        recent_layout.addLayout(self._rows_layout)
-        recent_layout.addStretch(1)
-        self._recent_index = self._stack.addWidget(recent_page)
-
-    def set_recent_items(self, items: list[dict[str, object]]) -> None:
-        while self._rows_layout.count():
-            child = self._rows_layout.takeAt(0)
-            widget = child.widget()
-            if widget is not None:
-                widget.deleteLater()
-        if not items:
-            self._stack.setCurrentIndex(self._placeholder_index)
-            return
-        for item in items:
-            row = RecentDownloadRowWidget(
-                history_index=int(item.get("history_index", -1)),
-                badge_text=str(item.get("badge_text", "VID")),
-                title=str(item.get("title", "Downloaded item")),
-                meta=str(item.get("meta", "")),
-                can_requeue=bool(item.get("can_requeue", False)),
-                parent=self,
-            )
-            row.again_requested.connect(
-                lambda history_index, signal=self.again_requested: signal.emit(history_index)
-            )
-            self._rows_layout.addWidget(row)
-        self._stack.setCurrentIndex(self._recent_index)
+        root_layout.addStretch(1)
 
 
 def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> None:
@@ -683,6 +844,18 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> No
         QListView#nativeComboView::item:selected {{
             background: #314d45;
             color: #86d7b7;
+        }}
+        QListView#nativeComboView::item:disabled {{
+            background: transparent;
+            color: #7a7a73;
+        }}
+        QListView#nativeComboView::item:disabled:hover {{
+            background: transparent;
+            color: #7a7a73;
+        }}
+        QListView#nativeComboView::item:disabled:selected {{
+            background: #30302c;
+            color: #7a7a73;
         }}
         QListView#nativeComboView QScrollBar:vertical {{
             background: transparent;
@@ -730,3 +903,101 @@ class _NativeComboBox(QComboBox):
         if self._before_popup_callback is not None:
             self._before_popup_callback()
         _style_combo_popup(self)
+
+    def set_item_enabled(
+        self,
+        value: object,
+        enabled: bool,
+        *,
+        disabled_tooltip: str = "",
+    ) -> None:
+        index = self.findData(value)
+        if index < 0:
+            return
+        model = self.model()
+        if not isinstance(model, QStandardItemModel):
+            return
+        item = model.item(index)
+        if item is None:
+            return
+        item.setEnabled(enabled)
+        item.setToolTip("" if enabled else disabled_tooltip)
+        self.view().update()
+
+
+def build_native_combo(
+    parent: QWidget,
+    *,
+    register_native_combo: Callable[[_NativeComboBox], None],
+    config: NativeComboBoxConfig,
+) -> _NativeComboBox:
+    combo = _NativeComboBox(parent)
+    register_native_combo(combo)
+    _apply_widget_size(
+        combo,
+        minimum_width=config.minimum_width,
+        maximum_width=config.maximum_width,
+        fixed_height=config.fixed_height,
+    )
+    if config.hint_text:
+        combo.setPlaceholderText(config.hint_text)
+    for label, value in config.items:
+        combo.addItem(label, value)
+    return combo
+
+
+def build_source_feedback_toast(parent: QWidget) -> SourceToastRefs:
+    source_toast = QFrame(parent)
+    source_toast.setObjectName("sourceToastCard")
+    source_toast.setProperty("tone", "success")
+    source_toast.setMinimumWidth(260)
+    source_toast.setMaximumWidth(340)
+
+    shadow = QGraphicsDropShadowEffect(source_toast)
+    shadow.setBlurRadius(28)
+    shadow.setOffset(0, 10)
+    shadow.setColor(QColor(15, 33, 45, 48))
+    source_toast.setGraphicsEffect(shadow)
+
+    source_toast_layout = QVBoxLayout(source_toast)
+    source_toast_layout.setContentsMargins(16, 12, 16, 14)
+    source_toast_layout.setSpacing(4)
+
+    header = QWidget(source_toast)
+    header_layout = QHBoxLayout(header)
+    header_layout.setContentsMargins(0, 0, 0, 0)
+    header_layout.setSpacing(8)
+
+    title_label = QLabel("Formats ready", header)
+    title_label.setObjectName("sourceToastTitle")
+
+    dismiss_button = build_button(
+        header,
+        spec=ButtonSpec(
+            text="×",
+            object_name="sourceToastDismissButton",
+            tooltip="Dismiss notification",
+            fixed_width=24,
+            fixed_height=24,
+            focus_policy=Qt.FocusPolicy.NoFocus,
+            cursor=Qt.CursorShape.PointingHandCursor,
+        ),
+    )
+
+    message_label = QLabel("", source_toast)
+    message_label.setObjectName("sourceToastMessage")
+    message_label.setWordWrap(True)
+
+    header_layout.addWidget(title_label)
+    header_layout.addStretch(1)
+    header_layout.addWidget(dismiss_button)
+    source_toast_layout.addWidget(header)
+    source_toast_layout.addWidget(message_label)
+    source_toast.hide()
+
+    return SourceToastRefs(
+        card=source_toast,
+        title_label=title_label,
+        message_label=message_label,
+        dismiss_button=dismiss_button,
+    )

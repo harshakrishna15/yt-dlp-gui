@@ -1,47 +1,48 @@
-## yt-dlp-gui
+# yt-dlp-gui
 
-This is a small hobby project that makes a simplified GUI for `yt-dlp`.
+Small desktop GUI for local `yt-dlp` downloads on macOS and Windows.
 
-### Supported Platforms
+The app is built around a simple workflow:
+
+1. Paste a video or playlist URL.
+2. Analyze the URL to load available formats.
+3. Choose output settings.
+4. Download immediately or add the item to a queue.
+
+Downloads, logs, and preferences stay on your machine. This is a spare-time project and support is best-effort.
+
+## Supported Platforms
 
 - macOS
 - Windows
 
-### Quick Start
+## Current Features
 
-- macOS
+- Analyze a URL before downloading to load available audio and video formats
+- Download a single item immediately or build a reusable download queue
+- Choose audio or video mode, output container, codec, and quality
+- Handle playlist URLs, including optional playlist ranges like `1-5,7,10-`
+- Prompt for mixed YouTube URLs that contain both a direct video ID and a playlist ID
+- Set a custom filename for single-video downloads
+- Re-encode WebM video to MP4 when needed
+- Review activity in the built-in logs panel
+- Reorder, edit, or clear queued items from the queue panel
+- Save preferences such as output folder behavior and edit-friendly MP4 encoder selection
+- Export a diagnostics report to the selected output folder
 
-```bash
-chmod +x scripts/build-macos.sh
-./scripts/build-macos.sh
-```
-
-Output: `dist/yt-dlp-gui.app`
-
-- Windows (PowerShell)
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
-```
-
-Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
-
-### Prerequisites
+## Requirements
 
 - Python 3.10+
-- `ffmpeg` and `ffprobe` in `PATH`
-- Qt dependency: `PySide6` (installed from `requirements.txt`)
-- App entry points: `python -m gui` (module entry point) or `python run_gui.py` (wrapper that prefers the local `.venv`)
+- `ffmpeg` and `ffprobe` available in `PATH`
+- Python dependencies from `requirements.txt`
 
-### Install and Run
+`yt-dlp` is installed as a Python dependency from `requirements.txt`; you do not need a separate standalone `yt-dlp` binary for local development.
 
-Run these steps in the project folder.
+## Install And Run
 
-#### macOS
+Run these steps from the project root.
 
-1. Open **Terminal**.
-2. Go to this project folder.
-3. Run:
+### macOS
 
 ```bash
 brew install ffmpeg
@@ -51,25 +52,13 @@ python3 -m pip install -r requirements.txt
 python3 -m gui
 ```
 
-4. Next time, run:
-
-```bash
-cd /path/to/yt-dlp-gui
-source .venv/bin/activate
-python3 -m gui
-```
-
-Optional convenience launcher:
+Convenience launcher:
 
 ```bash
 python3 run_gui.py
 ```
 
-#### Windows
-
-1. Open **PowerShell**.
-2. Go to this project folder.
-3. Run:
+### Windows
 
 ```powershell
 winget install ffmpeg
@@ -79,57 +68,70 @@ python -m pip install -r requirements.txt
 python -m gui
 ```
 
-4. Next time, run:
-
-```powershell
-cd C:\path\to\yt-dlp-gui
-.\.venv\Scripts\Activate.ps1
-python -m gui
-```
-
-Optional convenience launcher:
+Convenience launcher:
 
 ```powershell
 python run_gui.py
 ```
 
-#### Check ffmpeg
+If `Activate.ps1` is blocked by your PowerShell policy, run this once in the current PowerShell session:
 
-Run `ffmpeg -version`.  
-If you see a version, it is installed.
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+```
 
-### Run Tests
+Then activate the environment and continue with the install steps.
 
-Tests include core unit tests and Qt UI tests (offscreen). No network calls.
+## How To Use The App
 
-- macOS
+1. Paste a video or playlist URL.
+2. Click `Analyze URL` to load formats and preview details.
+3. If the URL can be treated as either a single video or a playlist, choose the mode you want.
+4. Pick `Video` or `Audio`, then choose the container, codec, and quality you want.
+5. Optionally set:
+   - `Playlist items` for playlist downloads
+   - `File name` for single-video downloads
+   - output folder
+6. Click `Download` to start immediately, or `Add to queue` to save the current URL and settings as a queue item.
+7. Use the `Queue` panel to reorder items, edit an existing item, or clear the queue.
+8. Use the `Logs` panel to inspect format fetches, download progress, and failures.
+9. Open `Preferences` to:
+   - choose the edit-friendly MP4 encoder preference
+   - enable opening the output folder after downloads finish
+   - export a diagnostics report
+
+Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can override that path with `YT_DLP_GUI_SETTINGS_PATH`.
+
+## Entry Points
+
+- `python -m gui`
+- `python run_gui.py`
+
+`run_gui.py` prefers the local `.venv` Python interpreter when one exists.
+
+## Run Tests
+
+The test suite includes core unit tests and Qt UI tests. It does not require live network access.
+
+### macOS
 
 ```bash
 source .venv/bin/activate
 python3 scripts/run_tests.py -v
 ```
 
-- Windows
+### Windows
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python scripts/run_tests.py -v
 ```
 
-### Code Structure
+## Build Packaged Apps
 
-Core logic is shared across the Qt app:
+The packaging scripts create `.venv` if needed, install build dependencies, and generate fresh app icons before running PyInstaller.
 
-- `gui/common/`: shared helpers, download/runtime integration, types, diagnostics/history stores
-- `gui/core/`: UI-agnostic logic (queue checks, download planning, URL helpers, format selection, option parsing)
-- `gui/services/`: shared orchestration used by the frontend (request building/execution, history recording)
-- `gui/qt/`: Qt-specific frontend modules
-
-### Build Packaged App
-
-Build distributable app output from source.
-
-- macOS
+### macOS
 
 ```bash
 chmod +x scripts/build-macos.sh
@@ -139,59 +141,71 @@ python3 scripts/check_packaged_assets.py dist/yt-dlp-gui.app
 
 Output: `dist/yt-dlp-gui.app`
 
-The macOS build script auto-generates and embeds an app icon during packaging.
-
-- Windows
+### Windows
 
 ```powershell
-.\scripts\build-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 python scripts/check_packaged_assets.py dist\yt-dlp-gui
 ```
 
 Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
 
-### Common Problems
+Packaged builds still expect `ffmpeg` and `ffprobe` to be available on the system.
 
-#### 1) `ffmpeg` or `ffprobe` not found
+## Project Layout
 
-macOS: run `brew install ffmpeg`, then restart Terminal.  
-Windows: run `winget install ffmpeg`, then open a new PowerShell window.
+- `gui/common/`: shared helpers for downloads, settings, diagnostics, and format handling
+- `gui/core/`: UI-agnostic logic for queue handling, option parsing, workflow checks, and presentation shaping
+- `gui/services/`: app-facing orchestration for building and running download requests
+- `gui/qt/`: Qt application, controllers, widgets, assets, and styling
+- `scripts/`: build, packaging, and test helpers
+- `tests/`: unit and Qt UI tests
 
-#### 2) PySide6 is missing
+## Troubleshooting
 
-macOS: activate `.venv`, then run `python3 -m pip install -r requirements.txt`.  
-Windows: activate `.venv`, then run `python -m pip install -r requirements.txt`.
+### `ffmpeg` or `ffprobe` not found
 
-#### 3) Build/run command differences
+macOS:
 
-macOS: `source .venv/bin/activate`  
-Windows: `.\.venv\Scripts\Activate.ps1`
+```bash
+brew install ffmpeg
+```
 
-#### 4) PowerShell blocks the Windows build script (unsigned script policy)
+Windows:
 
-If the script is blocked because there is no trusted signature, run the build with:
+```powershell
+winget install ffmpeg
+```
+
+Then restart the terminal or app and try again.
+
+### PySide6 is missing
+
+Activate the virtual environment and reinstall dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### Format loading or downloads fail
+
+Open the `Logs` panel first. If you need to share or inspect more context, use `Preferences -> Export diagnostics` to write a diagnostics report into the current output folder.
+
+### Windows blocks the build script
+
+Run the build with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
-This bypass only applies to that one command.
+That bypass applies only to that command.
 
-### Usage Notes
+## Support Policy
 
-- You can download playlists.
-- Use **Playlist items** for ranges like `1-5,7,10-`.
-- Leave Playlist items blank to download the full playlist.
-- The app keeps recent downloads in **History** and saves your output and post-download preferences between runs.
+This project is maintained in spare time. Issues and pull requests are welcome, but there is no guaranteed support timeline.
 
-### Support Policy
-
-This is maintained in my spare time.
-I might fix things when I can, but there are no guarantees for support, updates, or compatibility fixes.
-
-Issues and PRs are welcome, but implementing fixes depends on my free time.
-
-### Legal
+## Legal
 
 Only download content you are authorized to download.
 Platform terms may still restrict downloads.

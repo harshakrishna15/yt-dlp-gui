@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse, urlencode
 
-from .types import DownloadOptions, HistoryItem, QueueItem
+from .types import DownloadOptions, QueueItem
 
 
 def sanitize_url_for_report(value: str) -> str:
@@ -39,7 +39,6 @@ def build_report_payload(
     is_downloading: bool,
     preview_title: str,
     options: DownloadOptions,
-    history_items: list[HistoryItem],
     logs_text: str,
 ) -> str:
     lines: list[str] = []
@@ -71,20 +70,6 @@ def build_report_payload(
                     "container": settings.get("format_filter"),
                     "codec": settings.get("codec_filter"),
                     "format": settings.get("format_label"),
-                },
-                ensure_ascii=True,
-            )
-        )
-    lines.append("")
-    lines.append("[history]")
-    for item in history_items[:50]:
-        lines.append(
-            json.dumps(
-                {
-                    "timestamp": item.get("timestamp", ""),
-                    "name": item.get("name", ""),
-                    "path": item.get("path", ""),
-                    "source_url": sanitize_url_for_report(item.get("source_url", "")),
                 },
                 ensure_ascii=True,
             )

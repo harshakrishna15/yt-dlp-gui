@@ -71,6 +71,18 @@ def queue_add_feedback(issue: str) -> tuple[str, str]:
     return status, log
 
 
+def queue_add_success_feedback(queue_count: int) -> tuple[str, str]:
+    count = max(1, int(queue_count))
+    item_label = "item" if count == 1 else "items"
+    status = f"Added to queue as item {count}"
+    message = (
+        f"Saved as queue item {count}. "
+        f"Queue now has {count} {item_label}. "
+        "Open Queue to review, or press Download to start it."
+    )
+    return status, message
+
+
 def queue_start_missing_detail(issue: str) -> str:
     return QUEUE_START_MISSING_DETAIL_BY_ISSUE.get(issue, "settings")
 
@@ -100,8 +112,12 @@ def next_non_empty_queue_index(
     return None
 
 
-def queue_item(url: str, settings: QueueSettings) -> QueueItem:
-    return {"url": str(url), "settings": settings}
+def queue_item(url: str, settings: QueueSettings, *, title: str = "") -> QueueItem:
+    item: QueueItem = {"url": str(url), "settings": settings}
+    clean_title = str(title or "").strip()
+    if clean_title:
+        item["title"] = clean_title
+    return item
 
 
 def normalize_selected_indices(

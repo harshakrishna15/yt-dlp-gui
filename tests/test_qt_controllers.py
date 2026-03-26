@@ -103,7 +103,6 @@ class FakeSignals:
         self.log = FakeSignal()
         self.download_done = FakeSignal()
         self.queue_item_done = FakeSignal()
-        self.record_output = FakeSignal()
 
 
 class FakeWindow:
@@ -123,18 +122,11 @@ class FakeWindow:
         self._playlist_mode = False
         self._filtered_lookup: dict[str, dict] = {}
         self._last_error_log = ""
-        self.session_completed_value = FakeStatusValue("0")
-        self.session_failed_value = FakeStatusValue("0")
-        self.session_success_rate_value = FakeStatusValue("-")
-        self.session_remaining_value = FakeStatusValue("0")
-        self.session_speed_value = FakeStatusValue("-")
-        self.session_peak_speed_value = FakeStatusValue("-")
-        self.session_downloaded_value = FakeStatusValue("0 B")
-        self.session_elapsed_value = FakeStatusValue("-")
-        self._session_total_items = 0
+        self._preview_title_raw = ""
 
         self.status_updates: list[str] = []
         self.feedback_updates: list[tuple[str, str]] = []
+        self.feedback_titles: list[str | None] = []
         self.logs: list[str] = []
         self.popups: list[tuple[str, str, bool]] = []
         self.preview_title = ""
@@ -149,6 +141,15 @@ class FakeWindow:
         self.current_item: tuple[str, str] = ("-", "-")
         self.open_output_calls = 0
         self.close_after_cancel_calls = 0
+        self.edited_queue_items: list[tuple[int, dict[str, object]]] = []
+        self.cleared_queue_edit_mode = 0
+        self.pending_queue_edit_apply_calls = 0
+        self.post_download_output_dir: Path | None = None
+        self.captured_queue_settings = {
+            "mode": "audio",
+            "format_filter": "mp3",
+            "format_label": "High",
+        }
 
     def _set_status(self, text: str, *, log: bool = True) -> None:
         self.status_updates.append(str(text))
@@ -156,8 +157,15 @@ class FakeWindow:
         if log:
             self.logs.append(str(text))
 
-    def _set_source_feedback(self, message: str, *, tone: str) -> None:
+    def _set_source_feedback(
+        self,
+        message: str,
+        *,
+        tone: str,
+        title: str | None = None,
+    ) -> None:
         self.feedback_updates.append((str(message), str(tone)))
+        self.feedback_titles.append(str(title) if title is not None else None)
 
     def _set_mode_unselected(self) -> None:
         return
@@ -173,6 +181,7 @@ class FakeWindow:
 
     def _set_preview_title(self, title: str) -> None:
         self.preview_title = str(title)
+        self._preview_title_raw = str(title)
 
     def _set_source_summary(self, summary: dict[str, object] | None) -> None:
         self.source_summary = dict(summary) if isinstance(summary, dict) else None
@@ -189,6 +198,9 @@ class FakeWindow:
     def _apply_mode_formats(self) -> None:
         return
 
+    def _apply_pending_queue_edit_settings(self) -> None:
+        self.pending_queue_edit_apply_calls += 1
+
     def _show_feedback_popup(self, *, title: str, message: str, critical: bool = False) -> None:
         self.popups.append((str(title), str(message), bool(critical)))
 
@@ -201,40 +213,11 @@ class FakeWindow:
     def _prepare_next_queue_item_progress(self) -> None:
         self.queue_progress_preps += 1
 
-    def _reset_session_metrics(
-        self, *, total_items: int, started_ts: float | None = None
-    ) -> None:
-        self._session_total_items = max(0, int(total_items))
-        self.session_completed_value.setText("0")
-        self.session_failed_value.setText("0")
-        self.session_success_rate_value.setText("-")
-        self.session_remaining_value.setText(
-            str(self._session_total_items if self._is_downloading else 0)
-        )
-        self.session_speed_value.setText("-")
-        self.session_peak_speed_value.setText("-")
-        self.session_downloaded_value.setText("0 B")
-        self.session_elapsed_value.setText("0:00" if started_ts is not None else "-")
+    def _set_post_download_output_dir(self, output_dir: Path) -> None:
+        self.post_download_output_dir = Path(output_dir)
 
-    def _set_session_counts(self, *, completed: int, failed: int) -> None:
-        completed_i = max(0, int(completed))
-        failed_i = max(0, int(failed))
-        processed = completed_i + failed_i
-        self.session_completed_value.setText(str(completed_i))
-        self.session_failed_value.setText(str(failed_i))
-        if processed > 0:
-            self.session_success_rate_value.setText(
-                f"{(completed_i / processed) * 100.0:.0f}%"
-            )
-        else:
-            self.session_success_rate_value.setText("-")
-        remaining = (
-            max(0, self._session_total_items - processed) if self._is_downloading else 0
-        )
-        self.session_remaining_value.setText(str(remaining))
-
-    def _clear_last_output_path(self) -> None:
-        return
+    def _clear_post_download_output_dir(self) -> None:
+        self.post_download_output_dir = None
 
     def _set_metrics_visible(self, visible: bool) -> None:
         self.metrics_visible = bool(visible)
@@ -266,14 +249,16 @@ class FakeWindow:
         self.logs.append(str(text))
 
     def _capture_queue_settings(self) -> dict[str, object]:
-        return {
-            "mode": "audio",
-            "format_filter": "mp3",
-            "format_label": "High",
-        }
+        return dict(self.captured_queue_settings)
 
     def _refresh_queue_panel(self) -> None:
         self.queue_refreshes += 1
+
+    def _edit_queue_item(self, row: int, item: dict[str, object]) -> None:
+        self.edited_queue_items.append((int(row), dict(item)))
+
+    def _clear_queue_item_edit_mode(self) -> None:
+        self.cleared_queue_edit_mode += 1
 
     def _set_current_item_display(self, *, progress: str, title: str) -> None:
         self.current_item = (str(progress), str(title))
@@ -615,11 +600,7 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(target, controller.run_single_download_worker)
         self.assertEqual(args, ())
         self.assertEqual(kwargs["request"], request)
-        self.assertEqual(kwargs["history_title"], "")
-        self.assertEqual(
-            kwargs["history_settings"],
-            {"mode": "audio", "format_filter": "mp3", "format_label": "High"},
-        )
+        self.assertEqual(window.post_download_output_dir, Path("/tmp/out"))
 
     def test_start_queue_download_sets_state_and_submits_queue_worker(self) -> None:
         window = FakeWindow()
@@ -714,32 +695,121 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(state.queue_items, [])
         self.assertGreaterEqual(window.queue_refreshes, 3)
 
-    def test_requeue_history_item_restores_prior_settings(self) -> None:
+    def test_on_queue_edit_item_sets_edit_mode_and_delegates_to_window(self) -> None:
         window = FakeWindow()
+        state = RunQueueState(
+            queue_items=[
+                {
+                    "url": "https://example.com/watch?v=abc",
+                    "title": "Example title",
+                    "settings": {"mode": "video", "format_filter": "mp4"},
+                }
+            ]
+        )
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.on_queue_edit_item(0)
+
+        self.assertEqual(state.editing_queue_index, 0)
+        self.assertEqual(
+            window.edited_queue_items,
+            [
+                (
+                    0,
+                    {
+                        "url": "https://example.com/watch?v=abc",
+                        "title": "Example title",
+                        "settings": {"mode": "video", "format_filter": "mp4"},
+                    },
+                )
+            ],
+        )
+
+    def test_on_add_to_queue_announces_position_and_queue_count(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc")
+        window._filtered_lookup = {"Best": {"id": "x"}}
+        state = RunQueueState(
+            queue_items=[
+                {
+                    "url": "https://example.com/watch?v=queued",
+                    "settings": {
+                        "mode": "audio",
+                        "format_filter": "mp3",
+                        "format_label": "High",
+                    },
+                }
+            ]
+        )
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.on_add_to_queue()
+
+        self.assertEqual(len(state.queue_items), 2)
+        self.assertEqual(state.queue_items[-1]["url"], "https://example.com/watch?v=abc")
+        self.assertEqual(state.queue_items[-1].get("title", ""), "")
+        self.assertEqual(window.status_value.text(), "Added to queue as item 2")
+        self.assertEqual(
+            window.feedback_updates[-1],
+            (
+                "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+                "success",
+            ),
+        )
+        self.assertEqual(window.feedback_titles[-1], "Added to queue")
+
+    def test_on_add_to_queue_preserves_preview_title(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc")
+        window._filtered_lookup = {"Best": {"id": "x"}}
+        window._preview_title_raw = "Example video title"
         state = RunQueueState()
         ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
         controller = RunQueueController(window, state=state, ports=ports)
 
-        queued = controller.on_requeue_history_item(
-            {
-                "source_url": "https://example.com/watch?v=abc",
-                "queue_settings": {
-                    "mode": "video",
-                    "format_filter": "mp4",
-                    "codec_filter": "h264",
-                    "format_label": "1080p",
-                },
-            }
-        )
+        controller.on_add_to_queue()
 
-        self.assertTrue(queued)
-        self.assertEqual(len(state.queue_items), 1)
-        self.assertEqual(state.queue_items[0]["url"], "https://example.com/watch?v=abc")
-        self.assertEqual(
-            state.queue_items[0]["settings"]["codec_filter"],
-            "h264",
+        self.assertEqual(state.queue_items[0]["title"], "Example video title")
+
+    def test_on_add_to_queue_updates_existing_edit_item(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=updated")
+        window._filtered_lookup = {"Best": {"id": "x"}}
+        window._preview_title_raw = "Updated title"
+        window.captured_queue_settings = {
+            "mode": "video",
+            "format_filter": "mp4",
+            "codec_filter": "avc1",
+            "format_label": "1080p",
+        }
+        state = RunQueueState(
+            queue_items=[
+                {
+                    "url": "https://example.com/watch?v=old",
+                    "title": "Old title",
+                    "settings": {
+                        "mode": "audio",
+                        "format_filter": "mp3",
+                        "format_label": "High",
+                    },
+                }
+            ],
+            editing_queue_index=0,
         )
-        self.assertEqual(window.status_value.text(), "Added recent download back to queue")
+        ports, _dialogs, _filesystem, _clock = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.on_add_to_queue()
+
+        self.assertEqual(len(state.queue_items), 1)
+        self.assertEqual(state.queue_items[0]["url"], "https://example.com/watch?v=updated")
+        self.assertEqual(state.queue_items[0]["title"], "Updated title")
+        self.assertEqual(state.queue_items[0]["settings"]["codec_filter"], "avc1")
+        self.assertIsNone(state.editing_queue_index)
+        self.assertEqual(window.cleared_queue_edit_mode, 1)
+        self.assertEqual(window.feedback_titles[-1], "Queue item updated")
 
     def test_on_queue_item_done_prepares_next_item_without_full_progress_reset(self) -> None:
         window = FakeWindow()
@@ -777,7 +847,7 @@ class TestRunQueueController(unittest.TestCase):
         self.assertFalse(state.is_downloading)
         self.assertEqual(len(dialogs.critical_calls), 1)
 
-    def test_finish_queue_success_updates_status_counts_and_opens_folder(self) -> None:
+    def test_finish_queue_success_updates_status_and_opens_folder(self) -> None:
         window = FakeWindow()
         state = RunQueueState(
             queue_items=[
@@ -804,14 +874,10 @@ class TestRunQueueController(unittest.TestCase):
         self.assertFalse(state.show_progress_item)
         self.assertIsNone(state.queue_started_ts)
         self.assertEqual(window.status_value.text(), "Queue complete")
-        self.assertEqual(window.session_completed_value.text(), "2")
-        self.assertEqual(window.session_failed_value.text(), "0")
-        self.assertEqual(window.session_success_rate_value.text(), "100%")
-        self.assertEqual(window.session_remaining_value.text(), "0")
         self.assertEqual(window.open_output_calls, 1)
         self.assertTrue(any("[queue] finished successfully" in line for line in window.logs))
 
-    def test_finish_queue_failed_shows_warning_popup_and_keeps_failed_count(self) -> None:
+    def test_finish_queue_failed_shows_warning_popup(self) -> None:
         window = FakeWindow()
         window._last_error_log = "HTTP Error 429: Too many requests"
         state = RunQueueState(
@@ -836,10 +902,6 @@ class TestRunQueueController(unittest.TestCase):
         controller.finish_queue(cancelled=False)
 
         self.assertEqual(window.status_value.text(), "Queue finished with errors")
-        self.assertEqual(window.session_completed_value.text(), "1")
-        self.assertEqual(window.session_failed_value.text(), "2")
-        self.assertEqual(window.session_success_rate_value.text(), "33%")
-        self.assertEqual(window.session_remaining_value.text(), "0")
         self.assertEqual(window.open_output_calls, 1)
         self.assertEqual(len(window.popups), 1)
         self.assertEqual(window.popups[0][0], "Queue finished with errors")
@@ -869,10 +931,6 @@ class TestRunQueueController(unittest.TestCase):
         controller.finish_queue(cancelled=True)
 
         self.assertEqual(window.status_value.text(), "Queue cancelled")
-        self.assertEqual(window.session_completed_value.text(), "1")
-        self.assertEqual(window.session_failed_value.text(), "1")
-        self.assertEqual(window.session_success_rate_value.text(), "50%")
-        self.assertEqual(window.session_remaining_value.text(), "0")
         self.assertEqual(window.open_output_calls, 0)
         self.assertTrue(any("[queue] stopped by cancellation" in line for line in window.logs))
 

@@ -5,12 +5,24 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QWidget
 
-from ..common import diagnostics, settings_store
+from ..common import diagnostics, settings_store, tooling
 from . import panels as qt_panels
 from .constants import LOG_MAX_LINES
 
 if TYPE_CHECKING:
     from .app import QtYtDlpGui
+
+
+_EDIT_FRIENDLY_ENCODER_CODECS = {
+    "apple": "h264_videotoolbox",
+    "nvidia": "h264_nvenc",
+    "amd": "h264_amf",
+    "intel": "h264_qsv",
+    "cpu": "libx264",
+}
+_EDIT_FRIENDLY_ENCODER_DISABLED_TOOLTIP = (
+    "Unavailable from the installed ffmpeg on this computer."
+)
 
 
 class WindowSettingsMixin:
@@ -27,79 +39,26 @@ class WindowSettingsMixin:
             parent=self,
             register_native_combo=self._register_native_combo,
             on_export_diagnostics=self._export_diagnostics,
-            on_show_about=self._show_about_dialog,
         )
         self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
         self.open_folder_after_download_check = refs.open_folder_after_download_check
         self.export_diagnostics_button = refs.export_diagnostics_button
-        self.about_button = refs.about_button
-        return refs.panel
-
-    def _build_session_panel(self: "QtYtDlpGui") -> QWidget:
-        refs = qt_panels.build_session_panel(
-            parent=self,
-            session_card=self.run_activity_card,
-        )
+        self._refresh_edit_friendly_encoder_availability()
         return refs.panel
 
     def _build_queue_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_queue_panel(
             parent=self,
-            on_remove_selected=self._queue_remove_selected,
-            on_move_up=self._queue_move_up,
-            on_move_down=self._queue_move_down,
-            on_clear=self._queue_clear,
         )
         self.queue_stack = refs.queue_stack
         self._queue_empty_index = refs.queue_empty_index
         self._queue_content_index = refs.queue_content_index
         self.queue_empty_state = refs.queue_empty_state
         self.queue_list = refs.queue_list
-        self.queue_remove_button = refs.queue_remove_button
-        self.queue_move_up_button = refs.queue_move_up_button
-        self.queue_move_down_button = refs.queue_move_down_button
-        self.queue_clear_button = refs.queue_clear_button
-        self.queue_empty_state.again_requested.connect(self._requeue_history_item)
-        self.queue_summary_empty.again_requested.connect(self._requeue_history_item)
         self.queue_list.itemSelectionChanged.connect(self._refresh_queue_panel_state)
+        self.queue_list.edit_requested.connect(self._queue_edit_row)
         self.queue_list.remove_requested.connect(self._queue_remove_row)
         self.queue_list.items_reordered.connect(self._queue_reorder_items)
-        self._set_uniform_button_width(
-            [
-                self.queue_remove_button,
-                self.queue_move_up_button,
-                self.queue_move_down_button,
-                self.queue_clear_button,
-            ],
-            extra_px=24,
-        )
-        return refs.panel
-
-    def _build_history_panel(self: "QtYtDlpGui") -> QWidget:
-        refs = qt_panels.build_history_panel(
-            parent=self,
-            on_open_file=self._open_selected_history_file,
-            on_open_folder=self._open_selected_history_folder,
-            on_clear=self._clear_download_history,
-        )
-        self.history_stack = refs.history_stack
-        self._history_empty_index = refs.history_empty_index
-        self._history_content_index = refs.history_content_index
-        self.history_list = refs.history_list
-        self.history_open_file_button = refs.history_open_file_button
-        self.history_open_folder_button = refs.history_open_folder_button
-        self.history_clear_button = refs.history_clear_button
-        self.history_list.itemSelectionChanged.connect(
-            self._refresh_history_panel_state
-        )
-        self._set_uniform_button_width(
-            [
-                self.history_open_file_button,
-                self.history_open_folder_button,
-                self.history_clear_button,
-            ],
-            extra_px=24,
-        )
         return refs.panel
 
     def _build_logs_panel(self: "QtYtDlpGui") -> QWidget:
@@ -180,11 +139,26 @@ class WindowSettingsMixin:
             lambda _state: self._save_user_settings()
         )
 
+    def _refresh_edit_friendly_encoder_availability(self: "QtYtDlpGui") -> None:
+        ffmpeg_path, _ffmpeg_source = tooling.resolve_binary("ffmpeg")
+        available_codecs: set[str] = set()
+        if ffmpeg_path is not None:
+            available_codecs = tooling.available_ffmpeg_encoders(
+                ffmpeg_path,
+                candidates=_EDIT_FRIENDLY_ENCODER_CODECS.values(),
+            )
+        for preference, codec in _EDIT_FRIENDLY_ENCODER_CODECS.items():
+            self.edit_friendly_encoder_combo.set_item_enabled(
+                preference,
+                codec in available_codecs,
+                disabled_tooltip=_EDIT_FRIENDLY_ENCODER_DISABLED_TOOLTIP,
+            )
+
     def _maybe_open_output_folder(self: "QtYtDlpGui") -> None:
         if not self.open_folder_after_download_check.isChecked():
             return
-        if self._latest_output_path is not None:
-            output_dir = self._latest_output_path.parent
+        if self._post_download_output_dir is not None:
+            output_dir = self._post_download_output_dir
         else:
             output_dir = Path(
                 self.output_dir_edit.text().strip() or self._default_output_dir()
@@ -218,9 +192,8 @@ class WindowSettingsMixin:
             queue_items=self.queue_items,
             queue_active=self.queue_active,
             is_downloading=self._is_downloading,
-            preview_title=self.preview_value.text(),
+            preview_title=self._preview_title_raw,
             options=options,
-            history_items=self.download_history,
             logs_text="\n".join(self._log_lines),
         )
         try:

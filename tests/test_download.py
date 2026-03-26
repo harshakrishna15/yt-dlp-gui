@@ -898,22 +898,17 @@ class TestEditFriendlyEncoderSelection(unittest.TestCase):
 
 
 class TestEncoderProbe(unittest.TestCase):
-    @patch("gui.common.download.subprocess.run", side_effect=OSError("boom"))
-    def test_available_h264_video_encoders_falls_back_on_subprocess_error(
-        self, _mock_run
+    @patch("gui.common.download.available_ffmpeg_encoders", return_value=set())
+    def test_available_h264_video_encoders_falls_back_on_probe_failure(
+        self, _mock_probe
     ) -> None:
         encoders = download._available_h264_video_encoders(Path("/usr/bin/ffmpeg"))
         self.assertEqual(encoders, {"libx264"})
 
-    @patch("gui.common.download.subprocess.run")
-    def test_available_h264_video_encoders_falls_back_on_nonzero_exit(
-        self, mock_run
+    @patch("gui.common.download.available_ffmpeg_encoders", return_value=set())
+    def test_available_h264_video_encoders_falls_back_on_empty_probe_result(
+        self, _mock_probe
     ) -> None:
-        mock_run.return_value = type(
-            "_Result",
-            (),
-            {"returncode": 1, "stdout": "", "stderr": "error"},
-        )()
         encoders = download._available_h264_video_encoders(Path("/usr/bin/ffmpeg"))
         self.assertEqual(encoders, {"libx264"})
 

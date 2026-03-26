@@ -66,6 +66,10 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QMainWindow, QWidget#appRoot {
             background: __page_bg_bottom__;
         }
+        QStackedWidget#panelStack {
+            background: __page_bg_bottom__;
+            border: none;
+        }
         QWidget#downloadsPage, QWidget#panelPage {
             background: transparent;
             border: none;
@@ -159,10 +163,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __text_primary__;
             font-size: 20px;
             font-weight: 800;
-        }
-        QLabel#panelHeaderSubtitle {
-            color: __text_muted__;
-            font-size: 12px;
         }
         QLabel#cardHeaderTitle {
             font-family: "Arial Rounded MT Bold", "Avenir Next";
@@ -430,31 +430,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-weight: 700;
             padding: 0px 7px 0px 0px;
         }
-        QLabel#sourceFeedbackLabel {
-            border-radius: 18px;
-            padding: 11px 14px;
-            font-size: 13px;
-            font-weight: 700;
-            color: __text_muted__;
-            background: transparent;
-            border: none;
-        }
-        QLabel#sourceFeedbackLabel[tone="loading"],
-        QLabel#sourceFeedbackLabel[tone="success"] {
-            color: __accent_text__;
-            background: __accent_soft__;
-            border: 1px solid __accent_border__;
-        }
-        QLabel#sourceFeedbackLabel[tone="warning"] {
-            color: __warning_text__;
-            background: __warning_bg__;
-            border: 1px solid __warning_border__;
-        }
-        QLabel#sourceFeedbackLabel[tone="error"] {
-            color: __error_text__;
-            background: __error_bg__;
-            border: 1px solid __error_border__;
-        }
         QFrame#mixedUrlOverlay {
             background: rgba(23, 34, 45, 20);
             border: none;
@@ -505,7 +480,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-family: "Avenir Next";
             font-size: 18px;
             font-weight: 500;
-            padding: 0px 0px 2px 0px;
+            padding: 0px;
         }
         QPushButton#sourceToastDismissButton:hover {
             background: rgba(255, 255, 255, 40);
@@ -549,9 +524,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border-radius: 0px;
         }
         QFrame#panelEmptyCard {
-            background: __surface_soft_glass_strong__;
-            border: none;
-            border-radius: 18px;
+            background: __surface__;
+            border: 1px solid __border_soft__;
+            border-radius: 24px;
         }
         QLabel#panelFormIntro {
             color: __text_muted__;
@@ -559,9 +534,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-weight: 600;
         }
         QFrame#settingsRowCard, QFrame#settingsAppCard {
-            background: __surface_soft_glass_strong__;
-            border: 1px solid __border_soft__;
-            border-radius: 18px;
+            background: transparent;
+            border: none;
+            border-radius: 0px;
         }
         QLabel#settingsRowTitle {
             color: __text_primary__;
@@ -573,6 +548,16 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 12px;
             font-weight: 600;
             line-height: 1.35em;
+        }
+        QLabel#settingsAppName {
+            color: __text_primary__;
+            font-size: 18px;
+            font-weight: 800;
+        }
+        QLabel#settingsAppVersion {
+            color: __text_muted__;
+            font-size: 13px;
+            font-weight: 700;
         }
         QLabel#panelEmptyBadge {
             background: __accent_soft__;
@@ -619,11 +604,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 13px;
             font-weight: 700;
         }
-        QLabel#recentDownloadsTitle {
-            color: __text_muted__;
-            font-size: 12px;
-            font-weight: 800;
-        }
         QLabel#panelInlineMeta {
             color: __text_muted__;
             font-size: 12px;
@@ -642,15 +622,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 13px;
             min-height: 18px;
             padding: 0px 0px 2px 0px;
-        }
-        QLabel#runSectionLabel {
-            color: __text_label__;
-            font-size: 15px;
-            font-weight: 800;
-            letter-spacing: 0.9px;
-        }
-        QLabel#runSectionLabel[compact="true"] {
-            font-size: 14px;
         }
         QFrame#metricsStrip {
             background: transparent;
@@ -682,28 +653,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             border-radius: 0px;
         }
-        QFrame#sessionMetricCard {
-            background: __surface__;
-            border: 1px solid __border_soft__;
-            border-radius: 16px;
-        }
-        QLabel#sessionMetricValue {
-            color: __text_primary__;
-            font-family: "Arial Rounded MT Bold", "Avenir Next";
-            font-size: 24px;
-            font-weight: 800;
-        }
-        QLabel#sessionMetricValue[compact="true"] {
-            font-size: 21px;
-        }
-        QLabel#sessionMetricLabel {
-            color: __text_muted__;
-            font-size: 13px;
-            font-weight: 700;
-        }
-        QLabel#sessionMetricLabel[compact="true"] {
-            font-size: 12px;
-        }
         QLabel#metricInline, QLabel#metricInlineItem {
             background: transparent;
             border: none;
@@ -717,30 +666,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 10px;
             padding: 0px 0px 2px 0px;
             min-height: 18px;
-        }
-        QFrame#downloadResultCard[state="empty"] {
-            background: __surface_soft_glass_strong__;
-            border: 1px solid __border_soft__;
-            border-radius: 16px;
-        }
-        QFrame#downloadResultCard[state="ready"] {
-            background: __accent_wash__;
-            border: 1px solid __accent_border__;
-            border-radius: 16px;
-        }
-        QLabel#downloadResultTitle {
-            color: __text_primary__;
-            font-weight: 700;
-        }
-        QFrame#downloadResultCard[state="ready"] QLabel#downloadResultTitle {
-            color: __accent_text__;
-        }
-        QLabel#downloadResultPath {
-            color: __text_muted__;
-            padding-right: 4px;
-        }
-        QFrame#downloadResultCard[state="ready"] QLabel#downloadResultPath {
-            color: __text_secondary__;
         }
         QProgressBar {
             background: __surface_soft_alt__;
@@ -765,7 +690,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QProgressBar#workspaceSummaryProgress::chunk {
             border-radius: 2px;
         }
-        QLineEdit, QComboBox {
+        QLineEdit {
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
                 stop: 0 __field_surface__,
@@ -777,24 +702,32 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             selection-background-color: __accent_wash_strong__;
             selection-color: __text_primary__;
         }
+        QComboBox {
+            background: qlineargradient(
+                x1: 0, y1: 0, x2: 0, y2: 1,
+                stop: 0 __field_surface__,
+                stop: 1 __surface_soft_alt__
+            );
+            border: 1px solid __border_soft__;
+            border-radius: 16px;
+            color: __field_text__;
+            selection-background-color: __surface_selected_strong__;
+            selection-color: __field_text__;
+            padding: 7px 16px;
+            padding-right: 46px;
+            font-weight: 600;
+        }
         QPlainTextEdit, QListWidget {
             background: __surface__;
             border: 1px solid __field_border__;
             border-radius: 18px;
             color: __field_text__;
         }
-        QLineEdit, QComboBox {
+        QLineEdit {
             padding: 8px 16px;
         }
         QPlainTextEdit, QListWidget {
             padding: 8px 12px;
-        }
-        QComboBox {
-            padding: 7px 16px;
-            padding-right: 46px;
-            selection-background-color: __surface_selected_strong__;
-            selection-color: __field_text__;
-            font-weight: 600;
         }
         QWidget#outputCardBlock QLabel#outputFormLabel,
         QWidget#outputCardBlock QLabel#saveBlockLabel {
@@ -814,7 +747,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __field_disabled_border__;
             color: __text_muted__;
         }
-        QLineEdit:hover, QPlainTextEdit:hover, QListWidget:hover, QComboBox:hover {
+        QLineEdit:hover, QPlainTextEdit:hover, QListWidget:hover {
             border: 1px solid __border_hover__;
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
@@ -822,12 +755,28 @@ def build_stylesheet(combo_arrow_path: str) -> str:
                 stop: 1 __surface__
             );
         }
-        QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QComboBox:focus {
+        QComboBox:hover {
+            border: 1px solid __border_hover__;
+            background: qlineargradient(
+                x1: 0, y1: 0, x2: 0, y2: 1,
+                stop: 0 __field_surface_hover__,
+                stop: 1 __surface_soft_alt__
+            );
+        }
+        QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus {
             border: 1px solid __accent_border__;
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
                 stop: 0 __field_surface_focus__,
                 stop: 1 __surface__
+            );
+        }
+        QComboBox:focus {
+            border: 1px solid __accent_border__;
+            background: qlineargradient(
+                x1: 0, y1: 0, x2: 0, y2: 1,
+                stop: 0 __field_surface_focus__,
+                stop: 1 __surface_soft_alt__
             );
         }
         QWidget#commandBar QLineEdit#urlInputField:hover,
@@ -839,8 +788,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
                 stop: 1 __surface__
             );
         }
-        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit,
-        QGroupBox#formatSection QWidget#outputCardBlock QComboBox {
+        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit {
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
                 stop: 0 __field_surface__,
@@ -849,16 +797,14 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __border_soft__;
             border-radius: 16px;
         }
-        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:hover,
-        QGroupBox#formatSection QWidget#outputCardBlock QComboBox:hover {
+        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:hover {
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
                 stop: 0 __field_surface_hover__,
                 stop: 1 __surface_soft_alt__
             );
         }
-        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:focus,
-        QGroupBox#formatSection QWidget#outputCardBlock QComboBox:focus {
+        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:focus {
             background: qlineargradient(
                 x1: 0, y1: 0, x2: 0, y2: 1,
                 stop: 0 __field_surface_focus__,
@@ -866,13 +812,26 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             );
             border: 1px solid __accent_border__;
         }
-        QPlainTextEdit#logsView {
-            background: #15202b;
+        QWidget#logsContentPage {
+            background: transparent;
             border: none;
-            border-radius: 18px;
-            color: #dce7f2;
-            selection-background-color: #2a4f63;
-            selection-color: #ffffff;
+        }
+        QFrame#logsConsoleCard {
+            background: __surface_soft_alt__;
+            border: 1px solid __border_soft__;
+            border-radius: 24px;
+        }
+        QPlainTextEdit#logsView,
+        QPlainTextEdit#logsView:hover,
+        QPlainTextEdit#logsView:focus {
+            background: transparent;
+            border: none;
+            border-radius: 20px;
+            color: __text_secondary__;
+            selection-background-color: __accent_wash_strong__;
+            selection-color: __text_inverse__;
+            font-size: 13px;
+            padding: 18px 18px;
         }
         QListWidget#panelList {
             background: __surface_glass_strong__;
@@ -900,48 +859,6 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: __surface__;
             border: 1px solid __border_soft__;
             border-radius: 18px;
-        }
-        QFrame#recentDownloadCard {
-            background: __surface__;
-            border: 1px solid __border_soft__;
-            border-radius: 18px;
-        }
-        QLabel#recentDownloadBadge {
-            background: __accent_soft__;
-            color: __accent_text__;
-            border-radius: 14px;
-            font-size: 12px;
-            font-weight: 800;
-        }
-        QLabel#recentDownloadTitle {
-            color: __text_primary__;
-            font-size: 16px;
-            font-weight: 800;
-        }
-        QLabel#recentDownloadMeta {
-            color: __text_muted__;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        QPushButton#historyAgainButton {
-            background: transparent;
-            border: 1px solid __border_soft__;
-            border-radius: 12px;
-            color: __text_secondary__;
-            font-size: 13px;
-            font-weight: 700;
-            padding: 8px 14px;
-        }
-        QPushButton#historyAgainButton:hover {
-            border: 1px solid __accent_border__;
-            color: __accent_text__;
-        }
-        QPushButton#historyAgainButton:pressed {
-            background: __accent_soft__;
-        }
-        QPushButton#historyAgainButton:disabled {
-            border: 1px solid __field_disabled_border__;
-            color: __button_disabled_text__;
         }
         QFrame#workspaceSummaryCard[tone="active"] {
             background: __surface_selected__;
@@ -1106,6 +1023,30 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __nav_disabled__;
             border: none;
         }
+        QPushButton#topIconButton {
+            background: __surface_soft_glass__;
+            color: __nav_text__;
+            border: 1px solid __border_soft__;
+            border-radius: 18px;
+            padding: 0px;
+            min-width: 40px;
+            min-height: 40px;
+        }
+        QPushButton#topIconButton:hover {
+            background: __surface_selected__;
+            color: __button_hover_text__;
+            border: 1px solid __border_hover__;
+        }
+        QPushButton#topIconButton:checked {
+            background: __surface_selected_strong__;
+            color: __accent_text__;
+            border: 1px solid __accent_border__;
+        }
+        QPushButton#topIconButton:disabled {
+            background: __surface__;
+            color: __nav_disabled__;
+            border: 1px solid __field_disabled_border__;
+        }
         QPushButton#primaryActionButton,
         QPushButton#analyzeUrlButton {
             background: __accent__;
@@ -1200,6 +1141,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QPushButton#secondaryActionButton:hover {
             background: __surface_selected__;
         }
+        QPushButton#secondaryActionButton:disabled {
+            color: __button_disabled_text__;
+        }
         QPushButton#dangerActionButton {
             background: transparent;
             border: 1px solid __border_soft__;
@@ -1209,6 +1153,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-weight: 700;
             min-height: 44px;
             padding: 10px 18px;
+        }
+        QPushButton#dangerActionButton[pill="true"] {
+            border-radius: 20px;
         }
         QPushButton#dangerActionButton[compact="true"] {
             font-size: 14px;

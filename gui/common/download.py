@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from ..core import options as core_options
 from .types import FormatInfo, ProgressUpdate
-from .tooling import resolve_binary
+from .tooling import available_ffmpeg_encoders, resolve_binary
 
 
 _MISSING_YT_DLP_MESSAGE = (
@@ -828,25 +828,8 @@ def _hardware_encoder_priority() -> tuple[str, ...]:
 
 
 def _available_h264_video_encoders(ffmpeg_path: Path) -> set[str]:
-    cmd = [str(ffmpeg_path), "-hide_banner", "-encoders"]
-    try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return {EDIT_FRIENDLY_VIDEO_CODEC}
-    if result.returncode != 0:
-        return {EDIT_FRIENDLY_VIDEO_CODEC}
-    text = f"{result.stdout}\n{result.stderr}"
     candidates = set(EDIT_FRIENDLY_HARDWARE_VIDEO_CODECS) | {EDIT_FRIENDLY_VIDEO_CODEC}
-    found: set[str] = set()
-    for codec in candidates:
-        if re.search(rf"\b{re.escape(codec)}\b", text):
-            found.add(codec)
+    found = available_ffmpeg_encoders(ffmpeg_path, candidates=candidates)
     if not found:
         return {EDIT_FRIENDLY_VIDEO_CODEC}
     return found

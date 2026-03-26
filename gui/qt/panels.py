@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLayout,
     QLabel,
@@ -19,8 +20,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..app_meta import APP_VERSION
-from .widgets import QueueEmptyStateWidget, QueueListWidget, _NativeComboBox
+from ..app_meta import (
+    APP_DISPLAY_NAME,
+    APP_VERSION,
+)
+from .widgets import (
+    ButtonSpec,
+    NativeComboBoxConfig,
+    QueueEmptyStateWidget,
+    QueueListWidget,
+    _NativeComboBox,
+    build_button,
+    build_native_combo,
+)
 
 
 @dataclass(frozen=True)
@@ -29,7 +41,6 @@ class SettingsPanelRefs:
     edit_friendly_encoder_combo: _NativeComboBox
     open_folder_after_download_check: QCheckBox
     export_diagnostics_button: QPushButton
-    about_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -40,27 +51,6 @@ class QueuePanelRefs:
     queue_content_index: int
     queue_empty_state: QueueEmptyStateWidget
     queue_list: QueueListWidget
-    queue_remove_button: QPushButton
-    queue_move_up_button: QPushButton
-    queue_move_down_button: QPushButton
-    queue_clear_button: QPushButton
-
-
-@dataclass(frozen=True)
-class SessionPanelRefs:
-    panel: QWidget
-
-
-@dataclass(frozen=True)
-class HistoryPanelRefs:
-    panel: QWidget
-    history_stack: QStackedWidget
-    history_empty_index: int
-    history_content_index: int
-    history_list: QListWidget
-    history_open_file_button: QPushButton
-    history_open_folder_button: QPushButton
-    history_clear_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -88,11 +78,17 @@ class _EmptyStateRefs:
     hint_label: QLabel
 
 
+@dataclass(frozen=True)
+class _SettingsCardRefs:
+    card: QFrame
+    layout: QVBoxLayout
+    title_label: QLabel | None = None
+
+
 def _build_panel_shell(
     *,
     parent: QWidget,
     title: str,
-    subtitle: str,
     framed: bool = True,
 ) -> _PanelShellRefs:
     panel = QWidget(parent)
@@ -120,11 +116,6 @@ def _build_panel_shell(
     title_label = QLabel(title, header)
     title_label.setObjectName("panelHeaderTitle")
     header_layout.addWidget(title_label)
-    if subtitle.strip():
-        subtitle_label = QLabel(subtitle, header)
-        subtitle_label.setObjectName("panelHeaderSubtitle")
-        subtitle_label.setWordWrap(True)
-        header_layout.addWidget(subtitle_label)
 
     body = QWidget(container)
     body_layout = QVBoxLayout(body)
@@ -146,24 +137,22 @@ def _build_empty_state(
 ) -> _EmptyStateRefs:
     page = QWidget(parent)
     layout = QVBoxLayout(page)
-    layout.setContentsMargins(24, 24, 24, 24)
-    layout.setSpacing(6)
+    layout.setContentsMargins(28, 12, 28, 12)
+    layout.setSpacing(0)
     layout.addStretch(1)
 
     card = QFrame(page)
     card.setObjectName("panelEmptyCard")
-    card.setMaximumWidth(460)
+    card.setMaximumWidth(520)
     card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     card_layout = QVBoxLayout(card)
-    card_layout.setContentsMargins(20, 20, 20, 20)
-    card_layout.setSpacing(8)
+    card_layout.setContentsMargins(24, 24, 24, 24)
+    card_layout.setSpacing(10)
     card_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
     badge_label = QLabel(badge, card)
     badge_label.setObjectName("panelEmptyBadge")
-    badge_label.setAlignment(
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-    )
+    badge_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     title_label = QLabel(title, card)
@@ -178,7 +167,9 @@ def _build_empty_state(
     description_label.setAlignment(
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
     )
-    description_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    description_label.setSizePolicy(
+        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+    )
 
     hint_label = QLabel(hint, card)
     hint_label.setObjectName("panelEmptyHint")
@@ -202,17 +193,57 @@ def _build_empty_state(
     )
 
 
+def _build_settings_card(
+    parent: QWidget,
+    *,
+    object_name: str = "settingsRowCard",
+    spacing: int = 8,
+    title: str = "",
+) -> _SettingsCardRefs:
+    card = QFrame(parent)
+    card.setObjectName(object_name)
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(spacing)
+
+    title_label: QLabel | None = None
+    if title.strip():
+        title_label = QLabel(title, card)
+        title_label.setObjectName("settingsRowTitle")
+        layout.addWidget(title_label)
+
+    return _SettingsCardRefs(card=card, layout=layout, title_label=title_label)
+
+
+def _build_panel_actions(
+    parent: QWidget,
+    *,
+    button_specs: Sequence[ButtonSpec],
+) -> tuple[QWidget, tuple[QPushButton, ...]]:
+    actions = QWidget(parent)
+    layout = QHBoxLayout(actions)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(10)
+
+    buttons: list[QPushButton] = []
+    for spec in button_specs:
+        button = build_button(actions, spec=spec)
+        layout.addWidget(button)
+        buttons.append(button)
+
+    layout.addStretch(1)
+    return actions, tuple(buttons)
+
+
 def build_settings_panel(
     *,
     parent: QWidget,
     register_native_combo: Callable[[_NativeComboBox], None],
     on_export_diagnostics: Callable[[], None],
-    on_show_about: Callable[[], None],
 ) -> SettingsPanelRefs:
     shell = _build_panel_shell(
         parent=parent,
         title="Preferences",
-        subtitle="",
         framed=False,
     )
 
@@ -227,103 +258,107 @@ def build_settings_panel(
     settings_stack_layout.setContentsMargins(0, 0, 0, 0)
     settings_stack_layout.setSpacing(12)
 
-    encode_card = QFrame(settings_stack)
-    encode_card.setObjectName("settingsRowCard")
-    encode_card_layout = QVBoxLayout(encode_card)
-    encode_card_layout.setContentsMargins(16, 14, 16, 14)
-    encode_card_layout.setSpacing(8)
-    encode_title = QLabel("Edit-friendly encode", encode_card)
-    encode_title.setObjectName("settingsRowTitle")
-    edit_friendly_encoder_combo = _NativeComboBox(encode_card)
-    edit_friendly_encoder_combo.setObjectName("settingsComboBox")
-    register_native_combo(edit_friendly_encoder_combo)
-    edit_friendly_encoder_combo.addItem("Automatic (recommended)", "auto")
-    edit_friendly_encoder_combo.addItem("Apple hardware encoder", "apple")
-    edit_friendly_encoder_combo.addItem("NVIDIA hardware encoder", "nvidia")
-    edit_friendly_encoder_combo.addItem("AMD hardware encoder", "amd")
-    edit_friendly_encoder_combo.addItem("Intel hardware encoder", "intel")
-    edit_friendly_encoder_combo.addItem("CPU software encoder", "cpu")
-    edit_friendly_encoder_combo.setMinimumWidth(340)
-    edit_friendly_encoder_combo.setMaximumWidth(560)
-    encode_card_layout.addWidget(encode_title)
-    encode_card_layout.addWidget(
+    encode_card = _build_settings_card(
+        settings_stack,
+        title="Edit-friendly encode",
+    )
+    edit_friendly_encoder_combo = build_native_combo(
+        encode_card.card,
+        register_native_combo=register_native_combo,
+        config=NativeComboBoxConfig(
+            minimum_width=340,
+            maximum_width=560,
+            items=(
+                ("Automatic (recommended)", "auto"),
+                ("Apple hardware encoder", "apple"),
+                ("NVIDIA hardware encoder", "nvidia"),
+                ("AMD hardware encoder", "amd"),
+                ("Intel hardware encoder", "intel"),
+                ("CPU software encoder", "cpu"),
+            ),
+        ),
+    )
+    encode_card.layout.addWidget(
         edit_friendly_encoder_combo, alignment=Qt.AlignmentFlag.AlignLeft
     )
-    settings_stack_layout.addWidget(encode_card)
+    settings_stack_layout.addWidget(encode_card.card)
 
     open_folder_after_download_check = QCheckBox(
         "Open output folder after downloads", settings_stack
     )
-    post_download_card = QFrame(settings_stack)
-    post_download_card.setObjectName("settingsRowCard")
-    post_download_card_layout = QVBoxLayout(post_download_card)
-    post_download_card_layout.setContentsMargins(16, 14, 16, 14)
-    post_download_card_layout.setSpacing(8)
-    post_download_title = QLabel("Post-download", post_download_card)
-    post_download_title.setObjectName("settingsRowTitle")
-    post_download_card_layout.addWidget(post_download_title)
-    post_download_card_layout.addWidget(open_folder_after_download_check)
-    settings_stack_layout.addWidget(post_download_card)
+    post_download_card = _build_settings_card(
+        settings_stack,
+        title="Post-download",
+    )
+    post_download_card.layout.addWidget(open_folder_after_download_check)
+    settings_stack_layout.addWidget(post_download_card.card)
 
-    app_card = QFrame(settings_stack)
-    app_card.setObjectName("settingsAppCard")
-    app_card_layout = QVBoxLayout(app_card)
-    app_card_layout.setContentsMargins(16, 14, 16, 14)
-    app_card_layout.setSpacing(12)
+    app_card = _build_settings_card(
+        settings_stack,
+        object_name="settingsAppCard",
+        spacing=14,
+    )
+    app_card.card.setSizePolicy(
+        QSizePolicy.Policy.Preferred,
+        QSizePolicy.Policy.Fixed,
+    )
 
-    app_header = QWidget(app_card)
-    app_header_layout = QHBoxLayout(app_header)
-    app_header_layout.setContentsMargins(0, 0, 0, 0)
-    app_header_layout.setSpacing(10)
-    app_title = QLabel("App", app_header)
-    app_title.setObjectName("settingsRowTitle")
-    version_label = QLabel(f"Version {APP_VERSION}", app_header)
-    version_label.setObjectName("panelInlineMeta")
-    app_header_layout.addWidget(app_title)
-    app_header_layout.addStretch(1)
-    app_header_layout.addWidget(version_label)
+    app_copy = QWidget(app_card.card)
+    app_copy_layout = QVBoxLayout(app_copy)
+    app_copy_layout.setContentsMargins(0, 0, 0, 0)
+    app_copy_layout.setSpacing(2)
 
-    app_actions = QWidget(app_card)
+    app_name_label = QLabel(APP_DISPLAY_NAME, app_copy)
+    app_name_label.setObjectName("settingsAppName")
+    app_name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    version_label = QLabel(f"Version {APP_VERSION}", app_copy)
+    version_label.setObjectName("settingsAppVersion")
+    version_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    app_copy_layout.addWidget(app_name_label)
+    app_copy_layout.addWidget(version_label)
+
+    app_actions = QWidget(app_card.card)
     app_actions_layout = QHBoxLayout(app_actions)
     app_actions_layout.setContentsMargins(0, 0, 0, 0)
-    app_actions_layout.setSpacing(10)
-    about_button = QPushButton("About", app_actions)
-    about_button.setObjectName("ghostButton")
-    about_button.clicked.connect(on_show_about)
-    export_diagnostics_button = QPushButton("Export diagnostics", app_actions)
-    export_diagnostics_button.setObjectName("ghostButton")
-    export_diagnostics_button.clicked.connect(on_export_diagnostics)
-    app_actions_layout.addWidget(about_button)
+    app_actions_layout.setSpacing(0)
+    export_diagnostics_button = build_button(
+        app_actions,
+        spec=ButtonSpec(
+            text="Export diagnostics",
+            on_click=on_export_diagnostics,
+            object_name="ghostButton",
+        ),
+    )
+    app_actions_layout.addStretch(1)
     app_actions_layout.addWidget(export_diagnostics_button)
     app_actions_layout.addStretch(1)
-    app_card_layout.addWidget(app_header)
-    app_card_layout.addWidget(app_actions)
-    settings_stack_layout.addWidget(app_card)
+    app_card.layout.addWidget(app_copy)
+    app_card.layout.addWidget(app_actions)
 
     form_card_layout.addWidget(settings_stack)
-    shell.body_layout.addWidget(form_card)
-    shell.body_layout.addStretch(1)
+    form_card_layout.addStretch(1)
+    form_card_layout.addWidget(
+        app_card.card,
+        0,
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+    )
+    shell.body_layout.addWidget(form_card, stretch=1)
     return SettingsPanelRefs(
         panel=shell.panel,
         edit_friendly_encoder_combo=edit_friendly_encoder_combo,
         open_folder_after_download_check=open_folder_after_download_check,
         export_diagnostics_button=export_diagnostics_button,
-        about_button=about_button,
     )
 
 
 def build_queue_panel(
     *,
     parent: QWidget,
-    on_remove_selected: Callable[[], None],
-    on_move_up: Callable[[], None],
-    on_move_down: Callable[[], None],
-    on_clear: Callable[[], None],
 ) -> QueuePanelRefs:
     shell = _build_panel_shell(
         parent=parent,
-        title="Download queue",
-        subtitle="Batch multiple URLs and keep the current run order under control.",
+        title="Download Queue",
+        framed=False,
     )
 
     queue_stack = QStackedWidget(shell.panel)
@@ -340,26 +375,6 @@ def build_queue_panel(
     content_layout.addWidget(queue_list, stretch=1)
     queue_content_index = queue_stack.addWidget(content)
     shell.body_layout.addWidget(queue_stack, stretch=1)
-
-    actions = QWidget(shell.panel)
-    actions_layout = QHBoxLayout(actions)
-    actions_layout.setContentsMargins(0, 0, 0, 0)
-    actions_layout.setSpacing(10)
-    queue_remove_button = QPushButton("Remove", actions)
-    queue_move_up_button = QPushButton("Move up", actions)
-    queue_move_down_button = QPushButton("Move down", actions)
-    queue_clear_button = QPushButton("Clear", actions)
-    queue_clear_button.setObjectName("ghostButton")
-    queue_remove_button.clicked.connect(on_remove_selected)
-    queue_move_up_button.clicked.connect(on_move_up)
-    queue_move_down_button.clicked.connect(on_move_down)
-    queue_clear_button.clicked.connect(on_clear)
-    actions_layout.addWidget(queue_remove_button)
-    actions_layout.addWidget(queue_move_up_button)
-    actions_layout.addWidget(queue_move_down_button)
-    actions_layout.addWidget(queue_clear_button)
-    actions_layout.addStretch(1)
-    shell.body_layout.addWidget(actions)
     return QueuePanelRefs(
         panel=shell.panel,
         queue_stack=queue_stack,
@@ -367,88 +382,6 @@ def build_queue_panel(
         queue_content_index=queue_content_index,
         queue_empty_state=empty,
         queue_list=queue_list,
-        queue_remove_button=queue_remove_button,
-        queue_move_up_button=queue_move_up_button,
-        queue_move_down_button=queue_move_down_button,
-        queue_clear_button=queue_clear_button,
-    )
-
-
-def build_session_panel(
-    *,
-    parent: QWidget,
-    session_card: QWidget,
-) -> SessionPanelRefs:
-    shell = _build_panel_shell(
-        parent=parent,
-        title="Session",
-        subtitle="Track current run totals and the latest completed download.",
-        framed=False,
-    )
-    shell.body_layout.addWidget(session_card)
-    shell.body_layout.addStretch(1)
-    return SessionPanelRefs(panel=shell.panel)
-
-
-def build_history_panel(
-    *,
-    parent: QWidget,
-    on_open_file: Callable[[], None],
-    on_open_folder: Callable[[], None],
-    on_clear: Callable[[], None],
-) -> HistoryPanelRefs:
-    shell = _build_panel_shell(
-        parent=parent,
-        title="Recent downloads",
-        subtitle="Quick access to the files and folders this app downloaded most recently.",
-    )
-
-    history_stack = QStackedWidget(shell.panel)
-    empty = _build_empty_state(
-        history_stack,
-        badge="FILES",
-        title="No downloads yet",
-        description="Completed downloads will appear here so you can reopen files or folders quickly.",
-        hint="Downloaded files and folders will stay one click away here.",
-    )
-    history_empty_index = history_stack.addWidget(empty.page)
-
-    content = QWidget(history_stack)
-    content_layout = QVBoxLayout(content)
-    content_layout.setContentsMargins(0, 0, 0, 0)
-    content_layout.setSpacing(10)
-    history_list = QListWidget(content)
-    history_list.setObjectName("panelList")
-    history_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-    content_layout.addWidget(history_list, stretch=1)
-    history_content_index = history_stack.addWidget(content)
-    shell.body_layout.addWidget(history_stack, stretch=1)
-
-    actions = QWidget(shell.panel)
-    actions_layout = QHBoxLayout(actions)
-    actions_layout.setContentsMargins(0, 0, 0, 0)
-    actions_layout.setSpacing(10)
-    history_open_file_button = QPushButton("Open file", actions)
-    history_open_folder_button = QPushButton("Open folder", actions)
-    history_clear_button = QPushButton("Clear", actions)
-    history_clear_button.setObjectName("ghostButton")
-    history_open_file_button.clicked.connect(on_open_file)
-    history_open_folder_button.clicked.connect(on_open_folder)
-    history_clear_button.clicked.connect(on_clear)
-    actions_layout.addWidget(history_open_file_button)
-    actions_layout.addWidget(history_open_folder_button)
-    actions_layout.addWidget(history_clear_button)
-    actions_layout.addStretch(1)
-    shell.body_layout.addWidget(actions)
-    return HistoryPanelRefs(
-        panel=shell.panel,
-        history_stack=history_stack,
-        history_empty_index=history_empty_index,
-        history_content_index=history_content_index,
-        history_list=history_list,
-        history_open_file_button=history_open_file_button,
-        history_open_folder_button=history_open_folder_button,
-        history_clear_button=history_clear_button,
     )
 
 
@@ -461,7 +394,7 @@ def build_logs_panel(
     shell = _build_panel_shell(
         parent=parent,
         title="Activity log",
-        subtitle="",
+        framed=False,
     )
 
     logs_stack = QStackedWidget(shell.panel)
@@ -475,22 +408,55 @@ def build_logs_panel(
     logs_empty_index = logs_stack.addWidget(empty.page)
 
     content = QWidget(logs_stack)
+    content.setObjectName("logsContentPage")
     content_layout = QVBoxLayout(content)
     content_layout.setContentsMargins(0, 0, 0, 0)
-    content_layout.setSpacing(10)
-    logs_view = QPlainTextEdit(content)
+    content_layout.setSpacing(12)
+
+    console_card = QFrame(content)
+    console_card.setObjectName("logsConsoleCard")
+    console_layout = QVBoxLayout(console_card)
+    console_layout.setContentsMargins(0, 0, 0, 0)
+    console_layout.setSpacing(0)
+
+    logs_view = QPlainTextEdit(console_card)
     logs_view.setObjectName("logsView")
     logs_view.setReadOnly(True)
     logs_view.setMaximumBlockCount(max_lines)
-    logs_view.setPlaceholderText("Activity from format fetches and downloads will appear here.")
-    content_layout.addWidget(logs_view, stretch=1)
+    logs_view.setPlaceholderText(
+        "Activity from format fetches and downloads will appear here."
+    )
+    console_layout.addWidget(logs_view, stretch=1)
+    content_layout.addWidget(console_card, stretch=1)
     logs_content_index = logs_stack.addWidget(content)
     shell.body_layout.addWidget(logs_stack, stretch=1)
 
-    logs_clear_button = QPushButton("Clear logs", shell.panel)
-    logs_clear_button.setObjectName("ghostButton")
-    logs_clear_button.clicked.connect(on_clear_logs)
-    shell.body_layout.addWidget(logs_clear_button)
+    actions = QFrame(shell.panel)
+    actions.setObjectName("runActionCard")
+    actions.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Fixed,
+    )
+    actions_layout = QGridLayout(actions)
+    actions_layout.setContentsMargins(0, 0, 0, 0)
+    actions_layout.setHorizontalSpacing(8)
+    actions_layout.setVerticalSpacing(0)
+
+    logs_clear_button = build_button(
+        actions,
+        spec=ButtonSpec(
+            text="Clear logs",
+            on_click=on_clear_logs,
+            object_name="dangerActionButton",
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        ),
+    )
+    logs_clear_button.setProperty("pill", True)
+    actions_layout.addWidget(logs_clear_button, 0, 0)
+    shell.body_layout.addWidget(actions)
     return LogsPanelRefs(
         panel=shell.panel,
         logs_stack=logs_stack,

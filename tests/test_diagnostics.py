@@ -36,38 +36,19 @@ class TestDiagnostics(unittest.TestCase):
                 "custom_filename": "",
                 "edit_friendly_encoder": "auto",
             },
-            history_items=[
-                {
-                    "timestamp": "2026-02-17 12:00:00",
-                    "name": "a.mp4",
-                    "path": "/tmp/a.mp4",
-                    "source_url": "https://www.youtube.com/watch?v=hist123&token=secret",
-                }
-            ],
             logs_text="line one\nline two",
         )
 
         self.assertIn("generated_at=2026-02-17T12:00:00", payload)
         self.assertIn("[queue]", payload)
-        self.assertIn("[history]", payload)
         self.assertIn("[logs]", payload)
         self.assertIn("watch?v=abc123", payload)
         self.assertIn("watch?v=queue123", payload)
-        self.assertIn("watch?v=hist123", payload)
         self.assertNotIn("token=secret", payload)
         self.assertTrue(payload.endswith("\n"))
 
-    def test_build_report_payload_caps_preview_title_and_history_entries(self) -> None:
+    def test_build_report_payload_caps_preview_title(self) -> None:
         long_title = "x" * 200
-        history_items = [
-            {
-                "timestamp": f"2026-02-17 12:{idx:02d}:00",
-                "name": f"file-{idx}.mp4",
-                "path": f"/tmp/file-{idx}.mp4",
-                "source_url": f"https://example.com/watch?v={idx}",
-            }
-            for idx in range(55)
-        ]
         payload = diagnostics.build_report_payload(
             generated_at=datetime(2026, 2, 17, 12, 0, 0),
             status="Idle",
@@ -85,18 +66,11 @@ class TestDiagnostics(unittest.TestCase):
                 "custom_filename": "",
                 "edit_friendly_encoder": "auto",
             },
-            history_items=history_items,
             logs_text="ok",
         )
 
         self.assertIn(f"preview_title={'x' * 120}", payload)
         self.assertNotIn(f"preview_title={'x' * 121}", payload)
-
-        history_section = payload.split("[history]\n", 1)[1].split("\n\n[logs]\n", 1)[0]
-        history_lines = [line for line in history_section.splitlines() if line.strip()]
-        self.assertEqual(len(history_lines), 50)
-        self.assertIn("file-0.mp4", history_lines[0])
-        self.assertIn("file-49.mp4", history_lines[-1])
 
 
 if __name__ == "__main__":

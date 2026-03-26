@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..common import download, formats as formats_mod, history_store, yt_dlp_helpers as helpers
+from ..common import download, formats as formats_mod, yt_dlp_helpers as helpers
 from ..core import download_plan as core_download_plan
 from ..core import format_selection as core_format_selection
 from ..core import options as core_options
@@ -14,7 +13,6 @@ from ..common.types import (
     DownloadOptions,
     DownloadRequest,
     FormatInfo,
-    HistoryItem,
     ProgressUpdate,
     QueueSettings,
     ResolvedFormat,
@@ -164,38 +162,3 @@ def run_download_request(
         edit_friendly_encoder=str(request["edit_friendly_encoder"]),
         record_output=record_output,
     )
-
-
-def record_history_output(
-    *,
-    history: list[HistoryItem],
-    seen_paths: set[str],
-    output_path: Path,
-    source_url: str,
-    max_entries: int,
-    timestamp: datetime | None = None,
-    title: str = "",
-    format_label: str = "",
-    queue_settings: QueueSettings | Mapping[str, Any] | None = None,
-) -> bool:
-    normalized = history_store.normalize_output_path(output_path)
-    if not normalized:
-        return False
-    try:
-        file_size_bytes = max(0, int(output_path.expanduser().stat().st_size))
-    except (OSError, RuntimeError, ValueError):
-        file_size_bytes = 0
-    now = timestamp or datetime.now()
-    history_store.upsert_history_entry(
-        history,
-        seen_paths,
-        normalized_path=normalized,
-        source_url=source_url,
-        timestamp=now.strftime("%Y-%m-%d %H:%M:%S"),
-        max_entries=max_entries,
-        title=str(title or "").strip(),
-        format_label=str(format_label or "").strip(),
-        file_size_bytes=file_size_bytes,
-        queue_settings=dict(queue_settings or {}),
-    )
-    return True
