@@ -5,14 +5,93 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ..common import settings_store
 from ..common.types import DownloadOptions, DownloadRequest, QueueSettings, ResolvedFormat
 from . import options as core_options
+
+PLAYLIST_ITEMS_ERROR_TEXT = "Playlist items must use numbers and ranges like 1-5,7,10-."
+
+
+def _parse_playlist_items(value: str) -> list[tuple[int, int | None]]:
+    ranges: list[tuple[int, int | None]] = []
+    for chunk in str(value or "").split(","):
+        clean = chunk.strip()
+        if not clean:
+            continue
+        if "-" in clean:
+            start_s, end_s = [part.strip() for part in clean.split("-", 1)]
+            if not start_s:
+                continue
+            try:
+                start_i = int(start_s)
+            except ValueError:
+                continue
+            if start_i <= 0:
+                continue
+            if end_s:
+                try:
+                    end_i = int(end_s)
+                except ValueError:
+                    continue
+                if end_i <= 0 or end_i < start_i:
+                    continue
+            else:
+                end_i = None
+            ranges.append((start_i, end_i))
+            continue
+        try:
+            index = int(clean)
+        except ValueError:
+            continue
+        if index <= 0:
+            continue
+        ranges.append((index, index))
+    return _merge_playlist_ranges(ranges)
+
+
+def _merge_playlist_ranges(
+    ranges: list[tuple[int, int | None]],
+) -> list[tuple[int, int | None]]:
+    if not ranges:
+        return []
+    ordered = sorted(
+        ranges,
+        key=lambda item: (item[0], float("inf") if item[1] is None else item[1]),
+    )
+    merged: list[list[int | None]] = []
+    for start, end in ordered:
+        if not merged:
+            merged.append([start, end])
+            continue
+        last_start, last_end = merged[-1]
+        if last_end is None:
+            continue
+        if start <= (int(last_end) + 1):
+            merged[-1][1] = None if end is None else max(int(last_end), int(end))
+            continue
+        merged.append([start, end])
+    return [(int(start), None if end is None else int(end)) for start, end in merged]
+
+
+def _format_playlist_items(ranges: list[tuple[int, int | None]]) -> str | None:
+    if not ranges:
+        return None
+    parts: list[str] = []
+    for start, end in ranges:
+        if end is None:
+            parts.append(f"{start}-")
+        elif start == end:
+            parts.append(str(start))
+        else:
+            parts.append(f"{start}-{end}")
+    return ",".join(parts)
 
 
 def normalize_playlist_items(value: str) -> tuple[str | None, bool]:
     raw = value or ""
-    normalized = re.sub(r"\s+", "", raw)
-    return (normalized or None), bool(raw and normalized != raw)
+    compact = re.sub(r"\s+", "", raw)
+    normalized = _format_playlist_items(_parse_playlist_items(compact))
+    return normalized, bool(raw and raw != (normalized or ""))
 
 
 def parse_download_options_from_queue_settings(
@@ -73,7 +152,10 @@ def build_single_download_request(
     playlist_items_raw: str,
     options: DownloadOptions,
 ) -> DownloadRequest:
-    playlist_items, _was_normalized = normalize_playlist_items(playlist_items_raw)
+    playlist_items_raw_text = str(playlist_items_raw or "")
+    playlist_items, _was_normalized = normalize_playlist_items(playlist_items_raw_text)
+    if playlist_enabled and playlist_items_raw_text.strip() and playlist_items is None:
+        raise ValueError(PLAYLIST_ITEMS_ERROR_TEXT)
     if not playlist_enabled:
         playlist_items = None
     return {
@@ -116,14 +198,16 @@ def build_queue_download_request(
         backoff_default=backoff_default,
         fragments_default=fragments_default,
     )
-    playlist_items, _was_normalized = normalize_playlist_items(
-        str(settings.get("playlist_items", ""))
-    )
+    playlist_items_raw = str(settings.get("playlist_items", ""))
+    playlist_items, _was_normalized = normalize_playlist_items(playlist_items_raw)
+    if bool(resolved.get("is_playlist")) and playlist_items_raw.strip() and playlist_items is None:
+        raise ValueError(PLAYLIST_ITEMS_ERROR_TEXT)
     return {
         "url": url,
-        "output_dir": Path(
-            str(settings.get("output_dir") or default_output_dir)
-        ).expanduser(),
+        "output_dir": settings_store.resolve_output_dir_path(
+            settings.get("output_dir"),
+            default_output_dir=default_output_dir,
+        ),
         "fmt_info": resolved.get("fmt_info"),
         "fmt_label": str(resolved.get("fmt_label", "")),
         "format_filter": str(resolved.get("format_filter", "")),

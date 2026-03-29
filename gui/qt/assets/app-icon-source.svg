@@ -14,6 +14,11 @@
       <stop offset="0%" stop-color="#f3eadc" stop-opacity="0"/>
       <stop offset="100%" stop-color="#e6d4bb" stop-opacity="0.28"/>
     </linearGradient>
+    <linearGradient id="tileEdge" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.72"/>
+      <stop offset="18%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#8b6e4a" stop-opacity="0.16"/>
+    </linearGradient>
     <radialGradient id="halo" cx="0.5" cy="0.42" r="0.34">
       <stop offset="0%" stop-color="#baf3cb" stop-opacity="0.42"/>
       <stop offset="52%" stop-color="#baf3cb" stop-opacity="0.10"/>
@@ -29,33 +34,37 @@
       <stop offset="100%" stop-color="#0c4024" stop-opacity="0"/>
     </linearGradient>
     <clipPath id="tileClip">
-      <rect x="92" y="92" width="840" height="840" rx="196"/>
+      <rect x="110" y="90" width="804" height="804" rx="208"/>
     </clipPath>
   </defs>
-  <rect x="92" y="92" width="840" height="840" rx="196" fill="url(#tile)"/>
+  <rect x="110" y="90" width="804" height="804" rx="208" fill="url(#tile)"/>
 
   <g clip-path="url(#tileClip)">
-    <rect x="92" y="92" width="840" height="840" fill="url(#tileGlow)"/>
-    <path d="M92 92H932V338C756 286 584 270 414 292C304 306 196 332 92 376Z" fill="#ffffff" fill-opacity="0.18"/>
-    <rect x="92" y="596" width="840" height="336" fill="url(#tileTint)"/>
+    <rect x="110" y="90" width="804" height="804" fill="url(#tileGlow)"/>
+    <path d="M110 90H914V324C778 284 624 268 470 288C326 306 206 342 110 390Z" fill="#ffffff" fill-opacity="0.16"/>
+    <rect x="110" y="618" width="804" height="276" fill="url(#tileTint)"/>
+    <path d="M110 700C248 654 382 632 512 632C642 632 776 654 914 700V894H110Z" fill="#e2d0b7" fill-opacity="0.10"/>
 
-    <circle cx="512" cy="432" r="214" fill="url(#halo)"/>
-    <ellipse cx="512" cy="756" rx="226" ry="58" fill="url(#glyphShadow)"/>
+    <g transform="translate(512 500) scale(0.92) translate(-512 -500)">
+      <circle cx="512" cy="430" r="224" fill="url(#halo)"/>
+      <ellipse cx="512" cy="758" rx="226" ry="58" fill="url(#glyphShadow)"/>
 
-    <g transform="translate(0 18)" fill="#1a6b3e" fill-opacity="0.16">
-      <rect x="468" y="258" width="88" height="286" rx="44"/>
-      <path d="M334 478L512 680L690 478Z"/>
-      <rect x="310" y="704" width="404" height="90" rx="45"/>
+      <g transform="translate(0 18)" fill="#1a6b3e" fill-opacity="0.16">
+        <rect x="468" y="258" width="88" height="286" rx="44"/>
+        <path d="M334 478L512 680L690 478Z"/>
+        <rect x="310" y="704" width="404" height="90" rx="45"/>
+      </g>
+
+      <g fill="url(#glyph)">
+        <rect x="468" y="240" width="88" height="286" rx="44"/>
+        <path d="M334 460L512 662L690 460Z"/>
+        <rect x="310" y="686" width="404" height="90" rx="45"/>
+      </g>
+
+      <path d="M468 240H556V302C532 296 501 296 468 302Z" fill="#aef3c0" fill-opacity="0.28"/>
+      <path d="M374 510H650L512 662Z" fill="#8ce4a6" fill-opacity="0.22"/>
+      <rect x="356" y="714" width="312" height="24" rx="12" fill="#d2f7dd" fill-opacity="0.42"/>
     </g>
-
-    <g fill="url(#glyph)">
-      <rect x="468" y="240" width="88" height="286" rx="44"/>
-      <path d="M334 460L512 662L690 460Z"/>
-      <rect x="310" y="686" width="404" height="90" rx="45"/>
-    </g>
-
-    <path d="M468 240H556V302C532 296 501 296 468 302Z" fill="#aef3c0" fill-opacity="0.28"/>
-    <path d="M374 510H650L512 662Z" fill="#8ce4a6" fill-opacity="0.22"/>
-    <rect x="356" y="714" width="312" height="24" rx="12" fill="#d2f7dd" fill-opacity="0.42"/>
   </g>
+  <rect x="113" y="93" width="798" height="798" rx="205" fill="none" stroke="url(#tileEdge)" stroke-width="5"/>
 </svg>

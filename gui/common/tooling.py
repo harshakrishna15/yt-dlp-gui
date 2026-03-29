@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import subprocess
@@ -8,7 +9,7 @@ from typing import Tuple
 
 
 def _is_executable(path: Path) -> bool:
-    return path.exists() and path.is_file()
+    return path.exists() and path.is_file() and os.access(path, os.X_OK)
 
 
 def resolve_binary(tool: str) -> Tuple[Path | None, str]:

@@ -59,6 +59,46 @@ class TestAppService(unittest.TestCase):
 
         self.assertEqual(mock_run_download.call_count, 2)
 
+    @patch("gui.common.download.build_ydl_opts", return_value={"outtmpl": "%(title)s.%(ext)s"})
+    @patch("gui.common.download.YoutubeDL")
+    def test_run_download_request_handles_cancelled_after_late_stub_init(
+        self,
+        mock_ytdl,
+        _mock_build_opts,
+    ) -> None:
+        from _yt_dlp_stub import ensure_yt_dlp_stub
+
+        ensure_yt_dlp_stub()
+        from yt_dlp.utils import DownloadCancelled as StubDownloadCancelled
+
+        class _FakeYDL:
+            def __init__(self, _opts: dict) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def download(self, _urls: list[str]) -> None:
+                raise StubDownloadCancelled()
+
+        mock_ytdl.side_effect = _FakeYDL
+        logs: list[str] = []
+        updates: list[dict[str, object]] = []
+
+        result = app_service.run_download_request(
+            request=self._build_request(Path("/tmp/out")),
+            cancel_event=threading.Event(),
+            log=logs.append,
+            update_progress=updates.append,
+        )
+
+        self.assertEqual(result, "cancelled")
+        self.assertTrue(any("[cancelled] Download cancelled." in line for line in logs))
+        self.assertIn({"status": "cancelled"}, updates)
+
 
 if __name__ == "__main__":
     unittest.main()

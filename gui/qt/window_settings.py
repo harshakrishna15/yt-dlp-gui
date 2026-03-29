@@ -169,14 +169,19 @@ class WindowSettingsMixin:
 
     def _export_diagnostics(self: "QtYtDlpGui") -> None:
         timestamp = self._effects.clock.now()
-        base_dir = Path(
-            self.output_dir_edit.text().strip() or (Path.home() / "Downloads")
-        ).expanduser()
         try:
-            self._effects.filesystem.ensure_dir(base_dir)
-        except OSError:
-            base_dir = Path.home() / "Downloads"
-            self._effects.filesystem.ensure_dir(base_dir)
+            base_dir = settings_store.prepare_output_dir_path(
+                self.output_dir_edit.text(),
+                ensure_dir=self._effects.filesystem.ensure_dir,
+                default_output_dir=self._default_output_dir(),
+            )
+        except OSError as exc:
+            self._effects.dialogs.critical(
+                self,
+                "Diagnostics export failed",
+                str(exc),
+            )
+            return
 
         output_path = base_dir / f"yt-dlp-gui-diagnostics-{timestamp:%Y%m%d-%H%M%S}.txt"
         options = self._snapshot_download_options()

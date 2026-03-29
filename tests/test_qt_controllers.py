@@ -150,6 +150,7 @@ class FakeWindow:
             "format_filter": "mp3",
             "format_label": "High",
         }
+        self.default_output_dir = "/tmp/default-downloads"
 
     def _set_status(self, text: str, *, log: bool = True) -> None:
         self.status_updates.append(str(text))
@@ -250,6 +251,9 @@ class FakeWindow:
 
     def _capture_queue_settings(self) -> dict[str, object]:
         return dict(self.captured_queue_settings)
+
+    def _default_output_dir(self) -> str:
+        return self.default_output_dir
 
     def _refresh_queue_panel(self) -> None:
         self.queue_refreshes += 1
@@ -601,6 +605,74 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(args, ())
         self.assertEqual(kwargs["request"], request)
         self.assertEqual(window.post_download_output_dir, Path("/tmp/out"))
+
+    def test_on_start_uses_default_output_dir_when_field_blank(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc")
+        window.output_dir_edit.setText("")
+        window._filtered_lookup = {"Best": {"id": "x"}}
+        executor = FakeExecutor()
+        ports, dialogs, filesystem, _clock = build_ports(executor=executor)
+        state = RunQueueState()
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        def _build_request(**kwargs: object) -> tuple[dict[str, object], bool]:
+            return (
+                {
+                    "url": "https://example.com/watch?v=abc",
+                    "output_dir": kwargs["output_dir"],
+                    "fmt_info": {},
+                    "fmt_label": "Best",
+                    "format_filter": "mp4",
+                    "convert_to_mp4": False,
+                    "playlist_enabled": False,
+                    "playlist_items": None,
+                    "network_timeout_s": 20,
+                    "network_retries": 1,
+                    "retry_backoff_s": 1.5,
+                    "concurrent_fragments": 2,
+                    "subtitle_languages": [],
+                    "write_subtitles": False,
+                    "embed_subtitles": False,
+                    "audio_language": "",
+                    "custom_filename": "",
+                    "edit_friendly_encoder": "auto",
+                },
+                False,
+            )
+
+        with patch(
+            "gui.qt.controllers.app_service.build_single_download_request",
+            side_effect=_build_request,
+        ) as mock_build_request:
+            controller.on_start()
+
+        self.assertEqual(dialogs.critical_calls, [])
+        self.assertEqual(filesystem.ensure_dir_calls, [Path("/tmp/default-downloads")])
+        self.assertEqual(
+            mock_build_request.call_args.kwargs["output_dir"],
+            Path("/tmp/default-downloads"),
+        )
+        self.assertEqual(window.post_download_output_dir, Path("/tmp/default-downloads"))
+
+    def test_on_start_with_invalid_playlist_items_uses_dialog_port(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.com/watch?v=abc&list=PL1")
+        window._filtered_lookup = {"Best": {"id": "x"}}
+        window._playlist_mode = True
+        window.playlist_items_edit.setText("invalid-only")
+        executor = FakeExecutor()
+        ports, dialogs, filesystem, _clock = build_ports(executor=executor)
+        state = RunQueueState()
+        controller = RunQueueController(window, state=state, ports=ports)
+
+        controller.on_start()
+
+        self.assertFalse(state.is_downloading)
+        self.assertEqual(len(executor.calls), 0)
+        self.assertEqual(filesystem.ensure_dir_calls, [Path("/tmp/out")])
+        self.assertEqual(len(dialogs.critical_calls), 1)
+        self.assertEqual(dialogs.critical_calls[0][0], "Invalid playlist items")
 
     def test_start_queue_download_sets_state_and_submits_queue_worker(self) -> None:
         window = FakeWindow()

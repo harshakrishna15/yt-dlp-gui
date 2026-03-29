@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from _yt_dlp_stub import ensure_yt_dlp_stub
@@ -137,6 +138,18 @@ class TestFormatHelpers(unittest.TestCase):
 
 
 class TestTooling(unittest.TestCase):
+    @patch("gui.common.tooling.os.access")
+    def test_is_executable_respects_execute_permission(self, mock_access) -> None:
+        with TemporaryDirectory() as tmpdir:
+            candidate = Path(tmpdir) / "ffmpeg"
+            candidate.write_text("binary", encoding="utf-8")
+
+            mock_access.return_value = False
+            self.assertFalse(tooling._is_executable(candidate))
+
+            mock_access.return_value = True
+            self.assertTrue(tooling._is_executable(candidate))
+
     @patch("gui.common.tooling.shutil.which")
     def test_resolve_binary_uses_path_lookup(self, mock_which) -> None:
         mock_which.return_value = "/usr/local/bin/ffmpeg"

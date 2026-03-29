@@ -90,7 +90,7 @@ def build_single_download_request(
     playlist_items_raw: str,
     options: DownloadOptions,
 ) -> tuple[DownloadRequest, bool]:
-    playlist_items, was_normalized = core_download_plan.normalize_playlist_items(
+    _playlist_items, was_normalized = core_download_plan.normalize_playlist_items(
         playlist_items_raw
     )
     request = core_download_plan.build_single_download_request(
@@ -101,7 +101,7 @@ def build_single_download_request(
         format_filter=format_filter,
         convert_to_mp4=convert_to_mp4,
         playlist_enabled=playlist_enabled,
-        playlist_items_raw=playlist_items or "",
+        playlist_items_raw=playlist_items_raw,
         options=options,
     )
     return request, was_normalized

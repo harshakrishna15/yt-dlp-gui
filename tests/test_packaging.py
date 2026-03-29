@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 from gui.qt.assets_manifest import REQUIRED_ASSET_FILENAMES, assets_dir
@@ -12,6 +14,103 @@ from scripts import write_pyinstaller_version_info
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _paeth_predictor(left: int, up: int, up_left: int) -> int:
+    base = left + up - up_left
+    left_dist = abs(base - left)
+    up_dist = abs(base - up)
+    up_left_dist = abs(base - up_left)
+    if left_dist <= up_dist and left_dist <= up_left_dist:
+        return left
+    if up_dist <= up_left_dist:
+        return up
+    return up_left
+
+
+def _unfilter_png_scanline(
+    filter_type: int, scanline: bytes, previous: bytes, bytes_per_pixel: int
+) -> bytearray:
+    output = bytearray(scanline)
+    if filter_type == 0:
+        return output
+    for index in range(len(output)):
+        left = output[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+        up = previous[index] if previous else 0
+        up_left = previous[index - bytes_per_pixel] if previous and index >= bytes_per_pixel else 0
+        if filter_type == 1:
+            output[index] = (output[index] + left) & 0xFF
+        elif filter_type == 2:
+            output[index] = (output[index] + up) & 0xFF
+        elif filter_type == 3:
+            output[index] = (output[index] + ((left + up) // 2)) & 0xFF
+        elif filter_type == 4:
+            output[index] = (output[index] + _paeth_predictor(left, up, up_left)) & 0xFF
+        else:
+            raise AssertionError(f"Unsupported PNG filter type: {filter_type}")
+    return output
+
+
+def _png_alpha_samples(
+    path: Path, points: tuple[tuple[int, int], ...]
+) -> dict[tuple[int, int], int]:
+    # Keep this parser stdlib-only so packaging tests still run without Qt or Pillow.
+    payload = path.read_bytes()
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+
+    width = 0
+    height = 0
+    bit_depth = 0
+    color_type = 0
+    idat = bytearray()
+    offset = 8
+    while offset < len(payload):
+        chunk_length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        offset += 4
+        chunk_type = payload[offset : offset + 4]
+        offset += 4
+        chunk_data = payload[offset : offset + chunk_length]
+        offset += chunk_length + 4
+        if chunk_type == b"IHDR":
+            width, height, bit_depth, color_type, compression, filter_method, interlace = (
+                struct.unpack(">IIBBBBB", chunk_data)
+            )
+            assert compression == 0
+            assert filter_method == 0
+            assert interlace == 0
+        elif chunk_type == b"IDAT":
+            idat.extend(chunk_data)
+        elif chunk_type == b"IEND":
+            break
+
+    assert width > 0
+    assert height > 0
+    assert bit_depth == 8
+    bytes_per_pixel = {2: 3, 6: 4}.get(color_type)
+    assert bytes_per_pixel is not None, f"Unsupported PNG color type: {color_type}"
+
+    decompressed = zlib.decompress(bytes(idat))
+    stride = width * bytes_per_pixel
+    previous = b""
+    rows: list[bytearray] = []
+    cursor = 0
+    for _ in range(height):
+        filter_type = decompressed[cursor]
+        cursor += 1
+        row = decompressed[cursor : cursor + stride]
+        cursor += stride
+        decoded = _unfilter_png_scanline(filter_type, row, previous, bytes_per_pixel)
+        rows.append(decoded)
+        previous = decoded
+
+    result: dict[tuple[int, int], int] = {}
+    for x, y in points:
+        pixel_offset = x * bytes_per_pixel
+        if color_type == 6:
+            result[(x, y)] = rows[y][pixel_offset + 3]
+        else:
+            result[(x, y)] = 255
+    return result
 
 
 class TestQtAssetManifest(unittest.TestCase):
@@ -136,6 +235,43 @@ class TestPackagingConfiguration(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 0)
+
+    def test_generated_png_uses_rounded_dock_silhouette(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "icon.png"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "make-macos-icon.py"),
+                    "--output",
+                    str(output),
+                    "--size",
+                    "512",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            samples = _png_alpha_samples(
+                output,
+                (
+                    (0, 0),
+                    (511, 0),
+                    (0, 511),
+                    (511, 511),
+                    (180, 180),
+                    (256, 256),
+                ),
+            )
+            for (x, y), alpha in samples.items():
+                with self.subTest(x=x, y=y):
+                    if (x, y) in {(0, 0), (511, 0), (0, 511), (511, 511)}:
+                        self.assertEqual(alpha, 0)
+                    else:
+                        self.assertEqual(alpha, 255)
 
     @unittest.skipUnless(sys.platform == "darwin", "icns generation is macOS-only")
     def test_icon_generator_can_write_icns(self) -> None:

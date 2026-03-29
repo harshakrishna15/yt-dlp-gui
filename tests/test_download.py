@@ -19,6 +19,11 @@ class TestPlaylistParsing(unittest.TestCase):
         parsed = download._parse_playlist_items(items)
         self.assertEqual(parsed, [(1, 3), (7, 7), (10, None)])
 
+    def test_parse_playlist_items_merges_overlaps_and_adjacent_ranges(self) -> None:
+        items = "3,1-3,2-4,8-,7-7"
+        parsed = download._parse_playlist_items(items)
+        self.assertEqual(parsed, [(1, 4), (7, None)])
+
     def test_playlist_ranges_count(self) -> None:
         self.assertEqual(download._playlist_ranges_count([(1, 3), (7, 7)]), 4)
         self.assertIsNone(download._playlist_ranges_count([(1, None)]))
@@ -199,6 +204,54 @@ class TestBuildYdlOptions(unittest.TestCase):
         self.assertIn({"key": "EmbedThumbnail"}, opts["postprocessors"])
         self.assertTrue(str(opts["outtmpl"]).endswith("%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s"))
         self.assertIn("[media] source=missing (some merges/conversions may fail)", self.logs)
+
+    @patch("gui.common.download.resolve_binary")
+    def test_build_opts_playlist_items_normalizes_overlaps_and_invalid_chunks(
+        self,
+        mock_resolve_binary,
+    ) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        opts = download.build_ydl_opts(
+            url="https://example.com/playlist",
+            output_dir=Path("/tmp/out"),
+            fmt_info={"format_id": "137", "vcodec": "avc1", "acodec": "none", "ext": "mp4"},
+            fmt_label="Video MP4",
+            format_filter="mp4",
+            convert_to_mp4=False,
+            playlist_enabled=True,
+            playlist_items="3, 1-3, 2-4, foo, 8-",
+            cancel_event=None,
+            log=self._log,
+            update_progress=self._update,
+        )
+
+        self.assertEqual(opts["playlist_items"], "1-4,8-")
+        self.assertEqual(
+            opts["extractor_args"],
+            {"youtube": {"playlist_items": "1-4,8-"}},
+        )
+        self.assertIn("[playlist] items=1-4,8-", self.logs)
+
+    @patch("gui.common.download.resolve_binary")
+    def test_build_opts_rejects_fully_invalid_playlist_items(
+        self,
+        mock_resolve_binary,
+    ) -> None:
+        mock_resolve_binary.return_value = (None, "missing")
+        with self.assertRaisesRegex(ValueError, "Playlist items must use numbers and ranges"):
+            download.build_ydl_opts(
+                url="https://example.com/playlist",
+                output_dir=Path("/tmp/out"),
+                fmt_info={"format_id": "137", "vcodec": "avc1", "acodec": "none", "ext": "mp4"},
+                fmt_label="Video MP4",
+                format_filter="mp4",
+                convert_to_mp4=False,
+                playlist_enabled=True,
+                playlist_items="invalid-only",
+                cancel_event=None,
+                log=self._log,
+                update_progress=self._update,
+            )
 
     @patch("gui.common.download.resolve_binary")
     def test_build_opts_simple_range_sets_start_end(self, mock_resolve_binary) -> None:
@@ -569,6 +622,55 @@ class TestRunDownload(unittest.TestCase):
         self.assertTrue(any("[cancelled] Download cancelled." in l for l in self.logs))
         self.assertIn({"status": "cancelled"}, self.updates)
         self.assertTrue(any(l.startswith("[time] Total item time: ") for l in self.logs))
+
+    @patch("gui.common.download.build_ydl_opts")
+    @patch("gui.common.download.YoutubeDL")
+    def test_run_download_refreshes_stale_cancelled_binding(
+        self,
+        mock_ytdl,
+        mock_build_opts,
+    ) -> None:
+        mock_build_opts.return_value = {"outtmpl": "%(title)s.%(ext)s"}
+
+        class _FallbackCancelled(Exception):
+            pass
+
+        class _FakeYDL:
+            def __init__(self, _opts: dict) -> None:
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def download(self, _urls: list[str]) -> None:
+                raise DownloadCancelled()
+
+        mock_ytdl.side_effect = _FakeYDL
+        original_cancelled = download.DownloadCancelled
+        try:
+            download.DownloadCancelled = _FallbackCancelled
+            result = download.run_download(
+                url="https://example.com/video",
+                output_dir=Path("/tmp/out"),
+                fmt_info={"format_id": "22"},
+                fmt_label="label",
+                format_filter="mp4",
+                convert_to_mp4=False,
+                playlist_enabled=False,
+                playlist_items=None,
+                cancel_event=threading.Event(),
+                log=self._log,
+                update_progress=self._update,
+            )
+        finally:
+            download.DownloadCancelled = original_cancelled
+
+        self.assertEqual(result, download.DOWNLOAD_CANCELLED)
+        self.assertFalse(any(line.startswith("[error]") for line in self.logs))
+        self.assertIn({"status": "cancelled"}, self.updates)
 
     @patch("gui.common.download.build_ydl_opts")
     @patch("gui.common.download.YoutubeDL")

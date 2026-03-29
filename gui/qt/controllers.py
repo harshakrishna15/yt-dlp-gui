@@ -6,7 +6,13 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..common import download, format_pipeline, formats as formats_mod, yt_dlp_helpers as helpers
+from ..common import (
+    download,
+    format_pipeline,
+    formats as formats_mod,
+    settings_store,
+    yt_dlp_helpers as helpers,
+)
 from ..common.types import DownloadRequest, QueueItem, QueueSettings
 from ..core import error_feedback as core_error_feedback
 from ..core import queue_logic as core_queue_logic
@@ -339,7 +345,15 @@ class RunQueueController:
             self._ports.dialogs.critical(w, title, message)
             return
 
-        output_dir = Path(w.output_dir_edit.text().strip()).expanduser()
+        default_output_dir = (
+            str(w._default_output_dir()).strip()
+            if callable(getattr(w, "_default_output_dir", None))
+            else None
+        )
+        output_dir = settings_store.resolve_output_dir_path(
+            w.output_dir_edit.text(),
+            default_output_dir=default_output_dir,
+        )
         try:
             self._ports.filesystem.ensure_dir(output_dir)
         except OSError as exc:
@@ -351,6 +365,25 @@ class RunQueueController:
             return
 
         options = w._snapshot_download_options()
+        try:
+            request, was_normalized = app_service.build_single_download_request(
+                url=url,
+                output_dir=output_dir,
+                fmt_info=w._selected_format_info(),
+                fmt_label=w._selected_format_label(),
+                format_filter=w._current_container(),
+                convert_to_mp4=bool(w.convert_check.isChecked()),
+                playlist_enabled=bool(w._playlist_mode),
+                playlist_items_raw=w.playlist_items_edit.text(),
+                options=options,
+            )
+        except ValueError as exc:
+            self._ports.dialogs.critical(
+                w,
+                "Invalid playlist items",
+                str(exc),
+            )
+            return
         s.run_state = RunState.SINGLE
         s.is_downloading = True
         s.cancel_requested = False
@@ -364,19 +397,8 @@ class RunQueueController:
         w._set_source_feedback("", tone="hidden")
         w._update_controls_state()
 
-        request, was_normalized = app_service.build_single_download_request(
-            url=url,
-            output_dir=output_dir,
-            fmt_info=w._selected_format_info(),
-            fmt_label=w._selected_format_label(),
-            format_filter=w._current_container(),
-            convert_to_mp4=bool(w.convert_check.isChecked()),
-            playlist_enabled=bool(w._playlist_mode),
-            playlist_items_raw=w.playlist_items_edit.text(),
-            options=options,
-        )
         if was_normalized:
-            w._append_log("[info] Playlist items normalized (spaces removed).")
+            w._append_log("[info] Playlist items normalized.")
         if request["playlist_enabled"]:
             w._append_log(
                 f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
@@ -706,7 +728,18 @@ class RunQueueController:
             settings=next_item.settings,
             index=next_item.display_index,
             total=next_item.total,
-            default_output_dir=w.output_dir_edit.text().strip(),
+            default_output_dir=(
+                str(
+                    settings_store.resolve_output_dir_path(
+                        w.output_dir_edit.text(),
+                        default_output_dir=(
+                            str(w._default_output_dir()).strip()
+                            if callable(getattr(w, "_default_output_dir", None))
+                            else None
+                        ),
+                    )
+                )
+            ),
         )
 
     def resolve_format_for_url(

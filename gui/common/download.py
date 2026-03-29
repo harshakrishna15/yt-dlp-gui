@@ -28,7 +28,17 @@ except ModuleNotFoundError:
         """Fallback cancellation type when yt-dlp is unavailable at import time."""
 
 
+def _sync_download_cancelled_type():
+    try:
+        from yt_dlp.utils import DownloadCancelled as YtDlpDownloadCancelled
+    except ModuleNotFoundError:
+        return DownloadCancelled
+    globals()["DownloadCancelled"] = YtDlpDownloadCancelled
+    return YtDlpDownloadCancelled
+
+
 def _youtube_dl_class():
+    _sync_download_cancelled_type()
     if YoutubeDL is not None:
         return YoutubeDL
     try:
@@ -36,13 +46,6 @@ def _youtube_dl_class():
     except ModuleNotFoundError as exc:
         raise RuntimeError(_MISSING_YT_DLP_MESSAGE) from exc
 
-    try:
-        from yt_dlp.utils import DownloadCancelled as YtDlpDownloadCancelled
-    except ModuleNotFoundError:
-        globals()["YoutubeDL"] = YtDlpYoutubeDL
-        return YtDlpYoutubeDL
-
-    globals()["DownloadCancelled"] = YtDlpDownloadCancelled
     globals()["YoutubeDL"] = YtDlpYoutubeDL
     return YtDlpYoutubeDL
 
@@ -74,6 +77,8 @@ YDL_RETRY_BACKOFF_SECONDS = 1.5
 YDL_PLAYLIST_SLEEP_MIN_SECONDS = 1.0
 YDL_PLAYLIST_SLEEP_MAX_SECONDS = 2.5
 YDL_MAX_CONCURRENT_FRAGMENTS = 4
+
+PLAYLIST_ITEMS_ERROR_TEXT = "Playlist items must use numbers and ranges like 1-5,7,10-."
 
 # Default MP4 editing preset aimed at smoother Final Cut Pro playback.
 EDIT_FRIENDLY_VIDEO_CODEC = "libx264"
@@ -197,9 +202,15 @@ def build_ydl_opts(
     if fmt_label:
         log(f"[format] {fmt_label}")
 
+    sanitized_playlist_items = None
+    if playlist_enabled:
+        sanitized_playlist_items = _sanitize_playlist_items(playlist_items)
+        if str(playlist_items or "").strip() and sanitized_playlist_items is None:
+            raise ValueError(PLAYLIST_ITEMS_ERROR_TEXT)
+
     ranges: list[tuple[int, int | None]] = []
-    if playlist_enabled and playlist_items:
-        ranges = _parse_playlist_items(playlist_items)
+    if playlist_enabled and sanitized_playlist_items:
+        ranges = _parse_playlist_items(sanitized_playlist_items)
 
     ffmpeg_path, ffmpeg_source = resolve_binary("ffmpeg")
 
@@ -263,15 +274,17 @@ def build_ydl_opts(
         log(f"[media] source={ffmpeg_source} available=yes")
     else:
         log("[media] source=missing (some merges/conversions may fail)")
-    if playlist_enabled and playlist_items:
-        opts["playlist_items"] = playlist_items
+    if playlist_enabled and sanitized_playlist_items:
+        opts["playlist_items"] = sanitized_playlist_items
         opts["extractor_args"] = {
-            "youtube": {"playlist_items": playlist_items},
+            "youtube": {"playlist_items": sanitized_playlist_items},
         }
-        log(f"[playlist] items={playlist_items}")
-        simple_range = re.fullmatch(r"\d+\s*-\s*\d+", playlist_items)
+        log(f"[playlist] items={sanitized_playlist_items}")
+        simple_range = re.fullmatch(r"\d+\s*-\s*\d+", sanitized_playlist_items)
         if simple_range:
-            start_s, end_s = [part.strip() for part in playlist_items.split("-", 1)]
+            start_s, end_s = [
+                part.strip() for part in sanitized_playlist_items.split("-", 1)
+            ]
             try:
                 start_i = int(start_s)
                 end_i = int(end_s)
@@ -1278,7 +1291,49 @@ def _parse_playlist_items(items: str) -> list[tuple[int, int | None]]:
             if idx <= 0:
                 continue
             ranges.append((idx, idx))
-    return ranges
+    return _merge_playlist_ranges(ranges)
+
+
+def _merge_playlist_ranges(
+    ranges: list[tuple[int, int | None]],
+) -> list[tuple[int, int | None]]:
+    if not ranges:
+        return []
+    ordered = sorted(
+        ranges,
+        key=lambda item: (item[0], float("inf") if item[1] is None else item[1]),
+    )
+    merged: list[list[int | None]] = []
+    for start, end in ordered:
+        if not merged:
+            merged.append([start, end])
+            continue
+        last_start, last_end = merged[-1]
+        if last_end is None:
+            continue
+        if start <= (int(last_end) + 1):
+            merged[-1][1] = None if end is None else max(int(last_end), int(end))
+            continue
+        merged.append([start, end])
+    return [(int(start), None if end is None else int(end)) for start, end in merged]
+
+
+def _format_playlist_items(ranges: list[tuple[int, int | None]]) -> str | None:
+    if not ranges:
+        return None
+    parts: list[str] = []
+    for start, end in ranges:
+        if end is None:
+            parts.append(f"{start}-")
+        elif start == end:
+            parts.append(str(start))
+        else:
+            parts.append(f"{start}-{end}")
+    return ",".join(parts)
+
+
+def _sanitize_playlist_items(items: str | None) -> str | None:
+    return _format_playlist_items(_parse_playlist_items(str(items or "")))
 
 
 def _playlist_match_filter(

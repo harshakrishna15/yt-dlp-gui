@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gui.core import download_plan
 
@@ -7,12 +8,17 @@ from gui.core import download_plan
 class TestCoreDownloadPlan(unittest.TestCase):
     def test_normalize_playlist_items(self) -> None:
         value, changed = download_plan.normalize_playlist_items("1, 2, 5-7")
-        self.assertEqual(value, "1,2,5-7")
+        self.assertEqual(value, "1-2,5-7")
         self.assertTrue(changed)
 
         value, changed = download_plan.normalize_playlist_items("")
         self.assertIsNone(value)
         self.assertFalse(changed)
+
+    def test_normalize_playlist_items_merges_ranges_and_drops_invalid_chunks(self) -> None:
+        value, changed = download_plan.normalize_playlist_items("3, 1-3, 2-4, foo, 8-")
+        self.assertEqual(value, "1-4,8-")
+        self.assertTrue(changed)
 
     def test_build_single_download_request_disables_playlist_items_when_disabled(self) -> None:
         request = download_plan.build_single_download_request(
@@ -41,6 +47,31 @@ class TestCoreDownloadPlan(unittest.TestCase):
         self.assertEqual(request["network_retries"], 1)
         self.assertEqual(request["concurrent_fragments"], 3)
         self.assertEqual(request["custom_filename"], "clip")
+
+    def test_build_single_download_request_rejects_invalid_playlist_items(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Playlist items must use numbers and ranges"):
+            download_plan.build_single_download_request(
+                url="https://example.com/watch?v=1",
+                output_dir=Path("/tmp/out"),
+                fmt_info={"format_id": "22"},
+                fmt_label="Video",
+                format_filter="mp4",
+                convert_to_mp4=False,
+                playlist_enabled=True,
+                playlist_items_raw="bad-input",
+                options={
+                    "network_timeout_s": 20,
+                    "network_retries": 1,
+                    "retry_backoff_s": 1.5,
+                    "concurrent_fragments": 3,
+                    "subtitle_languages": [],
+                    "write_subtitles": False,
+                    "embed_subtitles": False,
+                    "audio_language": "",
+                    "custom_filename": "",
+                    "edit_friendly_encoder": "auto",
+                },
+            )
 
     def test_build_queue_download_request_parses_and_clamps_network_values(self) -> None:
         request = download_plan.build_queue_download_request(
@@ -73,13 +104,57 @@ class TestCoreDownloadPlan(unittest.TestCase):
             fragments_default=4,
         )
         self.assertEqual(request["output_dir"], Path("/tmp/custom"))
-        self.assertEqual(request["playlist_items"], "1,2,3")
+        self.assertEqual(request["playlist_items"], "1-3")
         self.assertEqual(request["network_timeout_s"], 300)
         self.assertEqual(request["network_retries"], 1)
         self.assertEqual(request["retry_backoff_s"], 30.0)
         self.assertEqual(request["concurrent_fragments"], 4)
         self.assertEqual(request["subtitle_languages"], ["en", "es"])
         self.assertEqual(request["edit_friendly_encoder"], "intel")
+
+    def test_build_queue_download_request_uses_safe_default_output_dir_when_blank(self) -> None:
+        with patch("gui.common.settings_store.Path.home", return_value=Path("/Users/tester")):
+            request = download_plan.build_queue_download_request(
+                url="https://example.com/watch?v=1",
+                settings={
+                    "output_dir": "   ",
+                    "playlist_items": "",
+                },
+                resolved={
+                    "fmt_info": {"format_id": "22"},
+                    "fmt_label": "Video",
+                    "format_filter": "mp4",
+                    "is_playlist": False,
+                },
+                default_output_dir="",
+                timeout_default=20,
+                retries_default=1,
+                backoff_default=1.5,
+                fragments_default=4,
+            )
+
+        self.assertEqual(request["output_dir"], Path("/Users/tester/Downloads"))
+
+    def test_build_queue_download_request_rejects_invalid_playlist_items(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Playlist items must use numbers and ranges"):
+            download_plan.build_queue_download_request(
+                url="https://example.com/watch?v=1",
+                settings={
+                    "output_dir": "/tmp/custom",
+                    "playlist_items": "bad-input",
+                },
+                resolved={
+                    "fmt_info": {"format_id": "22"},
+                    "fmt_label": "Video",
+                    "format_filter": "mp4",
+                    "is_playlist": True,
+                },
+                default_output_dir="/tmp/default",
+                timeout_default=20,
+                retries_default=1,
+                backoff_default=1.5,
+                fragments_default=4,
+            )
 
 
 if __name__ == "__main__":

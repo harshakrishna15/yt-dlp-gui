@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -57,6 +59,72 @@ def _master_png_path() -> Path:
     return Path(__file__).resolve().parent.parent / "gui" / "qt" / "assets" / "tmp-mac-app-icon.png"
 
 
+def _render_svg_icon_with_appkit(output_path: Path, size: int) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    swift_source = f"""
+import AppKit
+import Foundation
+
+let input = URL(fileURLWithPath: {json.dumps(str(_icon_source_svg_path()))})
+let output = URL(fileURLWithPath: {json.dumps(str(output_path))})
+let size = NSSize(width: {int(size)}, height: {int(size)})
+guard let image = NSImage(contentsOf: input) else {{
+    fputs("Failed to load SVG icon source: \\(input.path)\\n", stderr)
+    exit(1)
+}}
+guard let rep = NSBitmapImageRep(
+    bitmapDataPlanes: nil,
+    pixelsWide: Int(size.width),
+    pixelsHigh: Int(size.height),
+    bitsPerSample: 8,
+    samplesPerPixel: 4,
+    hasAlpha: true,
+    isPlanar: false,
+    colorSpaceName: .deviceRGB,
+    bytesPerRow: 0,
+    bitsPerPixel: 0
+) else {{
+    fputs("Failed to allocate bitmap for icon render\\n", stderr)
+    exit(1)
+}}
+rep.size = size
+NSGraphicsContext.saveGraphicsState()
+guard let context = NSGraphicsContext(bitmapImageRep: rep) else {{
+    fputs("Failed to create graphics context for icon render\\n", stderr)
+    exit(1)
+}}
+NSGraphicsContext.current = context
+context.cgContext.clear(CGRect(origin: .zero, size: size))
+image.draw(in: CGRect(origin: .zero, size: size))
+context.flushGraphics()
+NSGraphicsContext.restoreGraphicsState()
+guard let data = rep.representation(using: .png, properties: [:]) else {{
+    fputs("Failed to encode icon render as PNG\\n", stderr)
+    exit(1)
+}}
+do {{
+    try data.write(to: output)
+}} catch {{
+    fputs("Failed to write icon PNG: \\(error.localizedDescription)\\n", stderr)
+    exit(1)
+}}
+"""
+    env = os.environ.copy()
+    tmpdir = Path(tempfile.gettempdir())
+    env.setdefault("SWIFT_MODULECACHE_PATH", str(tmpdir / "swift-module-cache"))
+    env.setdefault("CLANG_MODULE_CACHE_PATH", str(tmpdir / "clang-module-cache"))
+    result = subprocess.run(
+        ["swift", "-e", swift_source],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    if result.returncode != 0:
+        details = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"swift failed to render SVG icon: {details}")
+
+
 def _resize_png_with_sips(source_png: Path, output_path: Path, size: int) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
@@ -93,16 +161,14 @@ def write_icon_png(output_path: Path, size: int) -> None:
         if not _render_svg_icon(size).save(str(output_path), "PNG"):
             raise RuntimeError(f"Failed to write {output_path}")
         return
+    if sys.platform == "darwin":
+        _render_svg_icon_with_appkit(output_path, size)
+        return
     master_png = _master_png_path()
     if not master_png.is_file():
         raise RuntimeError(f"Missing master icon PNG: {master_png}")
-    if master_png.resolve() == output_path.resolve():
-        return
     if int(size) == 1024:
         output_path.write_bytes(master_png.read_bytes())
-        return
-    if sys.platform == "darwin":
-        _resize_png_with_sips(master_png, output_path, size)
         return
     if Image is not None:
         _resize_png_with_pillow(master_png, output_path, size)

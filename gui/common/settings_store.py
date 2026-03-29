@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +14,58 @@ def user_settings_path() -> Path:
     return Path.home() / ".yt-dlp-gui" / "settings.json"
 
 
+def default_output_dir_path(*, default_output_dir: str | None = None) -> Path:
+    raw = str(default_output_dir or "").strip()
+    if raw:
+        try:
+            return Path(raw).expanduser()
+        except (TypeError, ValueError, OSError):
+            pass
+    return Path.home() / "Downloads"
+
+
+def resolve_output_dir_path(
+    value: object,
+    *,
+    default_output_dir: str | None = None,
+) -> Path:
+    raw = str(value or "").strip()
+    if raw:
+        try:
+            return Path(raw).expanduser()
+        except (TypeError, ValueError, OSError):
+            pass
+    return default_output_dir_path(default_output_dir=default_output_dir)
+
+
+def prepare_output_dir_path(
+    value: object,
+    *,
+    ensure_dir: Callable[[Path], None],
+    default_output_dir: str | None = None,
+) -> Path:
+    preferred = resolve_output_dir_path(value, default_output_dir=default_output_dir)
+    fallback = default_output_dir_path(default_output_dir=default_output_dir)
+    candidates = [preferred]
+    if fallback != preferred:
+        candidates.append(fallback)
+
+    last_error: OSError | None = None
+    for candidate in candidates:
+        try:
+            ensure_dir(candidate)
+        except OSError as exc:
+            last_error = exc
+            continue
+        return candidate
+
+    if last_error is not None:
+        raise last_error
+    return fallback
+
+
 def default_settings(*, default_output_dir: str | None = None) -> dict[str, Any]:
-    output_dir = str(default_output_dir or "").strip() or str(Path.home() / "Downloads")
+    output_dir = str(default_output_dir_path(default_output_dir=default_output_dir))
     return {
         "output_dir": output_dir,
         "edit_friendly_encoder": "auto",
