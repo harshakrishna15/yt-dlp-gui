@@ -500,7 +500,7 @@ def build_logs_panel(
 ) -> LogsPanelRefs:
     shell = _build_panel_shell(
         parent=parent,
-        title="Activity log",
+        title="Activity Log",
         framed=False,
     )
 

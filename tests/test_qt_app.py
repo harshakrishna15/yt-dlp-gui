@@ -450,16 +450,17 @@ class TestQtApp(unittest.TestCase):
         QTest.qWait(0)
         self._assert_url_input_visible_in_source_row(mode="focused")
 
-    def test_stylesheet_gives_fields_inset_surfaces_and_combo_arrows(self) -> None:
+    def test_stylesheet_gives_fields_flat_surfaces_and_combo_arrows(self) -> None:
         stylesheet = qt_style.build_stylesheet("/tmp/combo-down-arrow.svg")
         self.assertRegex(
             stylesheet,
-            r"QLineEdit\s*\{[^}]*qlineargradient",
+            r"QLineEdit\s*\{[^}]*background:\s*#202725;",
         )
         self.assertRegex(
             stylesheet,
-            r"QComboBox\s*\{[^}]*qlineargradient",
+            r"QComboBox\s*\{[^}]*background:\s*#202725;",
         )
+        self.assertNotIn("qlineargradient", stylesheet)
         self.assertRegex(
             stylesheet,
             r'QComboBox::down-arrow\s*\{[^}]*image:\s*url\("/tmp/combo-down-arrow\.svg"\);',
@@ -3040,7 +3041,7 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(combo.view().window().isVisible())
         popup_stylesheet = combo.view().window().styleSheet()
         self.assertIn("QListView#nativeComboView", popup_stylesheet)
-        self.assertIn("background: #272724;", popup_stylesheet)
+        self.assertIn("background: #1f2422;", popup_stylesheet)
         self.assertIn("border-radius: 20px;", popup_stylesheet)
 
         combo.hidePopup()

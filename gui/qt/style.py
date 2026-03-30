@@ -2,60 +2,60 @@ from __future__ import annotations
 
 
 _PALETTE = {
-    "page_bg_top": "#1b1b18",
-    "page_bg_bottom": "#111210",
-    "surface_glass": "rgba(48, 48, 43, 236)",
-    "surface_glass_strong": "rgba(50, 50, 45, 248)",
-    "surface_soft_glass": "rgba(38, 38, 35, 224)",
-    "surface_soft_glass_strong": "rgba(38, 38, 35, 240)",
-    "accent_wash": "rgba(36, 126, 97, 92)",
-    "accent_wash_strong": "rgba(39, 147, 112, 146)",
-    "scroll_handle": "#62625c",
-    "scroll_handle_hover": "#7d7d75",
-    "text_primary": "#f1eee7",
-    "text_muted": "#b6b1a6",
-    "text_label": "#c0baaf",
-    "text_secondary": "#ded9cf",
-    "text_inverse": "#f6f2ea",
-    "surface": "#272724",
-    "surface_soft": "#20201d",
-    "surface_soft_alt": "#30302c",
-    "surface_disabled": "#232320",
-    "surface_selected": "#33332f",
-    "surface_selected_strong": "#314d45",
-    "border": "#505049",
-    "border_strong": "#65655d",
-    "border_soft": "#42423d",
-    "border_hover": "#6d6d64",
-    "accent": "#258161",
-    "accent_hover": "#2d9571",
-    "accent_pressed": "#1d6b51",
-    "accent_soft": "#223a34",
-    "accent_soft_hover": "#29463f",
-    "accent_border": "#347c66",
-    "accent_text": "#86d7b7",
-    "accent_toast_bg": "#1f4c3d",
-    "field_text": "#f2ede5",
-    "field_readonly_text": "#ddd7ca",
-    "field_surface": "#2d2d28",
-    "field_surface_hover": "#34342f",
-    "field_surface_focus": "#393933",
-    "field_surface_readonly": "#2a2a26",
-    "field_border": "#494943",
-    "field_disabled_border": "#393934",
-    "field_disabled_text": "#8c877f",
-    "tab_text": "#b0aaa0",
-    "nav_text": "#d8d2c8",
-    "nav_disabled": "#6d6a62",
-    "button_text": "#ece7de",
+    "page_bg_top": "#111514",
+    "page_bg_bottom": "#0d1110",
+    "surface_glass": "#1c211f",
+    "surface_glass_strong": "#202624",
+    "surface_soft_glass": "#171c1b",
+    "surface_soft_glass_strong": "#191f1d",
+    "accent_wash": "rgba(45, 143, 112, 72)",
+    "accent_wash_strong": "rgba(45, 143, 112, 116)",
+    "scroll_handle": "#5b625f",
+    "scroll_handle_hover": "#727a76",
+    "text_primary": "#edf2ef",
+    "text_muted": "#aab2ae",
+    "text_label": "#bcc4c0",
+    "text_secondary": "#d6ddd9",
+    "text_inverse": "#f6fbf8",
+    "surface": "#1f2422",
+    "surface_soft": "#171c1b",
+    "surface_soft_alt": "#252b28",
+    "surface_disabled": "#1b201f",
+    "surface_selected": "#2a302d",
+    "surface_selected_strong": "#24453b",
+    "border": "#48504c",
+    "border_strong": "#5f6864",
+    "border_soft": "#353d39",
+    "border_hover": "#6a736f",
+    "accent": "#2d8f70",
+    "accent_hover": "#38a27f",
+    "accent_pressed": "#226d55",
+    "accent_soft": "#18342d",
+    "accent_soft_hover": "#1f443a",
+    "accent_border": "#418e75",
+    "accent_text": "#8bdcbe",
+    "accent_toast_bg": "#183a31",
+    "field_text": "#eef3ef",
+    "field_readonly_text": "#dbe2de",
+    "field_surface": "#202725",
+    "field_surface_hover": "#262d2a",
+    "field_surface_focus": "#2b332f",
+    "field_surface_readonly": "#1b201f",
+    "field_border": "#424a46",
+    "field_disabled_border": "#303734",
+    "field_disabled_text": "#858d89",
+    "tab_text": "#a5ada9",
+    "nav_text": "#d5dcd8",
+    "nav_disabled": "#686f6c",
+    "button_text": "#e7ece9",
     "button_hover_text": "#ffffff",
-    "button_disabled_text": "#7d7a72",
-    "warning_bg": "#4a3c22",
-    "warning_border": "#80663a",
-    "warning_text": "#f3d08a",
-    "error_bg": "#442421",
-    "error_border": "#9f4b43",
-    "error_text": "#ff7f72",
+    "button_disabled_text": "#737b77",
+    "warning_bg": "#473621",
+    "warning_border": "#89653f",
+    "warning_text": "#f1cb8a",
+    "error_bg": "#412320",
+    "error_border": "#a4564d",
+    "error_text": "#ff897d",
 }
 
 _INPUT_RADIUS = "22px"
@@ -691,11 +691,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border-radius: 2px;
         }
         QLineEdit {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface__,
-                stop: 1 __surface__
-            );
+            background: __field_surface__;
             border: 1px solid __field_border__;
             border-radius: __input_radius__;
             color: __field_text__;
@@ -703,11 +699,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             selection-color: __text_primary__;
         }
         QComboBox {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface__,
-                stop: 1 __surface_soft_alt__
-            );
+            background: __field_surface__;
             border: 1px solid __border_soft__;
             border-radius: 16px;
             color: __field_text__;
@@ -734,11 +726,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             padding: 0px 2px 1px 0px;
         }
         QLineEdit:read-only {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_readonly__,
-                stop: 1 __surface_soft__
-            );
+            background: __field_surface_readonly__;
             border: 1px solid __border_soft__;
             color: __field_readonly_text__;
         }
@@ -749,67 +737,35 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QLineEdit:hover, QPlainTextEdit:hover, QListWidget:hover {
             border: 1px solid __border_hover__;
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_hover__,
-                stop: 1 __surface__
-            );
+            background: __field_surface_hover__;
         }
         QComboBox:hover {
             border: 1px solid __border_hover__;
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_hover__,
-                stop: 1 __surface_soft_alt__
-            );
+            background: __field_surface_hover__;
         }
         QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus {
             border: 1px solid __accent_border__;
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_focus__,
-                stop: 1 __surface__
-            );
+            background: __field_surface_focus__;
         }
         QComboBox:focus {
             border: 1px solid __accent_border__;
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_focus__,
-                stop: 1 __surface_soft_alt__
-            );
+            background: __field_surface_focus__;
         }
         QWidget#commandBar QLineEdit#urlInputField:hover,
         QWidget#commandBar QLineEdit#urlInputField:focus {
             border: 1px solid __accent_border__;
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_focus__,
-                stop: 1 __surface__
-            );
+            background: __field_surface_focus__;
         }
         QGroupBox#formatSection QWidget#outputCardBlock QLineEdit {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface__,
-                stop: 1 __surface_soft_alt__
-            );
+            background: __field_surface__;
             border: 1px solid __border_soft__;
             border-radius: 16px;
         }
         QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:hover {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_hover__,
-                stop: 1 __surface_soft_alt__
-            );
+            background: __field_surface_hover__;
         }
         QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:focus {
-            background: qlineargradient(
-                x1: 0, y1: 0, x2: 0, y2: 1,
-                stop: 0 __field_surface_focus__,
-                stop: 1 __surface_soft_alt__
-            );
+            background: __field_surface_focus__;
             border: 1px solid __accent_border__;
         }
         QWidget#logsContentPage {

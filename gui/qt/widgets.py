@@ -805,12 +805,12 @@ class _QueueItemDelegate(QStyledItemDelegate):
     _REMOVE_BORDER_HOVER = QColor("#8b5d56")
     _REMOVE_TEXT = QColor("#f2d6cf")
     _REMOVE_TEXT_HOVER = QColor("#fff1ec")
-    _EDIT_BG = QColor("#223a34")
-    _EDIT_BG_HOVER = QColor("#29463f")
-    _EDIT_BORDER = QColor("#347c66")
-    _EDIT_BORDER_HOVER = QColor("#41a085")
-    _EDIT_TEXT = QColor("#86d7b7")
-    _EDIT_TEXT_HOVER = QColor("#c8f2df")
+    _EDIT_BG = QColor("#18342d")
+    _EDIT_BG_HOVER = QColor("#1f443a")
+    _EDIT_BORDER = QColor("#418e75")
+    _EDIT_BORDER_HOVER = QColor("#38a27f")
+    _EDIT_TEXT = QColor("#8bdcbe")
+    _EDIT_TEXT_HOVER = QColor("#d4f6e8")
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1290,7 +1290,7 @@ class QueueEmptyStateWidget(QWidget):
         root_layout.addStretch(1)
 
 
-def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> None:
+def _style_combo_popup(combo: QComboBox, *, border_color: str = "#353d39") -> None:
     popup = combo.view().window()
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
     popup.setAutoFillBackground(True)
@@ -1298,12 +1298,12 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> No
     popup.setStyleSheet(
         f"""
         QWidget {{
-            background: #111210;
+            background: #0d1110;
             border: none;
             border-radius: 24px;
         }}
         QListView#nativeComboView {{
-            background: #272724;
+            background: #1f2422;
             border: 1px solid {border_color};
             border-radius: 20px;
             padding: 6px;
@@ -1315,28 +1315,28 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> No
             min-height: 30px;
             padding: 7px 12px;
             border-radius: 12px;
-            color: #f2ede5;
+            color: #eef3ef;
             font-weight: 600;
         }}
         QListView#nativeComboView::item:hover {{
-            background: #30302c;
-            color: #f1eee7;
+            background: #252b28;
+            color: #edf2ef;
         }}
         QListView#nativeComboView::item:selected {{
-            background: #314d45;
-            color: #86d7b7;
+            background: #24453b;
+            color: #8bdcbe;
         }}
         QListView#nativeComboView::item:disabled {{
             background: transparent;
-            color: #7a7a73;
+            color: #858d89;
         }}
         QListView#nativeComboView::item:disabled:hover {{
             background: transparent;
-            color: #7a7a73;
+            color: #858d89;
         }}
         QListView#nativeComboView::item:disabled:selected {{
-            background: #30302c;
-            color: #7a7a73;
+            background: #252b28;
+            color: #858d89;
         }}
         QListView#nativeComboView QScrollBar:vertical {{
             background: transparent;
@@ -1345,12 +1345,12 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#42423d") -> No
             border: none;
         }}
         QListView#nativeComboView QScrollBar::handle:vertical {{
-            background: #62625c;
+            background: #5b625f;
             border-radius: 5px;
             min-height: 24px;
         }}
         QListView#nativeComboView QScrollBar::handle:vertical:hover {{
-            background: #7d7d75;
+            background: #727a76;
         }}
         QListView#nativeComboView QScrollBar::sub-line:vertical,
         QListView#nativeComboView QScrollBar::add-line:vertical,

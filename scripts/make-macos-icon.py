@@ -14,7 +14,7 @@ import tempfile
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtGui import QImage, QPainter, QPainterPath
     from PySide6.QtSvg import QSvgRenderer
 
     HAS_QT = True
@@ -37,6 +37,27 @@ def _icon_source_svg_path() -> Path:
     )
 
 
+_ICON_VIEWBOX_SIZE = 1024.0
+_ICON_TILE_X = 110.0
+_ICON_TILE_Y = 90.0
+_ICON_TILE_SIZE = 804.0
+_ICON_TILE_RADIUS = 208.0
+
+
+def _tile_clip_path(size: int) -> "QPainterPath":
+    scale = float(size) / _ICON_VIEWBOX_SIZE
+    path = QPainterPath()
+    path.addRoundedRect(
+        _ICON_TILE_X * scale,
+        _ICON_TILE_Y * scale,
+        _ICON_TILE_SIZE * scale,
+        _ICON_TILE_SIZE * scale,
+        _ICON_TILE_RADIUS * scale,
+        _ICON_TILE_RADIUS * scale,
+    )
+    return path
+
+
 def _render_svg_icon(size: int) -> QImage:
     if not HAS_QT:
         raise RuntimeError("PySide6 with QtSvg is required for direct SVG rendering")
@@ -50,6 +71,10 @@ def _render_svg_icon(size: int) -> QImage:
     p = QPainter(image)
     p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    # Qt's SVG rasterizer can leak low-alpha pixels past rounded clipPaths.
+    # Apply the final tile mask at the painter level so exported PNG/ICNS
+    # never carry corner ghosting regardless of renderer behavior.
+    p.setClipPath(_tile_clip_path(size))
     renderer.render(p)
     p.end()
     return image
@@ -61,6 +86,11 @@ def _master_png_path() -> Path:
 
 def _render_svg_icon_with_appkit(output_path: Path, size: int) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    scale = float(size) / _ICON_VIEWBOX_SIZE
+    tile_x = _ICON_TILE_X * scale
+    tile_y = _ICON_TILE_Y * scale
+    tile_size = _ICON_TILE_SIZE * scale
+    tile_radius = _ICON_TILE_RADIUS * scale
     swift_source = f"""
 import AppKit
 import Foundation
@@ -68,6 +98,8 @@ import Foundation
 let input = URL(fileURLWithPath: {json.dumps(str(_icon_source_svg_path()))})
 let output = URL(fileURLWithPath: {json.dumps(str(output_path))})
 let size = NSSize(width: {int(size)}, height: {int(size)})
+let tileRect = CGRect(x: {tile_x}, y: {tile_y}, width: {tile_size}, height: {tile_size})
+let tileRadius = CGFloat({tile_radius})
 guard let image = NSImage(contentsOf: input) else {{
     fputs("Failed to load SVG icon source: \\(input.path)\\n", stderr)
     exit(1)
@@ -95,6 +127,7 @@ guard let context = NSGraphicsContext(bitmapImageRep: rep) else {{
 }}
 NSGraphicsContext.current = context
 context.cgContext.clear(CGRect(origin: .zero, size: size))
+NSBezierPath(roundedRect: tileRect, xRadius: tileRadius, yRadius: tileRadius).addClip()
 image.draw(in: CGRect(origin: .zero, size: size))
 context.flushGraphics()
 NSGraphicsContext.restoreGraphicsState()
