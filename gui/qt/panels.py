@@ -24,6 +24,8 @@ from ..app_meta import (
 )
 from .widgets import (
     ButtonSpec,
+    CheckBoxSpec,
+    LabelSpec,
     LayoutConfig,
     NativeComboBoxConfig,
     QueueEmptyStateWidget,
@@ -31,8 +33,10 @@ from .widgets import (
     WidgetConfig,
     _NativeComboBox,
     build_button,
-    build_grid,
+    build_button_panel,
+    build_checkbox,
     build_hbox,
+    build_label,
     build_native_combo,
     build_vbox,
 )
@@ -127,8 +131,13 @@ def _build_panel_shell(
     )
     header = header_shell.widget
     header_layout = header_shell.layout
-    title_label = QLabel(title, header)
-    title_label.setObjectName("panelHeaderTitle")
+    title_label = build_label(
+        header,
+        spec=LabelSpec(
+            text=title,
+            widget_config=WidgetConfig(object_name="panelHeaderTitle"),
+        ),
+    )
     header_layout.addWidget(title_label)
 
     body_shell = build_vbox(
@@ -179,32 +188,68 @@ def _build_empty_state(
     card = card_shell.widget
     card_layout = card_shell.layout
 
-    badge_label = QLabel(badge, card)
-    badge_label.setObjectName("panelEmptyBadge")
-    badge_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-
-    title_label = QLabel(title, card)
-    title_label.setObjectName("panelEmptyTitle")
-    title_label.setWordWrap(True)
-    title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-    title_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-
-    description_label = QLabel(description, card)
-    description_label.setObjectName("panelEmptyDescription")
-    description_label.setWordWrap(True)
-    description_label.setAlignment(
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-    )
-    description_label.setSizePolicy(
-        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+    badge_label = build_label(
+        card,
+        spec=LabelSpec(
+            text=badge,
+            widget_config=WidgetConfig(
+                object_name="panelEmptyBadge",
+                size_policy=(
+                    QSizePolicy.Policy.Fixed,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        ),
     )
 
-    hint_label = QLabel(hint, card)
-    hint_label.setObjectName("panelEmptyHint")
-    hint_label.setWordWrap(True)
-    hint_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-    hint_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    title_label = build_label(
+        card,
+        spec=LabelSpec(
+            text=title,
+            widget_config=WidgetConfig(
+                object_name="panelEmptyTitle",
+                size_policy=(
+                    QSizePolicy.Policy.Preferred,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            word_wrap=True,
+        ),
+    )
+
+    description_label = build_label(
+        card,
+        spec=LabelSpec(
+            text=description,
+            widget_config=WidgetConfig(
+                object_name="panelEmptyDescription",
+                size_policy=(
+                    QSizePolicy.Policy.Preferred,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            word_wrap=True,
+        ),
+    )
+
+    hint_label = build_label(
+        card,
+        spec=LabelSpec(
+            text=hint,
+            widget_config=WidgetConfig(
+                object_name="panelEmptyHint",
+                size_policy=(
+                    QSizePolicy.Policy.Preferred,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            word_wrap=True,
+        ),
+    )
 
     card_layout.addWidget(badge_label, alignment=Qt.AlignmentFlag.AlignLeft)
     card_layout.addWidget(title_label)
@@ -240,8 +285,13 @@ def _build_settings_card(
 
     title_label: QLabel | None = None
     if title.strip():
-        title_label = QLabel(title, card)
-        title_label.setObjectName("settingsRowTitle")
+        title_label = build_label(
+            card,
+            spec=LabelSpec(
+                text=title,
+                widget_config=WidgetConfig(object_name="settingsRowTitle"),
+            ),
+        )
         layout.addWidget(title_label)
 
     return _SettingsCardRefs(card=card, layout=layout, title_label=title_label)
@@ -322,8 +372,9 @@ def build_settings_panel(
     )
     settings_stack_layout.addWidget(encode_card.card)
 
-    open_folder_after_download_check = QCheckBox(
-        "Open output folder after downloads", settings_stack
+    open_folder_after_download_check = build_checkbox(
+        settings_stack,
+        spec=CheckBoxSpec(text="Open output folder after downloads"),
     )
     post_download_card = _build_settings_card(
         settings_stack,
@@ -349,12 +400,22 @@ def build_settings_panel(
     app_copy = app_copy_shell.widget
     app_copy_layout = app_copy_shell.layout
 
-    app_name_label = QLabel(APP_DISPLAY_NAME, app_copy)
-    app_name_label.setObjectName("settingsAppName")
-    app_name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-    version_label = QLabel(f"Version {APP_VERSION}", app_copy)
-    version_label.setObjectName("settingsAppVersion")
-    version_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    app_name_label = build_label(
+        app_copy,
+        spec=LabelSpec(
+            text=APP_DISPLAY_NAME,
+            widget_config=WidgetConfig(object_name="settingsAppName"),
+            alignment=Qt.AlignmentFlag.AlignHCenter,
+        ),
+    )
+    version_label = build_label(
+        app_copy,
+        spec=LabelSpec(
+            text=f"Version {APP_VERSION}",
+            widget_config=WidgetConfig(object_name="settingsAppVersion"),
+            alignment=Qt.AlignmentFlag.AlignHCenter,
+        ),
+    )
     app_copy_layout.addWidget(app_name_label)
     app_copy_layout.addWidget(version_label)
 
@@ -482,55 +543,44 @@ def build_logs_panel(
     logs_content_index = logs_stack.addWidget(content)
     shell.body_layout.addWidget(logs_stack, stretch=1)
 
-    actions_shell = build_grid(
+    action_panel = build_button_panel(
         shell.panel,
-        widget_cls=QFrame,
-        widget_config=WidgetConfig(
+        card_config=WidgetConfig(
             object_name="runActionCard",
             size_policy=(
                 QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Fixed,
             ),
         ),
-        layout_config=LayoutConfig(
+        buttons_layout_config=LayoutConfig(
             margins=(0, 0, 0, 0),
             horizontal_spacing=8,
             vertical_spacing=0,
         ),
-    )
-    actions = actions_shell.widget
-    actions_layout = actions_shell.layout
-
-    export_logs_button = build_button(
-        actions,
-        spec=ButtonSpec(
-            text="Export logs",
-            on_click=on_export_logs,
-            object_name="secondaryActionButton",
-            size_policy=(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Fixed,
+        button_specs=(
+            ButtonSpec(
+                text="Export logs",
+                on_click=on_export_logs,
+                object_name="secondaryActionButton",
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            ButtonSpec(
+                text="Clear logs",
+                on_click=on_clear_logs,
+                object_name="dangerActionButton",
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
             ),
         ),
     )
-    actions_layout.addWidget(export_logs_button, 0, 0)
-
-    logs_clear_button = build_button(
-        actions,
-        spec=ButtonSpec(
-            text="Clear logs",
-            on_click=on_clear_logs,
-            object_name="dangerActionButton",
-            size_policy=(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Fixed,
-            ),
-        ),
-    )
+    actions = action_panel.card
+    export_logs_button, logs_clear_button = action_panel.buttons
     logs_clear_button.setProperty("pill", True)
-    actions_layout.addWidget(logs_clear_button, 0, 1)
-    actions_layout.setColumnStretch(0, 1)
-    actions_layout.setColumnStretch(1, 1)
     shell.body_layout.addWidget(actions)
     return LogsPanelRefs(
         panel=shell.panel,

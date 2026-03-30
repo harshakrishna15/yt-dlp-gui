@@ -110,6 +110,31 @@ class _SourceFeedbackToastEntry:
     placeholder: bool = False
 
 
+@dataclass(frozen=True)
+class _ResponsiveLayoutProfile:
+    output_mode: str
+    compact_content: bool
+    compact_run: bool
+    workspace_direction: QBoxLayout.Direction
+    workspace_spacing: int
+    output_shell_spacing: int
+    output_outer_spacing: int
+    output_card_spacing: int
+    output_card_side_margin: int
+    output_card_top_margin: int
+    output_card_bottom_margin: int
+    mode_row_spacing: int
+    folder_row_direction: QBoxLayout.Direction
+    folder_row_spacing: int
+    run_action_spacing: int
+    run_activity_margin: int
+    run_activity_spacing: int
+    metrics_card_margins: tuple[int, int, int, int]
+    metrics_card_spacing: int
+    metrics_strip_spacing: int
+    run_button_extra_width: int
+
+
 class _TooltipDelayProxyStyle(QProxyStyle):
     def __init__(self, base_style: QStyle, *, wake_up_delay_ms: int) -> None:
         super().__init__(base_style)
@@ -819,13 +844,83 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ("ETA: Finalizing", "ETA: 99:59:59 / 999:59:59"),
         )
 
+    def _responsive_layout_profile(self) -> _ResponsiveLayoutProfile:
+        output_mode = "stacked" if self.width() < 860 else "split"
+        compact_content = self.height() < ROOMY_CONTENT_LAYOUT_MIN_HEIGHT
+        compact_run = True
+        stacked_mode = output_mode == "stacked"
+
+        if compact_content:
+            output_shell_spacing = 8
+            output_outer_spacing = 10
+            output_card_spacing = 8
+            output_card_side_margin = 10
+            output_card_top_margin = 9
+            output_card_bottom_margin = 10
+            folder_row_spacing = 8
+        else:
+            output_shell_spacing = 12
+            output_outer_spacing = OUTPUT_CARD_STACK_GAP
+            output_card_spacing = 10
+            output_card_side_margin = 14
+            output_card_top_margin = 14
+            output_card_bottom_margin = 14
+            folder_row_spacing = 10
+
+        if compact_run:
+            run_action_spacing = 4
+            run_activity_margin = 10
+            run_activity_spacing = 6
+            metrics_card_margins = (10, 8, 10, 10)
+            metrics_card_spacing = 6
+            metrics_strip_spacing = 4
+        else:
+            run_action_spacing = 8
+            run_activity_margin = 16
+            run_activity_spacing = 12
+            metrics_card_margins = (12, 10, 12, 12)
+            metrics_card_spacing = 8
+            metrics_strip_spacing = 12
+
+        return _ResponsiveLayoutProfile(
+            output_mode=output_mode,
+            compact_content=compact_content,
+            compact_run=compact_run,
+            workspace_direction=(
+                QBoxLayout.Direction.TopToBottom
+                if stacked_mode
+                else QBoxLayout.Direction.LeftToRight
+            ),
+            workspace_spacing=14 if stacked_mode else 18,
+            output_shell_spacing=output_shell_spacing,
+            output_outer_spacing=output_outer_spacing,
+            output_card_spacing=output_card_spacing,
+            output_card_side_margin=output_card_side_margin,
+            output_card_top_margin=output_card_top_margin,
+            output_card_bottom_margin=output_card_bottom_margin,
+            mode_row_spacing=6 if stacked_mode else 8,
+            folder_row_direction=(
+                QBoxLayout.Direction.TopToBottom
+                if stacked_mode
+                else QBoxLayout.Direction.LeftToRight
+            ),
+            folder_row_spacing=folder_row_spacing,
+            run_action_spacing=run_action_spacing,
+            run_activity_margin=run_activity_margin,
+            run_activity_spacing=run_activity_spacing,
+            metrics_card_margins=metrics_card_margins,
+            metrics_card_spacing=metrics_card_spacing,
+            metrics_strip_spacing=metrics_strip_spacing,
+            run_button_extra_width=12 if compact_content else 34,
+        )
+
     def _use_compact_content_layout(self) -> bool:
-        return self.height() < ROOMY_CONTENT_LAYOUT_MIN_HEIGHT
+        return self._responsive_layout_profile().compact_content
 
     def _use_compact_run_layout(self) -> bool:
         # The always-visible metrics and result cards currently only fit reliably
         # with the denser run layout metrics.
-        return True
+        return self._responsive_layout_profile().compact_run
 
     def _source_row_button_width_samples(self) -> dict[QPushButton, tuple[str, ...]]:
         return {
@@ -858,7 +953,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
 
     def _normalize_control_sizing(self) -> None:
-        compact_height = self._use_compact_content_layout()
+        profile = self._responsive_layout_profile()
+        compact_height = profile.compact_content
         source_row_inputs = (self.url_edit,)
         text_inputs = (
             self.playlist_items_edit,
@@ -991,7 +1087,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.add_queue_button,
                 self.cancel_button,
             ],
-            extra_px=12 if compact_height else 34,
+            extra_px=profile.run_button_extra_width,
             sample_texts_by_button=self._run_action_button_width_samples(),
         )
         self._set_uniform_button_width(
@@ -1107,50 +1203,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self.url_edit.setMinimumWidth(url_width)
 
-    def _output_field_hosts(self) -> tuple[QWidget, ...]:
-        if self.format_card is None:
-            return ()
-        return tuple(self.format_card.findChildren(QWidget, "outputFieldHost"))
-
-    def _trim_output_field_lengths(
-        self,
-        *,
-        min_host_width_for_trim: int = 340,
-        trim_px: int = 12,
-    ) -> None:
-        hosts = self._output_field_hosts()
-        if not hosts:
-            return
-
-        folder_row = self.output_dir_edit.parentWidget()
-        folder_host = folder_row.parentWidget() if folder_row is not None else None
-        min_folder_field_width = (
-            220
-            + self.browse_button.minimumSizeHint().width()
-            + max(0, self.folder_row_layout.spacing())
-        )
-
-        for host in hosts:
-            host_layout = host.layout()
-            if host_layout is None:
-                continue
-            margins = host_layout.contentsMargins()
-            host_width = max(host.contentsRect().width(), host.width())
-            target_inset = 0
-            if self._output_layout_mode == "split" and host_width >= min_host_width_for_trim:
-                target_inset = trim_px
-                if host is folder_host:
-                    target_inset = min(
-                        target_inset,
-                        max(0, host_width - min_folder_field_width),
-                    )
-            host_layout.setContentsMargins(
-                target_inset,
-                margins.top(),
-                margins.right(),
-                margins.bottom(),
-            )
-
     def _normalize_input_widths(self) -> None:
         width = max(1, self.width())
         stacked_mode = self._output_layout_mode == "stacked"
@@ -1178,82 +1230,64 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if stacked_mode:
             self._unlock_widget_width(self.run_actions_card)
 
-    def _set_output_layout_mode(self, mode: str) -> None:
-        stacked_mode = mode == "stacked"
-        compact_height = self._use_compact_content_layout()
-        self._output_layout_mode = mode
-        self.workspace_layout.setDirection(
-            QBoxLayout.Direction.TopToBottom
-            if stacked_mode
-            else QBoxLayout.Direction.LeftToRight
-        )
-        self.workspace_layout.setSpacing(14 if stacked_mode else 18)
+    def _set_output_layout_mode(self, profile: _ResponsiveLayoutProfile) -> None:
+        stacked_mode = profile.output_mode == "stacked"
+        self._output_layout_mode = profile.output_mode
+        self.workspace_layout.setDirection(profile.workspace_direction)
+        self.workspace_layout.setSpacing(profile.workspace_spacing)
         output_shell_layout = self.output_section.layout()
         if isinstance(output_shell_layout, QVBoxLayout):
             output_shell_layout.setContentsMargins(0, 0, 0, 0)
-            output_shell_layout.setSpacing(8 if compact_height else 12)
-        outer_spacing = (
-            10
-            if compact_height
-            else OUTPUT_CARD_STACK_GAP
-        )
-        card_spacing = 8 if compact_height else 10
-        card_side_margin = 10 if compact_height else 14
-        card_top_margin = 9 if compact_height else 14
-        card_bottom_margin = 10 if compact_height else 14
-        self.output_layout.setSpacing(outer_spacing)
-        self.format_layout.setSpacing(card_spacing)
-        self.save_layout.setSpacing(card_spacing)
+            output_shell_layout.setSpacing(profile.output_shell_spacing)
+        self.output_layout.setSpacing(profile.output_outer_spacing)
+        self.format_layout.setSpacing(profile.output_card_spacing)
+        self.save_layout.setSpacing(profile.output_card_spacing)
         self.format_layout.setContentsMargins(
-            card_side_margin,
-            card_top_margin,
-            card_side_margin,
-            card_bottom_margin,
+            profile.output_card_side_margin,
+            profile.output_card_top_margin,
+            profile.output_card_side_margin,
+            profile.output_card_bottom_margin,
         )
         self.save_layout.setContentsMargins(0, 0, 0, 0)
         self._set_output_form_label_width()
         self.mode_row_layout.setDirection(QBoxLayout.Direction.LeftToRight)
-        self.mode_row_layout.setSpacing(6 if stacked_mode else 8)
-        self.folder_row_layout.setDirection(
-            QBoxLayout.Direction.TopToBottom
-            if stacked_mode
-            else QBoxLayout.Direction.LeftToRight
-        )
-        self.folder_row_layout.setSpacing(8 if compact_height else 10)
+        self.mode_row_layout.setSpacing(profile.mode_row_spacing)
+        self.folder_row_layout.setDirection(profile.folder_row_direction)
+        self.folder_row_layout.setSpacing(profile.folder_row_spacing)
 
-    def _set_run_section_layout_mode(self) -> None:
-        compact_height = self._use_compact_run_layout()
+    def _set_run_section_layout_mode(
+        self, profile: _ResponsiveLayoutProfile
+    ) -> None:
+        compact_height = profile.compact_run
 
         action_margin = 0
-        action_spacing = 4 if compact_height else 8
         buttons_shell_layout = self.run_actions_shell_layout
         buttons_shell_layout.setContentsMargins(
             action_margin, action_margin, action_margin, action_margin
         )
         buttons_layout = self.run_actions_layout
-        buttons_layout.setHorizontalSpacing(action_spacing)
-        buttons_layout.setVerticalSpacing(action_spacing)
+        buttons_layout.setHorizontalSpacing(profile.run_action_spacing)
+        buttons_layout.setVerticalSpacing(profile.run_action_spacing)
 
         activity_layout = self.run_activity_card.layout()
         if isinstance(activity_layout, QVBoxLayout):
-            activity_margin = 10 if compact_height else 16
             activity_layout.setContentsMargins(
-                activity_margin, activity_margin, activity_margin, activity_margin
+                profile.run_activity_margin,
+                profile.run_activity_margin,
+                profile.run_activity_margin,
+                profile.run_activity_margin,
             )
-            activity_layout.setSpacing(6 if compact_height else 12)
+            activity_layout.setSpacing(profile.run_activity_spacing)
 
         metrics_card_layout = self.metrics_card.layout()
         if isinstance(metrics_card_layout, QBoxLayout):
             metrics_card_layout.setContentsMargins(
-                10 if compact_height else 12,
-                8 if compact_height else 10,
-                10 if compact_height else 12,
-                10 if compact_height else 12,
+                *profile.metrics_card_margins,
             )
-            metrics_card_layout.setSpacing(6 if compact_height else 8)
+            metrics_card_layout.setSpacing(profile.metrics_card_spacing)
         metrics_strip_layout = self.metrics_strip.layout()
         if isinstance(metrics_strip_layout, QBoxLayout):
-            metrics_strip_layout.setSpacing(4 if compact_height else 12)
+            metrics_strip_layout.setSpacing(profile.metrics_strip_spacing)
 
         for widget in (
             self.start_button,
@@ -1287,9 +1321,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         buttons_layout.setRowStretch(3, 0)
 
     def _apply_responsive_layout(self) -> None:
-        desired_mode = "stacked" if self.width() < 860 else "split"
-        self._set_output_layout_mode(desired_mode)
-        self._set_run_section_layout_mode()
+        profile = self._responsive_layout_profile()
+        self._set_output_layout_mode(profile)
+        self._set_run_section_layout_mode(profile)
         self._sync_source_feedback_visibility()
         self.mixed_buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self._sync_source_details_height()
@@ -1697,7 +1731,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             if layout is not None:
                 layout.invalidate()
                 layout.activate()
-        self._trim_output_field_lengths()
         main_layout = self.main_page.layout()
         if main_layout is not None:
             main_layout.invalidate()
@@ -1748,19 +1781,25 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._ready_summary_full_text = str(full_text or "")
         return
 
-    def _set_main_workspace_selection(self) -> None:
-        self.downloads_button.setChecked(True)
-        self.queue_button.setChecked(False)
-        self.settings_button.setChecked(False)
-        self.logs_button.setChecked(False)
+    def _panel_checked(self, name: str) -> bool:
+        if self._active_panel_name is None:
+            return name == "downloads"
+        return self._active_panel_name == name
+
+    def _apply_panel_selection(self, active_panel: str | None) -> None:
+        self._active_panel_name = active_panel
+        for panel_name, button in self._panel_buttons.items():
+            button.setChecked(self._panel_checked(panel_name))
         self._refresh_top_action_icons()
+
+    def _set_main_workspace_selection(self) -> None:
+        self._apply_panel_selection(None)
 
     def _show_main_workspace(self) -> None:
         window_size = self.size()
         if self.panel_stack.currentIndex() != self._main_page_index:
             self.panel_stack.setCurrentIndex(self._main_page_index)
             self._sync_current_panel_geometry()
-        self._active_panel_name = None
         self._set_main_workspace_selection()
         self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
@@ -1774,9 +1813,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _toggle_panel(self, name: str) -> None:
         if self._active_panel_name == name:
-            for panel_name, button in self._panel_buttons.items():
-                button.setChecked(panel_name == name)
-            self._refresh_top_action_icons()
+            self._apply_panel_selection(name)
             return
         self._open_panel(name)
 
@@ -1898,15 +1935,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             ("queue", self.queue_button),
             ("logs", self.logs_button),
         ):
-            if self._active_panel_name is not None:
-                is_checked = self._active_panel_name == name
-            else:
-                is_checked = {
-                    "downloads": True,
-                    "queue": False,
-                    "settings": False,
-                    "logs": False,
-                }.get(name, False)
+            is_checked = self._panel_checked(name)
             icon = QIcon()
             if self._header_icons_enabled:
                 icon = self._panel_icon(
@@ -1994,12 +2023,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._refresh_edit_friendly_encoder_availability()
         self.panel_stack.setCurrentIndex(index)
         self._sync_current_panel_geometry()
-        self._active_panel_name = name
-        if name == "logs":
-            self._set_logs_alert(False)
-        for panel_name, button in self._panel_buttons.items():
-            button.setChecked(panel_name == name)
-        self._refresh_top_action_icons()
+        if name == "logs" and self._logs_alert_active:
+            self._logs_alert_active = False
+        self._apply_panel_selection(name)
         self._set_mixed_url_alert_visible(False)
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
@@ -2015,7 +2041,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         window_size = self.size()
         self.panel_stack.setCurrentIndex(self._main_page_index)
         self._sync_current_panel_geometry()
-        self._active_panel_name = None
         self._set_main_workspace_selection()
         self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
@@ -2497,7 +2522,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                     self.add_queue_button,
                     self.cancel_button,
                 ],
-                extra_px=34 if not self._use_compact_content_layout() else 12,
+                extra_px=self._responsive_layout_profile().run_button_extra_width,
                 sample_texts_by_button=self._run_action_button_width_samples(),
             )
             self._sync_run_section_split_widths()

@@ -31,16 +31,24 @@ from .constants import OUTPUT_CARD_STACK_GAP
 from .link_input import LinkInputRefs, build_link_input_module
 from .widgets import (
     ButtonSpec,
+    CheckBoxSpec,
+    LabelSpec,
     LayoutConfig,
+    LabeledFieldSpec,
     NativeComboBoxConfig,
     QueueEmptyStateWidget,
     SegmentedRailSpec,
+    LineEditSpec,
     SourceToastRefs,
     WidgetConfig,
     _NativeComboBox,
     build_button,
-    build_grid,
+    build_button_panel,
+    build_checkbox,
     build_hbox,
+    build_label,
+    build_labeled_fields,
+    build_line_edit,
     build_native_combo,
     build_segmented_rail,
     build_source_feedback_toast,
@@ -225,17 +233,6 @@ class _OutputSectionRefs:
     eta_label: QLabel
     item_label: QLabel
 
-
-@dataclass(frozen=True)
-class _LabeledRowSpec:
-    key: str
-    label: QLabel
-    field: QWidget
-    field_spacing: int = 20
-    field_alignment: Qt.Alignment | None = None
-    visible: bool = True
-
-
 class TopBarBuilder:
     @staticmethod
     def build(parent: QWidget) -> TopBarRefs:
@@ -361,83 +358,66 @@ class RunSectionBuilder:
         activity_card = activity_card_shell.widget
         activity_layout = activity_card_shell.layout
 
-        status_value = QLabel("Idle", activity_card)
-        status_value.setObjectName("statusLine")
+        status_value = build_label(
+            activity_card,
+            spec=LabelSpec(
+                text="Idle",
+                widget_config=WidgetConfig(object_name="statusLine"),
+            ),
+        )
         status_value.setVisible(False)
 
         activity_layout.addWidget(status_value)
 
-        actions_card_shell = build_vbox(
+        action_button_policy = (
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        action_panel = build_button_panel(
             parent,
-            widget_cls=QFrame,
-            widget_config=WidgetConfig(
+            card_config=WidgetConfig(
                 object_name="runActionCard",
                 size_policy=(
                     QSizePolicy.Policy.Expanding,
                     QSizePolicy.Policy.Fixed,
                 ),
             ),
-            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
-        )
-        actions_card = actions_card_shell.widget
-        buttons_shell_layout = actions_card_shell.layout
-
-        buttons_host_shell = build_grid(
-            actions_card,
-            widget_config=WidgetConfig(
+            host_config=WidgetConfig(
                 size_policy=(
                     QSizePolicy.Policy.Expanding,
                     QSizePolicy.Policy.Fixed,
                 ),
             ),
-            layout_config=LayoutConfig(
+            buttons_layout_config=LayoutConfig(
                 margins=(0, 0, 0, 0),
                 horizontal_spacing=8,
                 vertical_spacing=0,
             ),
-        )
-        buttons_host = buttons_host_shell.widget
-        buttons_layout = buttons_host_shell.layout
-        buttons_shell_layout.addWidget(buttons_host, 0, Qt.AlignmentFlag.AlignTop)
-
-        action_button_policy = (
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        start_button = build_button(
-            buttons_host,
-            spec=ButtonSpec(
-                text="Download",
-                object_name="primaryActionButton",
-                size_policy=action_button_policy,
-                on_click=callbacks.on_start,
+            button_specs=(
+                ButtonSpec(
+                    text="Download",
+                    object_name="primaryActionButton",
+                    size_policy=action_button_policy,
+                    on_click=callbacks.on_start,
+                ),
+                ButtonSpec(
+                    text="Add to queue",
+                    object_name="secondaryActionButton",
+                    size_policy=action_button_policy,
+                    on_click=callbacks.on_add_to_queue,
+                ),
+                ButtonSpec(
+                    text="Cancel",
+                    object_name="dangerActionButton",
+                    size_policy=action_button_policy,
+                    on_click=callbacks.on_cancel,
+                ),
             ),
         )
-        add_queue_button = build_button(
-            buttons_host,
-            spec=ButtonSpec(
-                text="Add to queue",
-                object_name="secondaryActionButton",
-                size_policy=action_button_policy,
-                on_click=callbacks.on_add_to_queue,
-            ),
-        )
-        cancel_button = build_button(
-            buttons_host,
-            spec=ButtonSpec(
-                text="Cancel",
-                object_name="dangerActionButton",
-                size_policy=action_button_policy,
-                on_click=callbacks.on_cancel,
-            ),
-        )
-
-        buttons_layout.addWidget(start_button, 0, 0)
-        buttons_layout.addWidget(add_queue_button, 0, 1)
-        buttons_layout.addWidget(cancel_button, 0, 2)
-        buttons_layout.setColumnStretch(0, 1)
-        buttons_layout.setColumnStretch(1, 1)
-        buttons_layout.setColumnStretch(2, 1)
+        actions_card = action_panel.card
+        buttons_shell_layout = action_panel.shell_layout
+        buttons_layout = action_panel.buttons_layout
+        start_button, add_queue_button, cancel_button = action_panel.buttons
         return RunSectionRefs(
             state_host=run_state_host,
             activity_card=activity_card,
@@ -465,13 +445,25 @@ def _build_section_header(
     header = header_shell.widget
     header_layout = header_shell.layout
 
-    title_label = QLabel(title, header)
-    title_label.setObjectName("cardHeaderTitle" if compact else "sectionHeaderTitle")
+    title_label = build_label(
+        header,
+        spec=LabelSpec(
+            text=title,
+            widget_config=WidgetConfig(
+                object_name="cardHeaderTitle" if compact else "sectionHeaderTitle"
+            ),
+        ),
+    )
     header_layout.addWidget(title_label)
     header_layout.addStretch(1)
     if meta:
-        meta_label = QLabel(meta, header)
-        meta_label.setObjectName("sectionMetaChip")
+        meta_label = build_label(
+            header,
+            spec=LabelSpec(
+                text=meta,
+                widget_config=WidgetConfig(object_name="sectionMetaChip"),
+            ),
+        )
         header_layout.addWidget(
             meta_label,
             alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -493,89 +485,6 @@ def _content_mode_selection_rect(button: QPushButton) -> QRect:
     if inset_rect.width() <= 0 or inset_rect.height() <= 0:
         return rect
     return inset_rect
-
-
-def _add_labeled_row(
-    parent: QWidget,
-    layout: QVBoxLayout,
-    label: QLabel,
-    field: QWidget,
-    *,
-    field_spacing: int = 20,
-    field_alignment: Qt.Alignment | None = None,
-) -> QWidget:
-    block_shell = build_vbox(
-        parent,
-        widget_config=WidgetConfig(object_name="outputCardBlock"),
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=4),
-    )
-    block = block_shell.widget
-    block_layout = block_shell.layout
-
-    row_shell = build_hbox(
-        block,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=field_spacing),
-    )
-    row = row_shell.widget
-    row_layout = row_shell.layout
-
-    field_host_shell = build_vbox(
-        row,
-        widget_config=WidgetConfig(object_name="outputFieldHost"),
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
-    )
-    field_host = field_host_shell.widget
-    field_host_layout = field_host_shell.layout
-    if field_alignment is None:
-        field_host_layout.addWidget(field)
-    else:
-        field_host_layout.addWidget(field, 0, field_alignment)
-
-    row_layout.addWidget(label)
-    row_layout.addWidget(field_host, stretch=1)
-    block_layout.addWidget(row)
-    layout.addWidget(block)
-    return block
-
-
-def _build_labeled_rows(
-    parent: QWidget,
-    layout: QVBoxLayout,
-    specs: Sequence[_LabeledRowSpec],
-) -> dict[str, QWidget]:
-    rows: dict[str, QWidget] = {}
-    for spec in specs:
-        row = _add_labeled_row(
-            parent,
-            layout,
-            spec.label,
-            spec.field,
-            field_spacing=spec.field_spacing,
-            field_alignment=spec.field_alignment,
-        )
-        row.setVisible(spec.visible)
-        rows[spec.key] = row
-    return rows
-
-
-def _add_save_block(
-    parent: QWidget,
-    layout: QVBoxLayout,
-    label: QLabel,
-    field: QWidget,
-) -> QWidget:
-    block_shell = build_vbox(
-        parent,
-        widget_config=WidgetConfig(object_name="outputCardBlock"),
-        layout_config=LayoutConfig(margins=(8, 5, 8, 5), spacing=5),
-    )
-    block = block_shell.widget
-    block_layout = block_shell.layout
-    block_layout.addWidget(label)
-    block_layout.addWidget(field)
-    layout.addWidget(block)
-    return block
-
 
 class DownloadsViewBuilder:
     @staticmethod
@@ -603,8 +512,12 @@ class DownloadsViewBuilder:
         )
         source_details_block = source_details_block_shell.widget
         source_details_block_layout = source_details_block_shell.layout
-        source_details_label = QLabel("", source_details_block)
-        source_details_label.setObjectName("sectionFormLabel")
+        source_details_label = build_label(
+            source_details_block,
+            spec=LabelSpec(
+                widget_config=WidgetConfig(object_name="sectionFormLabel"),
+            ),
+        )
         source_details_block_layout.addWidget(source_details_label)
 
         source_details_host_shell = build_vbox(
@@ -634,13 +547,18 @@ class DownloadsViewBuilder:
         )
         playlist_items_panel = playlist_items_panel_shell.widget
         playlist_items_layout = playlist_items_panel_shell.layout
-        playlist_items_edit = QLineEdit(playlist_items_panel)
-        playlist_items_edit.setPlaceholderText("Optional: 1-5,7,10-")
-        playlist_items_edit.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        playlist_items_edit.textChanged.connect(
-            lambda _text: callbacks.on_update_controls_state()
+        playlist_items_edit = build_line_edit(
+            playlist_items_panel,
+            spec=LineEditSpec(
+                widget_config=WidgetConfig(
+                    size_policy=(
+                        QSizePolicy.Policy.Expanding,
+                        QSizePolicy.Policy.Fixed,
+                    ),
+                ),
+                placeholder_text="Optional: 1-5,7,10-",
+                on_text_changed=lambda _text: callbacks.on_update_controls_state(),
+            ),
         )
         playlist_items_layout.addWidget(playlist_items_edit, stretch=1)
         source_details_stack.addWidget(playlist_items_panel)
@@ -853,7 +771,6 @@ class DownloadsViewBuilder:
         if not isinstance(mode_row_layout, QHBoxLayout):
             raise TypeError("content mode rail must use a horizontal layout")
         video_radio, audio_radio = mode_buttons
-        content_type_label = QLabel("Content type", format_card)
         content_type_field_shell = build_hbox(
             format_card,
             widget_config=WidgetConfig(
@@ -886,15 +803,27 @@ class DownloadsViewBuilder:
         playlist_length_group = playlist_length_group_shell.widget
         playlist_length_group_layout = playlist_length_group_shell.layout
 
-        playlist_length_label = QLabel("Playlist range", playlist_length_group)
-        playlist_length_label.setObjectName("sectionFormLabel")
-
-        playlist_length_edit = QLineEdit(playlist_length_group)
-        playlist_length_edit.setPlaceholderText("Range")
-        playlist_length_edit.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        playlist_length_label = build_label(
+            playlist_length_group,
+            spec=LabelSpec(
+                text="Playlist range",
+                widget_config=WidgetConfig(object_name="sectionFormLabel"),
+            ),
         )
-        playlist_length_edit.setMinimumWidth(0)
+
+        playlist_length_edit = build_line_edit(
+            playlist_length_group,
+            spec=LineEditSpec(
+                widget_config=WidgetConfig(
+                    minimum_width=0,
+                    size_policy=(
+                        QSizePolicy.Policy.Expanding,
+                        QSizePolicy.Policy.Fixed,
+                    ),
+                ),
+                placeholder_text="Range",
+            ),
+        )
 
         playlist_length_group_layout.addWidget(playlist_length_label)
         playlist_length_group_layout.addWidget(playlist_length_edit)
@@ -914,12 +843,13 @@ class DownloadsViewBuilder:
             ),
         )
         container_combo.currentIndexChanged.connect(callbacks.on_container_change)
-        convert_check = QCheckBox("Convert WebM to MP4", format_card)
-        convert_check.stateChanged.connect(
-            lambda _state: callbacks.on_update_controls_state()
+        convert_check = build_checkbox(
+            format_card,
+            spec=CheckBoxSpec(
+                text="Convert WebM to MP4",
+                on_state_changed=lambda _state: callbacks.on_update_controls_state(),
+            ),
         )
-        container_label = QLabel("Container", format_card)
-        post_process_label = QLabel("Post-process", format_card)
 
         codec_combo = build_native_combo(
             format_card,
@@ -934,7 +864,6 @@ class DownloadsViewBuilder:
             ),
         )
         codec_combo.currentIndexChanged.connect(callbacks.on_codec_change)
-        codec_label = QLabel("Codec", format_card)
 
         format_combo = build_native_combo(
             format_card,
@@ -947,54 +876,58 @@ class DownloadsViewBuilder:
         format_combo.currentIndexChanged.connect(
             lambda _idx: callbacks.on_update_controls_state()
         )
-        format_label = QLabel("Quality", format_card)
-
-        output_form_labels = [
-            content_type_label,
-            container_label,
-            codec_label,
-            format_label,
-        ]
-        for label in output_form_labels:
-            label.setObjectName("outputFormLabel")
+        label_config = WidgetConfig(object_name="outputFormLabel")
 
         output_row_specs = (
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="content_type",
-                label=content_type_label,
+                label_text="Content type",
                 field=content_type_field,
+                label_config=label_config,
             ),
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="container",
-                label=container_label,
+                label_text="Container",
                 field=container_combo,
+                label_config=label_config,
             ),
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="post_process",
-                label=post_process_label,
+                label_text="Post-process",
                 field=convert_check,
+                label_config=label_config,
                 visible=False,
             ),
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="codec",
-                label=codec_label,
+                label_text="Codec",
                 field=codec_combo,
+                label_config=label_config,
             ),
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="format",
-                label=format_label,
+                label_text="Quality",
                 field=format_combo,
+                label_config=label_config,
             ),
         )
-        output_row_map = _build_labeled_rows(
+        output_row_refs = build_labeled_fields(
             format_card,
-            format_layout,
-            output_row_specs,
+            layout=format_layout,
+            specs=output_row_specs,
         )
-        content_type_row = output_row_map["content_type"]
-        post_process_row = output_row_map["post_process"]
-        format_row = output_row_map["format"]
-        output_form_rows = [output_row_map[spec.key] for spec in output_row_specs]
+        content_type_label = output_row_refs["content_type"].label
+        container_label = output_row_refs["container"].label
+        post_process_label = output_row_refs["post_process"].label
+        codec_label = output_row_refs["codec"].label
+        format_label = output_row_refs["format"].label
+        content_type_row = output_row_refs["content_type"].row
+        post_process_row = output_row_refs["post_process"].row
+        format_row = output_row_refs["format"].row
+        output_form_labels = [
+            output_row_refs[spec.key].label for spec in output_row_specs if spec.visible
+        ]
+        output_form_rows = [output_row_refs[spec.key].row for spec in output_row_specs]
 
         save_card_shell = build_vbox(
             format_card,
@@ -1014,10 +947,12 @@ class DownloadsViewBuilder:
         )
         save_card = save_card_shell.widget
         save_layout = save_card_shell.layout
-        filename_edit = QLineEdit(save_card)
-        filename_edit.setPlaceholderText("Optional...")
-        file_name_label = QLabel("File name", save_card)
-        file_name_label.setObjectName("outputFormLabel")
+        filename_edit = build_line_edit(
+            save_card,
+            spec=LineEditSpec(
+                placeholder_text="Optional...",
+            ),
+        )
 
         folder_row_shell = build_vbox(
             save_card,
@@ -1035,9 +970,14 @@ class DownloadsViewBuilder:
         )
         folder_row = folder_row_shell.widget
         folder_row_layout = folder_row_shell.layout
-        output_dir_edit = QLineEdit(str(Path.home() / "Downloads"), folder_row)
-        output_dir_edit.setReadOnly(True)
-        output_dir_edit.setMinimumWidth(0)
+        output_dir_edit = build_line_edit(
+            folder_row,
+            spec=LineEditSpec(
+                text=str(Path.home() / "Downloads"),
+                widget_config=WidgetConfig(minimum_width=0),
+                read_only=True,
+            ),
+        )
         browse_button = build_button(
             folder_row,
             spec=ButtonSpec(
@@ -1052,28 +992,30 @@ class DownloadsViewBuilder:
         )
         folder_row_layout.addWidget(output_dir_edit)
         folder_row_layout.addWidget(browse_button)
-        output_folder_label = QLabel("Folder", save_card)
-        output_folder_label.setObjectName("outputFormLabel")
-
-        output_form_labels.extend([file_name_label, output_folder_label])
+ 
         save_row_specs = (
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="file_name",
-                label=file_name_label,
+                label_text="File name",
                 field=filename_edit,
+                label_config=label_config,
             ),
-            _LabeledRowSpec(
+            LabeledFieldSpec(
                 key="output_folder",
-                label=output_folder_label,
+                label_text="Folder",
                 field=folder_row,
+                label_config=label_config,
             ),
         )
-        save_row_map = _build_labeled_rows(
+        save_row_refs = build_labeled_fields(
             save_card,
-            save_layout,
-            save_row_specs,
+            layout=save_layout,
+            specs=save_row_specs,
         )
-        output_form_rows.extend(save_row_map[spec.key] for spec in save_row_specs)
+        file_name_label = save_row_refs["file_name"].label
+        output_folder_label = save_row_refs["output_folder"].label
+        output_form_labels.extend(save_row_refs[spec.key].label for spec in save_row_specs)
+        output_form_rows.extend(save_row_refs[spec.key].row for spec in save_row_specs)
 
         format_layout.addWidget(save_card)
 
@@ -1106,24 +1048,58 @@ class DownloadsViewBuilder:
         )
         metrics_strip = metrics_strip_shell.widget
         metrics_layout = metrics_strip_shell.layout
-        progress_label = QLabel("Progress: -", metrics_strip)
-        progress_label.setObjectName("metricInline")
-        progress_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
+        progress_label = build_label(
+            metrics_strip,
+            spec=LabelSpec(
+                text="Progress: -",
+                widget_config=WidgetConfig(
+                    object_name="metricInline",
+                    size_policy=(
+                        QSizePolicy.Policy.Fixed,
+                        QSizePolicy.Policy.Preferred,
+                    ),
+                ),
+            ),
         )
-        speed_label = QLabel("Speed: -", metrics_strip)
-        speed_label.setObjectName("metricInline")
-        speed_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
+        speed_label = build_label(
+            metrics_strip,
+            spec=LabelSpec(
+                text="Speed: -",
+                widget_config=WidgetConfig(
+                    object_name="metricInline",
+                    size_policy=(
+                        QSizePolicy.Policy.Fixed,
+                        QSizePolicy.Policy.Preferred,
+                    ),
+                ),
+            ),
         )
-        eta_label = QLabel("ETA: -", metrics_strip)
-        eta_label.setObjectName("metricInline")
-        eta_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-        item_label = QLabel("Item: -", metrics_strip)
-        item_label.setObjectName("metricInlineItem")
-        item_label.setMinimumWidth(0)
-        item_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        eta_label = build_label(
+            metrics_strip,
+            spec=LabelSpec(
+                text="ETA: -",
+                widget_config=WidgetConfig(
+                    object_name="metricInline",
+                    size_policy=(
+                        QSizePolicy.Policy.Fixed,
+                        QSizePolicy.Policy.Preferred,
+                    ),
+                ),
+            ),
+        )
+        item_label = build_label(
+            metrics_strip,
+            spec=LabelSpec(
+                text="Item: -",
+                widget_config=WidgetConfig(
+                    object_name="metricInlineItem",
+                    minimum_width=0,
+                    size_policy=(
+                        QSizePolicy.Policy.Expanding,
+                        QSizePolicy.Policy.Preferred,
+                    ),
+                ),
+            ),
         )
         metrics_layout.addWidget(progress_label)
         metrics_layout.addWidget(speed_label)
@@ -1224,12 +1200,14 @@ class MainUiBuilder:
         mixed_shadow.setColor(QColor(15, 91, 81, 68))
         mixed_url_alert.setGraphicsEffect(mixed_shadow)
         mixed_alert_layout = mixed_url_alert_shell.layout
-        mixed_url_alert_label = QLabel(
-            "Download this URL as a single video or as a playlist?",
+        mixed_url_alert_label = build_label(
             mixed_url_alert,
+            spec=LabelSpec(
+                text="Download this URL as a single video or as a playlist?",
+                widget_config=WidgetConfig(object_name="mixedUrlAlertTitle"),
+                word_wrap=True,
+            ),
         )
-        mixed_url_alert_label.setObjectName("mixedUrlAlertTitle")
-        mixed_url_alert_label.setWordWrap(True)
         mixed_alert_layout.addWidget(mixed_url_alert_label)
         mixed_buttons_shell = build_hbox(
             mixed_url_alert,

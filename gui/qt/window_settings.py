@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtWidgets import QWidget
 
@@ -23,6 +24,14 @@ _EDIT_FRIENDLY_ENCODER_CODECS = {
 _EDIT_FRIENDLY_ENCODER_DISABLED_TOOLTIP = (
     "Unavailable from the installed ffmpeg on this computer."
 )
+
+
+@dataclass(frozen=True)
+class _SettingBinding:
+    key: str
+    apply: Callable[[object], None]
+    capture: Callable[[], object]
+    connect: Callable[[Callable[[], None]], None]
 
 
 class WindowSettingsMixin:
@@ -87,39 +96,68 @@ class WindowSettingsMixin:
         self.output_dir_edit.setCursorPosition(0)
         self._refresh_queue_preview_card()
 
+    def _set_edit_friendly_encoder_preference(
+        self: "QtYtDlpGui", value: object
+    ) -> None:
+        preference = str(value or "auto").strip() or "auto"
+        index = self.edit_friendly_encoder_combo.findData(preference)
+        if index < 0:
+            index = self.edit_friendly_encoder_combo.findData("auto")
+        if index < 0:
+            index = 0
+        self.edit_friendly_encoder_combo.setCurrentIndex(index)
+
+    def _settings_bindings(self: "QtYtDlpGui") -> tuple[_SettingBinding, ...]:
+        return (
+            _SettingBinding(
+                key="output_dir",
+                apply=lambda value: self._set_output_dir_text(
+                    str(value or self._default_output_dir())
+                ),
+                capture=lambda: self.output_dir_edit.text().strip(),
+                connect=lambda callback: self.output_dir_edit.textChanged.connect(
+                    lambda _text: callback()
+                ),
+            ),
+            _SettingBinding(
+                key="edit_friendly_encoder",
+                apply=self._set_edit_friendly_encoder_preference,
+                capture=lambda: str(
+                    self.edit_friendly_encoder_combo.currentData() or "auto"
+                ).strip(),
+                connect=lambda callback: self.edit_friendly_encoder_combo.currentIndexChanged.connect(
+                    lambda _idx: callback()
+                ),
+            ),
+            _SettingBinding(
+                key="open_folder_after_download",
+                apply=lambda value: self.open_folder_after_download_check.setChecked(
+                    bool(value)
+                ),
+                capture=lambda: bool(
+                    self.open_folder_after_download_check.isChecked()
+                ),
+                connect=lambda callback: self.open_folder_after_download_check.stateChanged.connect(
+                    lambda _state: callback()
+                ),
+            ),
+        )
+
     def _load_user_settings(self: "QtYtDlpGui") -> None:
         settings = settings_store.load_settings(
             default_output_dir=self._default_output_dir()
         )
         self._applying_user_settings = True
         try:
-            self._set_output_dir_text(
-                str(settings.get("output_dir") or self._default_output_dir())
-            )
-            edit_friendly_encoder = str(
-                settings.get("edit_friendly_encoder") or "auto"
-            ).strip()
-            idx = self.edit_friendly_encoder_combo.findData(edit_friendly_encoder)
-            if idx < 0:
-                idx = self.edit_friendly_encoder_combo.findData("auto")
-            if idx < 0:
-                idx = 0
-            self.edit_friendly_encoder_combo.setCurrentIndex(idx)
-            self.open_folder_after_download_check.setChecked(
-                bool(settings.get("open_folder_after_download"))
-            )
+            for binding in self._settings_bindings():
+                binding.apply(settings.get(binding.key))
         finally:
             self._applying_user_settings = False
 
     def _capture_user_settings(self: "QtYtDlpGui") -> dict[str, object]:
         return {
-            "output_dir": self.output_dir_edit.text().strip(),
-            "edit_friendly_encoder": str(
-                self.edit_friendly_encoder_combo.currentData() or "auto"
-            ).strip(),
-            "open_folder_after_download": bool(
-                self.open_folder_after_download_check.isChecked()
-            ),
+            binding.key: binding.capture()
+            for binding in self._settings_bindings()
         }
 
     def _save_user_settings(self: "QtYtDlpGui") -> None:
@@ -131,15 +169,8 @@ class WindowSettingsMixin:
         )
 
     def _connect_settings_autosave(self: "QtYtDlpGui") -> None:
-        self.output_dir_edit.textChanged.connect(
-            lambda _text: self._save_user_settings()
-        )
-        self.edit_friendly_encoder_combo.currentIndexChanged.connect(
-            lambda _idx: self._save_user_settings()
-        )
-        self.open_folder_after_download_check.stateChanged.connect(
-            lambda _state: self._save_user_settings()
-        )
+        for binding in self._settings_bindings():
+            binding.connect(self._save_user_settings)
 
     def _refresh_edit_friendly_encoder_availability(self: "QtYtDlpGui") -> None:
         ffmpeg_path, _ffmpeg_source = tooling.resolve_binary("ffmpeg")
@@ -169,10 +200,12 @@ class WindowSettingsMixin:
             return
         self._effects.desktop.open_path(output_dir)
 
-    def _export_logs(self: "QtYtDlpGui") -> None:
-        if not self._log_lines:
-            return
-
+    def _prepare_export_path(
+        self: "QtYtDlpGui",
+        *,
+        failure_title: str,
+        filename_prefix: str,
+    ) -> tuple[object, Path] | None:
         timestamp = self._effects.clock.now()
         try:
             base_dir = settings_store.prepare_output_dir_path(
@@ -183,43 +216,66 @@ class WindowSettingsMixin:
         except OSError as exc:
             self._effects.dialogs.critical(
                 self,
-                "Logs export failed",
+                failure_title,
                 str(exc),
             )
-            return
+            return None
+        return (
+            timestamp,
+            base_dir / f"{filename_prefix}-{timestamp:%Y%m%d-%H%M%S}.txt",
+        )
 
-        output_path = base_dir / f"yt-dlp-gui-logs-{timestamp:%Y%m%d-%H%M%S}.txt"
-        payload = "\n".join(self._log_lines).rstrip("\n")
-        if payload:
-            payload += "\n"
+    def _complete_export(
+        self: "QtYtDlpGui",
+        *,
+        output_path: Path,
+        payload: str,
+        failure_title: str,
+        success_status: str,
+        success_log_prefix: str,
+        success_dialog_title: str,
+    ) -> None:
         try:
             self._effects.filesystem.write_text(output_path, payload, encoding="utf-8")
         except OSError as exc:
-            self._effects.dialogs.critical(self, "Logs export failed", str(exc))
+            self._effects.dialogs.critical(self, failure_title, str(exc))
             return
-        self._append_log(f"[logs] exported {output_path}")
-        self._set_status("Logs exported")
+        self._append_log(f"[{success_log_prefix}] exported {output_path}")
+        self._set_status(success_status)
         self._effects.dialogs.information(
-            self, "Logs exported", f"Saved to:\n{output_path}"
+            self, success_dialog_title, f"Saved to:\n{output_path}"
+        )
+
+    def _export_logs(self: "QtYtDlpGui") -> None:
+        if not self._log_lines:
+            return
+        export = self._prepare_export_path(
+            failure_title="Logs export failed",
+            filename_prefix="yt-dlp-gui-logs",
+        )
+        if export is None:
+            return
+        _timestamp, output_path = export
+        payload = "\n".join(self._log_lines).rstrip("\n")
+        if payload:
+            payload += "\n"
+        self._complete_export(
+            output_path=output_path,
+            payload=payload,
+            failure_title="Logs export failed",
+            success_status="Logs exported",
+            success_log_prefix="logs",
+            success_dialog_title="Logs exported",
         )
 
     def _export_diagnostics(self: "QtYtDlpGui") -> None:
-        timestamp = self._effects.clock.now()
-        try:
-            base_dir = settings_store.prepare_output_dir_path(
-                self.output_dir_edit.text(),
-                ensure_dir=self._effects.filesystem.ensure_dir,
-                default_output_dir=self._default_output_dir(),
-            )
-        except OSError as exc:
-            self._effects.dialogs.critical(
-                self,
-                "Diagnostics export failed",
-                str(exc),
-            )
+        export = self._prepare_export_path(
+            failure_title="Diagnostics export failed",
+            filename_prefix="yt-dlp-gui-diagnostics",
+        )
+        if export is None:
             return
-
-        output_path = base_dir / f"yt-dlp-gui-diagnostics-{timestamp:%Y%m%d-%H%M%S}.txt"
+        timestamp, output_path = export
         options = self._snapshot_download_options()
         payload = diagnostics.build_report_payload(
             generated_at=timestamp,
@@ -237,15 +293,11 @@ class WindowSettingsMixin:
             options=options,
             logs_text="\n".join(self._log_lines),
         )
-        try:
-            self._effects.filesystem.write_text(output_path, payload, encoding="utf-8")
-        except OSError as exc:
-            self._effects.dialogs.critical(
-                self, "Diagnostics export failed", str(exc)
-            )
-            return
-        self._append_log(f"[diag] exported {output_path}")
-        self._set_status("Diagnostics exported")
-        self._effects.dialogs.information(
-            self, "Diagnostics exported", f"Saved to:\n{output_path}"
+        self._complete_export(
+            output_path=output_path,
+            payload=payload,
+            failure_title="Diagnostics export failed",
+            success_status="Diagnostics exported",
+            success_log_prefix="diag",
+            success_dialog_title="Diagnostics exported",
         )

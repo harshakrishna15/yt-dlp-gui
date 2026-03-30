@@ -1639,7 +1639,7 @@ class TestQtApp(unittest.TestCase):
         right_edges = [map_rect_to_format(widget).right() for widget in right_edge_widgets]
         self.assertLessEqual(max(right_edges) - min(right_edges), 2)
 
-    def test_output_form_fields_are_slightly_shorter_than_their_split_hosts(self) -> None:
+    def test_output_form_fields_fill_their_split_hosts(self) -> None:
         self.window.show()
         QApplication.processEvents()
         self.window.resize(1220, 820)
@@ -1659,7 +1659,8 @@ class TestQtApp(unittest.TestCase):
             self.assertIsNotNone(widget)
             assert widget is not None
             self.assertIsNotNone(host)
-            self.assertGreaterEqual(widget.x(), 10)
+            self.assertLessEqual(widget.x(), 1)
+            self.assertLessEqual(abs(widget.width() - host.width()), 2)
 
     def test_mixed_url_choice_preserves_window_size(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"

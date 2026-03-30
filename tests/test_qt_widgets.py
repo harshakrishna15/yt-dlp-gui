@@ -9,10 +9,15 @@ try:
     from gui.qt.widgets import (
         ButtonSpec,
         LayoutConfig,
+        LabeledFieldSpec,
+        LineEditSpec,
         SegmentedRailSpec,
         WidgetConfig,
         build_button,
+        build_button_panel,
         build_grid,
+        build_labeled_fields,
+        build_line_edit,
         build_segmented_rail,
         build_vbox,
     )
@@ -192,6 +197,98 @@ class TestQtWidgets(unittest.TestCase):
         )
         self.assertEqual(layout.horizontalSpacing(), 11)
         self.assertEqual(layout.verticalSpacing(), 13)
+
+    def test_build_line_edit_applies_common_configuration(self) -> None:
+        parent = QWidget()
+        changed: list[str] = []
+        returned: list[str] = []
+
+        line_edit = build_line_edit(
+            parent,
+            spec=LineEditSpec(
+                text="seed",
+                widget_config=WidgetConfig(
+                    object_name="urlInputField",
+                    minimum_width=150,
+                    size_policy=(
+                        QSizePolicy.Policy.Expanding,
+                        QSizePolicy.Policy.Fixed,
+                    ),
+                ),
+                placeholder_text="Paste URL",
+                frame=False,
+                read_only=True,
+                on_text_changed=lambda text: changed.append(str(text)),
+                on_return_pressed=lambda: returned.append("return"),
+            ),
+        )
+
+        self.assertEqual(line_edit.objectName(), "urlInputField")
+        self.assertEqual(line_edit.text(), "seed")
+        self.assertEqual(line_edit.placeholderText(), "Paste URL")
+        self.assertFalse(line_edit.hasFrame())
+        self.assertTrue(line_edit.isReadOnly())
+        self.assertEqual(line_edit.minimumWidth(), 150)
+
+        line_edit.setText("next")
+        line_edit.returnPressed.emit()
+
+        self.assertEqual(changed[-1], "next")
+        self.assertEqual(returned, ["return"])
+
+    def test_build_labeled_fields_returns_labels_and_rows(self) -> None:
+        parent = QWidget()
+        layout_shell = build_vbox(parent)
+        field = QWidget(parent)
+
+        refs = build_labeled_fields(
+            parent,
+            layout=layout_shell.layout,
+            specs=(
+                LabeledFieldSpec(
+                    key="quality",
+                    label_text="Quality",
+                    field=field,
+                    label_config=WidgetConfig(object_name="outputFormLabel"),
+                    visible=False,
+                ),
+            ),
+        )
+
+        quality = refs["quality"]
+
+        self.assertEqual(quality.label.text(), "Quality")
+        self.assertEqual(quality.label.objectName(), "outputFormLabel")
+        self.assertEqual(quality.row.objectName(), "outputCardBlock")
+        self.assertFalse(quality.row.isVisible())
+        self.assertIsNotNone(quality.row.findChild(QWidget, "outputFieldHost"))
+
+    def test_build_button_panel_creates_even_button_grid(self) -> None:
+        parent = QWidget()
+
+        panel = build_button_panel(
+            parent,
+            card_config=WidgetConfig(
+                object_name="runActionCard",
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            button_specs=(
+                ButtonSpec(text="One"),
+                ButtonSpec(text="Two"),
+            ),
+        )
+
+        first_button, second_button = panel.buttons
+
+        self.assertEqual(panel.card.objectName(), "runActionCard")
+        self.assertEqual(first_button.text(), "One")
+        self.assertEqual(second_button.text(), "Two")
+        self.assertEqual(panel.shell_layout.count(), 1)
+        self.assertEqual(panel.buttons_layout.columnStretch(0), 1)
+        self.assertEqual(panel.buttons_layout.columnStretch(1), 1)
 
 
 if __name__ == "__main__":

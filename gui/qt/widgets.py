@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QLineEdit,
     QListWidget,
     QPushButton,
     QProgressBar,
@@ -125,6 +127,61 @@ class LayoutConfig:
 class WidgetShell(Generic[TWidget, TLayout]):
     widget: TWidget
     layout: TLayout
+
+
+@dataclass(frozen=True)
+class LabelSpec:
+    text: str = ""
+    widget_config: WidgetConfig | None = None
+    alignment: Qt.Alignment | None = None
+    word_wrap: bool | None = None
+
+
+@dataclass(frozen=True)
+class LineEditSpec:
+    text: str = ""
+    widget_config: WidgetConfig | None = None
+    placeholder_text: str | None = None
+    frame: bool | None = None
+    read_only: bool | None = None
+    on_text_changed: Callable[..., object] | None = None
+    on_return_pressed: Callable[[], None] | None = None
+
+
+@dataclass(frozen=True)
+class CheckBoxSpec:
+    text: str = ""
+    widget_config: WidgetConfig | None = None
+    on_state_changed: Callable[..., object] | None = None
+    on_toggled: Callable[[bool], None] | None = None
+
+
+@dataclass(frozen=True)
+class LabeledFieldSpec:
+    key: str
+    label_text: str
+    field: QWidget
+    label_config: WidgetConfig | None = None
+    block_object_name: str | None = "outputCardBlock"
+    field_host_object_name: str | None = "outputFieldHost"
+    row_spacing: int = 4
+    field_spacing: int = 20
+    field_alignment: Qt.Alignment | None = None
+    visible: bool = True
+
+
+@dataclass(frozen=True)
+class LabeledFieldRefs:
+    label: QLabel
+    row: QWidget
+
+
+@dataclass(frozen=True)
+class ButtonPanelRefs:
+    card: QFrame
+    shell_layout: QVBoxLayout
+    buttons_layout: QGridLayout
+    buttons: tuple[QPushButton, ...]
 
 
 @dataclass(frozen=True)
@@ -498,6 +555,103 @@ def build_grid(
     )
 
 
+def build_label(parent: QWidget, *, spec: LabelSpec) -> QLabel:
+    label = QLabel(spec.text, parent)
+    _apply_widget_config(label, config=spec.widget_config)
+    if spec.alignment is not None:
+        label.setAlignment(spec.alignment)
+    if spec.word_wrap is not None:
+        label.setWordWrap(spec.word_wrap)
+    return label
+
+
+def build_line_edit(parent: QWidget, *, spec: LineEditSpec) -> QLineEdit:
+    line_edit = QLineEdit(spec.text, parent)
+    _apply_widget_config(line_edit, config=spec.widget_config)
+    if spec.placeholder_text is not None:
+        line_edit.setPlaceholderText(spec.placeholder_text)
+    if spec.frame is not None:
+        line_edit.setFrame(spec.frame)
+    if spec.read_only is not None:
+        line_edit.setReadOnly(spec.read_only)
+    if spec.on_text_changed is not None:
+        line_edit.textChanged.connect(spec.on_text_changed)
+    if spec.on_return_pressed is not None:
+        line_edit.returnPressed.connect(spec.on_return_pressed)
+    return line_edit
+
+
+def build_checkbox(parent: QWidget, *, spec: CheckBoxSpec) -> QCheckBox:
+    checkbox = QCheckBox(spec.text, parent)
+    _apply_widget_config(checkbox, config=spec.widget_config)
+    if spec.on_state_changed is not None:
+        checkbox.stateChanged.connect(spec.on_state_changed)
+    if spec.on_toggled is not None:
+        checkbox.toggled.connect(spec.on_toggled)
+    return checkbox
+
+
+def build_labeled_fields(
+    parent: QWidget,
+    *,
+    layout: QVBoxLayout,
+    specs: Sequence[LabeledFieldSpec],
+) -> dict[str, LabeledFieldRefs]:
+    rows: dict[str, LabeledFieldRefs] = {}
+    for spec in specs:
+        block_shell = build_vbox(
+            parent,
+            widget_config=(
+                WidgetConfig(object_name=spec.block_object_name)
+                if spec.block_object_name is not None
+                else None
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=spec.row_spacing),
+        )
+        block = block_shell.widget
+        block_layout = block_shell.layout
+
+        row_shell = build_hbox(
+            block,
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=spec.field_spacing),
+        )
+        row = row_shell.widget
+        row_layout = row_shell.layout
+
+        label = build_label(
+            row,
+            spec=LabelSpec(
+                text=spec.label_text,
+                widget_config=spec.label_config,
+            ),
+        )
+
+        field_host_shell = build_vbox(
+            row,
+            widget_config=(
+                WidgetConfig(object_name=spec.field_host_object_name)
+                if spec.field_host_object_name is not None
+                else None
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+        )
+        field_host = field_host_shell.widget
+        field_host_layout = field_host_shell.layout
+        if spec.field_alignment is None:
+            field_host_layout.addWidget(spec.field)
+        else:
+            field_host_layout.addWidget(spec.field, 0, spec.field_alignment)
+
+        row_layout.addWidget(label)
+        row_layout.addWidget(field_host, stretch=1)
+        block_layout.addWidget(row)
+        block.setVisible(spec.visible)
+        layout.addWidget(block)
+        rows[spec.key] = LabeledFieldRefs(label=label, row=block)
+
+    return rows
+
+
 def build_button(parent: QWidget, *, spec: ButtonSpec) -> QPushButton:
     button = StableSizeHintButton(spec.text, parent)
     if spec.object_name:
@@ -526,6 +680,78 @@ def build_button(parent: QWidget, *, spec: ButtonSpec) -> QPushButton:
     if spec.on_toggled is not None:
         button.toggled.connect(spec.on_toggled)
     return button
+
+
+def build_button_grid(
+    parent: QWidget,
+    *,
+    widget_config: WidgetConfig | None = None,
+    layout_config: LayoutConfig = LayoutConfig(
+        margins=(0, 0, 0, 0),
+        horizontal_spacing=8,
+        vertical_spacing=0,
+    ),
+    button_specs: Sequence[ButtonSpec],
+) -> tuple[QFrame, QGridLayout, tuple[QPushButton, ...]]:
+    shell = build_grid(
+        parent,
+        widget_cls=QFrame,
+        widget_config=widget_config,
+        layout_config=layout_config,
+    )
+    frame = shell.widget
+    layout = shell.layout
+    buttons: list[QPushButton] = []
+    for index, button_spec in enumerate(button_specs):
+        button = build_button(frame, spec=button_spec)
+        layout.addWidget(button, 0, index)
+        layout.setColumnStretch(index, 1)
+        buttons.append(button)
+    return frame, layout, tuple(buttons)
+
+
+def build_button_panel(
+    parent: QWidget,
+    *,
+    card_config: WidgetConfig | None = None,
+    card_layout_config: LayoutConfig = LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+    host_config: WidgetConfig | None = None,
+    buttons_layout_config: LayoutConfig = LayoutConfig(
+        margins=(0, 0, 0, 0),
+        horizontal_spacing=8,
+        vertical_spacing=0,
+    ),
+    button_specs: Sequence[ButtonSpec],
+) -> ButtonPanelRefs:
+    card_shell = build_vbox(
+        parent,
+        widget_cls=QFrame,
+        widget_config=card_config,
+        layout_config=card_layout_config,
+    )
+    card = card_shell.widget
+    shell_layout = card_shell.layout
+    buttons_host_shell = build_grid(
+        card,
+        widget_config=host_config,
+        layout_config=buttons_layout_config,
+    )
+    buttons_host = buttons_host_shell.widget
+    buttons_layout = buttons_host_shell.layout
+    shell_layout.addWidget(buttons_host, 0, Qt.AlignmentFlag.AlignTop)
+
+    buttons: list[QPushButton] = []
+    for index, button_spec in enumerate(button_specs):
+        button = build_button(buttons_host, spec=button_spec)
+        buttons_layout.addWidget(button, 0, index)
+        buttons_layout.setColumnStretch(index, 1)
+        buttons.append(button)
+    return ButtonPanelRefs(
+        card=card,
+        shell_layout=shell_layout,
+        buttons_layout=buttons_layout,
+        buttons=tuple(buttons),
+    )
 
 
 def build_segmented_rail(

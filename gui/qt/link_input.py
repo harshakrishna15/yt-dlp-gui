@@ -13,9 +13,11 @@ from PySide6.QtWidgets import (
 from .widgets import (
     ButtonSpec,
     LayoutConfig,
+    LineEditSpec,
     WidgetConfig,
     build_button,
     build_hbox,
+    build_line_edit,
 )
 
 
@@ -43,14 +45,23 @@ def build_link_input_module(
     row = row_shell.widget
     row_layout = row_shell.layout
 
-    url_edit = QLineEdit(row)
-    url_edit.setObjectName("urlInputField")
-    url_edit.setFrame(False)
-    url_edit.setMinimumWidth(0)
-    url_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    url_edit.setPlaceholderText("Paste a video or playlist URL")
-    url_edit.textChanged.connect(on_url_changed)
-    url_edit.returnPressed.connect(on_fetch_formats)
+    url_edit = build_line_edit(
+        row,
+        spec=LineEditSpec(
+            widget_config=WidgetConfig(
+                object_name="urlInputField",
+                minimum_width=0,
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            placeholder_text="Paste a video or playlist URL",
+            frame=False,
+            on_text_changed=on_url_changed,
+            on_return_pressed=on_fetch_formats,
+        ),
+    )
 
     paste_button = build_button(
         row,
