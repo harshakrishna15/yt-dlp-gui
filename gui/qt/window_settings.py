@@ -65,12 +65,14 @@ class WindowSettingsMixin:
         refs = qt_panels.build_logs_panel(
             parent=self,
             max_lines=LOG_MAX_LINES,
+            on_export_logs=self._export_logs,
             on_clear_logs=self._clear_logs,
         )
         self.logs_stack = refs.logs_stack
         self._logs_empty_index = refs.logs_empty_index
         self._logs_content_index = refs.logs_content_index
         self.logs_view = refs.logs_view
+        self.logs_export_button = refs.export_logs_button
         self.logs_clear_button = refs.logs_clear_button
         return refs.panel
 
@@ -166,6 +168,40 @@ class WindowSettingsMixin:
         if not output_dir.exists():
             return
         self._effects.desktop.open_path(output_dir)
+
+    def _export_logs(self: "QtYtDlpGui") -> None:
+        if not self._log_lines:
+            return
+
+        timestamp = self._effects.clock.now()
+        try:
+            base_dir = settings_store.prepare_output_dir_path(
+                self.output_dir_edit.text(),
+                ensure_dir=self._effects.filesystem.ensure_dir,
+                default_output_dir=self._default_output_dir(),
+            )
+        except OSError as exc:
+            self._effects.dialogs.critical(
+                self,
+                "Logs export failed",
+                str(exc),
+            )
+            return
+
+        output_path = base_dir / f"yt-dlp-gui-logs-{timestamp:%Y%m%d-%H%M%S}.txt"
+        payload = "\n".join(self._log_lines).rstrip("\n")
+        if payload:
+            payload += "\n"
+        try:
+            self._effects.filesystem.write_text(output_path, payload, encoding="utf-8")
+        except OSError as exc:
+            self._effects.dialogs.critical(self, "Logs export failed", str(exc))
+            return
+        self._append_log(f"[logs] exported {output_path}")
+        self._set_status("Logs exported")
+        self._effects.dialogs.information(
+            self, "Logs exported", f"Saved to:\n{output_path}"
+        )
 
     def _export_diagnostics(self: "QtYtDlpGui") -> None:
         timestamp = self._effects.clock.now()

@@ -4,11 +4,18 @@ from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLineEdit,
     QPushButton,
     QSizePolicy,
     QWidget,
+)
+
+from .widgets import (
+    ButtonSpec,
+    LayoutConfig,
+    WidgetConfig,
+    build_button,
+    build_hbox,
 )
 
 
@@ -28,11 +35,13 @@ def build_link_input_module(
     on_paste_url: Callable[[], None],
     on_analyze_url: Callable[[], None],
 ) -> LinkInputRefs:
-    row = QWidget(parent)
-    row.setObjectName("commandBar")
-    row_layout = QHBoxLayout(row)
-    row_layout.setContentsMargins(0, 0, 1, 0)
-    row_layout.setSpacing(10)
+    row_shell = build_hbox(
+        parent,
+        widget_config=WidgetConfig(object_name="commandBar"),
+        layout_config=LayoutConfig(margins=(0, 0, 1, 0), spacing=10),
+    )
+    row = row_shell.widget
+    row_layout = row_shell.layout
 
     url_edit = QLineEdit(row)
     url_edit.setObjectName("urlInputField")
@@ -43,14 +52,24 @@ def build_link_input_module(
     url_edit.textChanged.connect(on_url_changed)
     url_edit.returnPressed.connect(on_fetch_formats)
 
-    paste_button = QPushButton("Paste", row)
-    paste_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-    paste_button.clicked.connect(on_paste_url)
+    paste_button = build_button(
+        row,
+        spec=ButtonSpec(
+            text="Paste",
+            size_policy=(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed),
+            on_click=on_paste_url,
+        ),
+    )
 
-    analyze_button = QPushButton("Analyze URL", row)
-    analyze_button.setObjectName("analyzeUrlButton")
-    analyze_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-    analyze_button.clicked.connect(on_analyze_url)
+    analyze_button = build_button(
+        row,
+        spec=ButtonSpec(
+            text="Analyze URL",
+            object_name="analyzeUrlButton",
+            size_policy=(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed),
+            on_click=on_analyze_url,
+        ),
+    )
 
     row_layout.addWidget(url_edit, stretch=1)
     row_layout.addWidget(paste_button)

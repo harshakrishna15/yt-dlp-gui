@@ -37,17 +37,6 @@ class ThreadWorkerExecutor:
         worker.start()
 
 
-class InlineWorkerExecutor:
-    def submit(
-        self,
-        target: Callable[..., object],
-        /,
-        *args: object,
-        **kwargs: object,
-    ) -> None:
-        target(*args, **kwargs)
-
-
 class DialogPort(Protocol):
     def critical(self, parent: object, title: str, message: str) -> None:
         ...

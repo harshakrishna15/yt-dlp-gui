@@ -34,6 +34,9 @@ class StatusPresenter:
             else "neutral"
         )
         message = str(text or "").strip()
+        if tone_value == "neutral":
+            self.last_source_feedback_log = None
+            return
         if not message:
             if tone_value == "hidden":
                 self.last_source_feedback_log = None

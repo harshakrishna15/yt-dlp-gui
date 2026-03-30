@@ -5,7 +5,6 @@ APP_REPO_NAME = "yt-dlp-gui"
 APP_DISPLAY_NAME = APP_REPO_NAME
 APP_VERSION = "0.1.0"
 APP_DESCRIPTION = "Fast local downloads."
-APP_WINDOW_SUBTITLE = "Fast local downloads."
 APP_PRIVACY_NOTE = "Downloads stay on this machine."
 APP_SHORTCUT_LINES = (
     "Cmd/Ctrl+L: Focus source actions",

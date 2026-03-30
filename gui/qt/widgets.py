@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, Generic, Sequence, TypeVar
 
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QObject,
+    QPoint,
     QPropertyAnimation,
     QPointF,
     QRect,
@@ -16,27 +17,34 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPen, QStandardItemModel
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
     QAbstractItemView,
     QComboBox,
     QFrame,
+    QGridLayout,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QListWidget,
     QPushButton,
     QProgressBar,
     QSizePolicy,
     QStackedWidget,
     QStyle,
+    QStyleOptionComboBox,
     QStyleOptionViewItem,
     QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
+
+
+TWidget = TypeVar("TWidget", bound=QWidget)
+TLayout = TypeVar("TLayout", bound=QLayout)
 
 
 class _QtSignals(QObject):
@@ -88,6 +96,35 @@ class ButtonSpec:
     focus_policy: Qt.FocusPolicy | None = None
     cursor: Qt.CursorShape | None = None
     stretch: int = 0
+
+
+@dataclass(frozen=True)
+class WidgetConfig:
+    object_name: str | None = None
+    size_policy: tuple[QSizePolicy.Policy, QSizePolicy.Policy] | None = None
+    minimum_width: int | None = None
+    maximum_width: int | None = None
+    fixed_width: int | None = None
+    minimum_height: int | None = None
+    maximum_height: int | None = None
+    fixed_height: int | None = None
+    visible: bool | None = None
+    widget_attributes: tuple[Qt.WidgetAttribute, ...] = ()
+
+
+@dataclass(frozen=True)
+class LayoutConfig:
+    margins: tuple[int, int, int, int] = (0, 0, 0, 0)
+    spacing: int | None = 0
+    horizontal_spacing: int | None = None
+    vertical_spacing: int | None = None
+    size_constraint: QLayout.SizeConstraint | None = None
+
+
+@dataclass(frozen=True)
+class WidgetShell(Generic[TWidget, TLayout]):
+    widget: TWidget
+    layout: TLayout
 
 
 @dataclass(frozen=True)
@@ -337,6 +374,130 @@ def _apply_widget_size(
             widget.setMaximumHeight(maximum_height)
 
 
+def _apply_widget_config(
+    widget: QWidget,
+    *,
+    config: WidgetConfig | None = None,
+) -> None:
+    if config is None:
+        return
+    if config.object_name is not None:
+        widget.setObjectName(config.object_name)
+    for attribute in config.widget_attributes:
+        widget.setAttribute(attribute, True)
+    _apply_widget_size(
+        widget,
+        size_policy=config.size_policy,
+        minimum_width=config.minimum_width,
+        maximum_width=config.maximum_width,
+        fixed_width=config.fixed_width,
+        minimum_height=config.minimum_height,
+        maximum_height=config.maximum_height,
+        fixed_height=config.fixed_height,
+    )
+    if config.visible is not None:
+        widget.setVisible(config.visible)
+
+
+def _apply_layout_config(
+    layout: QLayout,
+    *,
+    config: LayoutConfig,
+) -> None:
+    left, top, right, bottom = config.margins
+    layout.setContentsMargins(left, top, right, bottom)
+    if config.size_constraint is not None:
+        layout.setSizeConstraint(config.size_constraint)
+    if isinstance(layout, QGridLayout):
+        if config.spacing is not None:
+            layout.setHorizontalSpacing(config.spacing)
+            layout.setVerticalSpacing(config.spacing)
+        if config.horizontal_spacing is not None:
+            layout.setHorizontalSpacing(config.horizontal_spacing)
+        if config.vertical_spacing is not None:
+            layout.setVerticalSpacing(config.vertical_spacing)
+        return
+    if config.spacing is not None:
+        layout.setSpacing(config.spacing)
+
+
+def _build_layout_shell(
+    layout_cls: type[TLayout],
+    *,
+    parent: QWidget | None = None,
+    widget: TWidget | None = None,
+    widget_cls: type[TWidget] | None = None,
+    widget_config: WidgetConfig | None = None,
+    layout_config: LayoutConfig = LayoutConfig(),
+) -> WidgetShell[TWidget, TLayout]:
+    target_widget = widget
+    if target_widget is None:
+        resolved_widget_cls = widget_cls or QWidget
+        if parent is None:
+            raise ValueError("parent is required when widget is not provided")
+        target_widget = resolved_widget_cls(parent)
+    elif parent is not None and target_widget.parentWidget() is None:
+        target_widget.setParent(parent)
+    _apply_widget_config(target_widget, config=widget_config)
+    layout = layout_cls(target_widget)
+    _apply_layout_config(layout, config=layout_config)
+    return WidgetShell(widget=target_widget, layout=layout)
+
+
+def build_vbox(
+    parent: QWidget | None = None,
+    *,
+    widget: TWidget | None = None,
+    widget_cls: type[TWidget] | None = None,
+    widget_config: WidgetConfig | None = None,
+    layout_config: LayoutConfig = LayoutConfig(),
+) -> WidgetShell[TWidget, QVBoxLayout]:
+    return _build_layout_shell(
+        QVBoxLayout,
+        parent=parent,
+        widget=widget,
+        widget_cls=widget_cls,
+        widget_config=widget_config,
+        layout_config=layout_config,
+    )
+
+
+def build_hbox(
+    parent: QWidget | None = None,
+    *,
+    widget: TWidget | None = None,
+    widget_cls: type[TWidget] | None = None,
+    widget_config: WidgetConfig | None = None,
+    layout_config: LayoutConfig = LayoutConfig(),
+) -> WidgetShell[TWidget, QHBoxLayout]:
+    return _build_layout_shell(
+        QHBoxLayout,
+        parent=parent,
+        widget=widget,
+        widget_cls=widget_cls,
+        widget_config=widget_config,
+        layout_config=layout_config,
+    )
+
+
+def build_grid(
+    parent: QWidget | None = None,
+    *,
+    widget: TWidget | None = None,
+    widget_cls: type[TWidget] | None = None,
+    widget_config: WidgetConfig | None = None,
+    layout_config: LayoutConfig = LayoutConfig(),
+) -> WidgetShell[TWidget, QGridLayout]:
+    return _build_layout_shell(
+        QGridLayout,
+        parent=parent,
+        widget=widget,
+        widget_cls=widget_cls,
+        widget_config=widget_config,
+        layout_config=layout_config,
+    )
+
+
 def build_button(parent: QWidget, *, spec: ButtonSpec) -> QPushButton:
     button = StableSizeHintButton(spec.text, parent)
     if spec.object_name:
@@ -411,12 +572,43 @@ class _QueueItemDelegate(QStyledItemDelegate):
     _EDIT_WIDTH = 54
     _EDIT_HEIGHT = 24
     _REMOVE_SIZE = 22
+    _REMOVE_ICON_INSET = 6.2
     _REMOVE_BG = QColor("#322523")
+    _REMOVE_BG_HOVER = QColor("#44302d")
     _REMOVE_BORDER = QColor("#6e4741")
+    _REMOVE_BORDER_HOVER = QColor("#8b5d56")
     _REMOVE_TEXT = QColor("#f2d6cf")
+    _REMOVE_TEXT_HOVER = QColor("#fff1ec")
     _EDIT_BG = QColor("#223a34")
+    _EDIT_BG_HOVER = QColor("#29463f")
     _EDIT_BORDER = QColor("#347c66")
+    _EDIT_BORDER_HOVER = QColor("#41a085")
     _EDIT_TEXT = QColor("#86d7b7")
+    _EDIT_TEXT_HOVER = QColor("#c8f2df")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._hovered_row = -1
+        self._hovered_action: str | None = None
+
+    def set_hovered_action(self, row: int | None, action: str | None) -> bool:
+        normalized_action = action if action in {"edit", "remove"} else None
+        normalized_row = int(row) if normalized_action is not None and row is not None else -1
+        changed = (
+            self._hovered_row != normalized_row
+            or self._hovered_action != normalized_action
+        )
+        self._hovered_row = normalized_row
+        self._hovered_action = normalized_action
+        return changed
+
+    def hovered_action(self) -> tuple[int | None, str | None]:
+        if self._hovered_action is None or self._hovered_row < 0:
+            return (None, None)
+        return (self._hovered_row, self._hovered_action)
+
+    def _action_hovered(self, row: int, action: str) -> bool:
+        return self._hovered_row == int(row) and self._hovered_action == action
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
         size = super().sizeHint(option, index)
@@ -528,25 +720,41 @@ class _QueueItemDelegate(QStyledItemDelegate):
         if editable:
             edit_rect = self.edit_button_rect(view_option.rect)
             remove_rect = self.remove_button_rect(view_option.rect)
+            edit_hovered = self._action_hovered(index.row(), "edit")
+            remove_hovered = self._action_hovered(index.row(), "remove")
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setPen(QPen(self._EDIT_BORDER))
-            painter.setBrush(self._EDIT_BG)
+            painter.setPen(
+                QPen(self._EDIT_BORDER_HOVER if edit_hovered else self._EDIT_BORDER)
+            )
+            painter.setBrush(self._EDIT_BG_HOVER if edit_hovered else self._EDIT_BG)
             painter.drawRoundedRect(edit_rect.adjusted(0, 0, -1, -1), 12, 12)
-            painter.setPen(self._EDIT_TEXT)
+            painter.setPen(self._EDIT_TEXT_HOVER if edit_hovered else self._EDIT_TEXT)
             painter.drawText(
                 edit_rect,
                 int(Qt.AlignmentFlag.AlignCenter),
                 "Edit",
             )
             remove_frame = QRectF(remove_rect).adjusted(0.5, 0.5, -0.5, -0.5)
-            painter.setPen(QPen(self._REMOVE_BORDER))
-            painter.setBrush(self._REMOVE_BG)
+            painter.setPen(
+                QPen(
+                    self._REMOVE_BORDER_HOVER if remove_hovered else self._REMOVE_BORDER
+                )
+            )
+            painter.setBrush(self._REMOVE_BG_HOVER if remove_hovered else self._REMOVE_BG)
             painter.drawEllipse(remove_frame)
-            icon_pen = QPen(self._REMOVE_TEXT, 1.8)
+            icon_pen = QPen(
+                self._REMOVE_TEXT_HOVER if remove_hovered else self._REMOVE_TEXT,
+                1.8,
+            )
             icon_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(icon_pen)
-            icon_bounds = remove_frame.adjusted(5.4, 5.4, -5.4, -5.4)
+            icon_bounds = remove_frame.adjusted(
+                self._REMOVE_ICON_INSET,
+                self._REMOVE_ICON_INSET,
+                -self._REMOVE_ICON_INSET,
+                -self._REMOVE_ICON_INSET,
+            )
             painter.drawLine(icon_bounds.topLeft(), icon_bounds.bottomRight())
             painter.drawLine(icon_bounds.bottomLeft(), icon_bounds.topRight())
             painter.restore()
@@ -588,6 +796,8 @@ class QueueListWidget(QListWidget):
         self.setItemDelegate(self._delegate)
         self._delegate.edit_requested.connect(self._emit_edit_requested)
         self._delegate.remove_requested.connect(self._emit_remove_requested)
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setAutoScroll(True)
         self.setAutoScrollMargin(self._DRAG_EDGE_AUTOSCROLL_MARGIN)
@@ -609,12 +819,57 @@ class QueueListWidget(QListWidget):
             if self._queue_editable
             else QAbstractItemView.DragDropMode.NoDragDrop
         )
+        self._set_hovered_inline_action(None, None)
         self.setDragEnabled(self._queue_editable)
         self.setAcceptDrops(self._queue_editable)
         self.viewport().setAcceptDrops(self._queue_editable)
         self.setDropIndicatorShown(self._queue_editable)
         self.setDragDropMode(drag_drop_mode)
         self.viewport().update()
+
+    def hovered_inline_action(self) -> tuple[int | None, str | None]:
+        return self._delegate.hovered_action()
+
+    def _inline_action_at(self, pos: QPoint) -> tuple[int | None, str | None]:
+        if not self._queue_editable:
+            return (None, None)
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return (None, None)
+        row = int(index.row())
+        rect = self.visualRect(index)
+        if self._delegate.edit_button_rect(rect).contains(pos):
+            return (row, "edit")
+        if self._delegate.remove_button_rect(rect).contains(pos):
+            return (row, "remove")
+        return (None, None)
+
+    def _set_hovered_inline_action(
+        self,
+        row: int | None,
+        action: str | None,
+    ) -> None:
+        if not self._delegate.set_hovered_action(row, action):
+            if action is None:
+                self.viewport().unsetCursor()
+            else:
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+            return
+        if action is None:
+            self.viewport().unsetCursor()
+        else:
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        self.viewport().update()
+
+    def mouseMoveEvent(self, event) -> None:
+        pos = event.position().toPoint() if hasattr(event, "position") else QPoint()
+        self._set_hovered_inline_action(*self._inline_action_at(pos))
+        super().mouseMoveEvent(event)
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.Type.Leave:
+            self._set_hovered_inline_action(None, None)
+        return super().viewportEvent(event)
 
     def remove_button_rect(self, row: int) -> QRect:
         item = self.item(int(row))
@@ -890,6 +1145,22 @@ class _NativeComboBox(QComboBox):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._before_popup_callback: Callable[[], None] | None = None
+
+    def initStyleOption(self, option: QStyleOptionComboBox) -> None:  # type: ignore[override]
+        super().initStyleOption(option)
+        if option.currentText or self.currentIndex() >= 0:
+            return
+        placeholder = self.placeholderText().strip()
+        if not placeholder:
+            return
+        option.currentText = placeholder
+        placeholder_color = option.palette.color(QPalette.ColorRole.PlaceholderText)
+        if not placeholder_color.isValid() or placeholder_color.alpha() == 0:
+            placeholder_color = QColor(option.palette.color(QPalette.ColorRole.ButtonText))
+            placeholder_color.setAlpha(190)
+        option.palette.setColor(QPalette.ColorRole.ButtonText, placeholder_color)
+        option.palette.setColor(QPalette.ColorRole.Text, placeholder_color)
+        option.palette.setColor(QPalette.ColorRole.WindowText, placeholder_color)
 
     def set_before_popup_callback(
         self, callback: Callable[[], None] | None

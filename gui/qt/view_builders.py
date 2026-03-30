@@ -31,15 +31,20 @@ from .constants import OUTPUT_CARD_STACK_GAP
 from .link_input import LinkInputRefs, build_link_input_module
 from .widgets import (
     ButtonSpec,
+    LayoutConfig,
     NativeComboBoxConfig,
     QueueEmptyStateWidget,
     SegmentedRailSpec,
     SourceToastRefs,
+    WidgetConfig,
     _NativeComboBox,
     build_button,
+    build_grid,
+    build_hbox,
     build_native_combo,
     build_segmented_rail,
     build_source_feedback_toast,
+    build_vbox,
 )
 
 
@@ -102,6 +107,8 @@ class DownloadsViewRefs:
     audio_radio: QPushButton
     content_type_label: QLabel
     content_type_row: QWidget
+    playlist_length_group: QWidget
+    playlist_length_edit: QLineEdit
     container_combo: _NativeComboBox
     convert_check: QCheckBox
     container_label: QLabel
@@ -188,6 +195,8 @@ class _OutputSectionRefs:
     audio_radio: QPushButton
     content_type_label: QLabel
     content_type_row: QWidget
+    playlist_length_group: QWidget
+    playlist_length_edit: QLineEdit
     container_combo: _NativeComboBox
     convert_check: QCheckBox
     container_label: QLabel
@@ -230,19 +239,26 @@ class _LabeledRowSpec:
 class TopBarBuilder:
     @staticmethod
     def build(parent: QWidget) -> TopBarRefs:
-        header = QWidget(parent)
-        header.setObjectName("topBarShell")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(0)
-
-        top_actions = QWidget(header)
-        top_actions.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        header_shell = build_hbox(
+            parent,
+            widget_config=WidgetConfig(object_name="topBarShell"),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
         )
-        top_actions_layout = QHBoxLayout(top_actions)
-        top_actions_layout.setContentsMargins(0, 0, 4, 0)
-        top_actions_layout.setSpacing(8)
+        header = header_shell.widget
+        header_layout = header_shell.layout
+
+        top_actions_shell = build_hbox(
+            header,
+            widget_config=WidgetConfig(
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 4, 0), spacing=8),
+        )
+        top_actions = top_actions_shell.widget
+        top_actions_layout = top_actions_shell.layout
 
         classic_actions, classic_buttons = build_segmented_rail(
             top_actions,
@@ -322,18 +338,28 @@ class TopBarBuilder:
 class RunSectionBuilder:
     @staticmethod
     def build(parent: QWidget, callbacks: RunSectionCallbacks) -> RunSectionRefs:
-        run_state_host = QWidget(parent)
-        run_state_host.setObjectName("runStateHost")
-        run_state_host.setFixedSize(0, 0)
+        run_state_host_shell = build_vbox(
+            parent,
+            widget_config=WidgetConfig(
+                object_name="runStateHost",
+                fixed_width=0,
+                fixed_height=0,
+                visible=False,
+                widget_attributes=(Qt.WidgetAttribute.WA_DontShowOnScreen,),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+        )
+        run_state_host = run_state_host_shell.widget
         run_state_host.move(-10_000, -10_000)
-        run_state_host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-        run_state_host.hide()
 
-        activity_card = QFrame(run_state_host)
-        activity_card.setObjectName("runActivityCard")
-        activity_layout = QVBoxLayout(activity_card)
-        activity_layout.setContentsMargins(16, 16, 16, 16)
-        activity_layout.setSpacing(12)
+        activity_card_shell = build_vbox(
+            run_state_host,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(object_name="runActivityCard"),
+            layout_config=LayoutConfig(margins=(16, 16, 16, 16), spacing=12),
+        )
+        activity_card = activity_card_shell.widget
+        activity_layout = activity_card_shell.layout
 
         status_value = QLabel("Idle", activity_card)
         status_value.setObjectName("statusLine")
@@ -341,23 +367,37 @@ class RunSectionBuilder:
 
         activity_layout.addWidget(status_value)
 
-        actions_card = QFrame(parent)
-        actions_card.setObjectName("runActionCard")
-        actions_card.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        actions_card_shell = build_vbox(
+            parent,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(
+                object_name="runActionCard",
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
         )
-        buttons_shell_layout = QVBoxLayout(actions_card)
-        buttons_shell_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_shell_layout.setSpacing(0)
+        actions_card = actions_card_shell.widget
+        buttons_shell_layout = actions_card_shell.layout
 
-        buttons_host = QWidget(actions_card)
-        buttons_host.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        buttons_host_shell = build_grid(
+            actions_card,
+            widget_config=WidgetConfig(
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(
+                margins=(0, 0, 0, 0),
+                horizontal_spacing=8,
+                vertical_spacing=0,
+            ),
         )
-        buttons_layout = QGridLayout(buttons_host)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setHorizontalSpacing(8)
-        buttons_layout.setVerticalSpacing(0)
+        buttons_host = buttons_host_shell.widget
+        buttons_layout = buttons_host_shell.layout
         buttons_shell_layout.addWidget(buttons_host, 0, Qt.AlignmentFlag.AlignTop)
 
         action_button_policy = (
@@ -418,10 +458,12 @@ def _build_section_header(
     compact: bool,
     meta: str | None = None,
 ) -> QWidget:
-    header = QWidget(parent)
-    header_layout = QHBoxLayout(header)
-    header_layout.setContentsMargins(0, 0, 0, 0)
-    header_layout.setSpacing(10)
+    header_shell = build_hbox(
+        parent,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
+    )
+    header = header_shell.widget
+    header_layout = header_shell.layout
 
     title_label = QLabel(title, header)
     title_label.setObjectName("cardHeaderTitle" if compact else "sectionHeaderTitle")
@@ -462,21 +504,28 @@ def _add_labeled_row(
     field_spacing: int = 20,
     field_alignment: Qt.Alignment | None = None,
 ) -> QWidget:
-    block = QWidget(parent)
-    block.setObjectName("outputCardBlock")
-    block_layout = QVBoxLayout(block)
-    block_layout.setContentsMargins(0, 0, 0, 0)
-    block_layout.setSpacing(4)
+    block_shell = build_vbox(
+        parent,
+        widget_config=WidgetConfig(object_name="outputCardBlock"),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=4),
+    )
+    block = block_shell.widget
+    block_layout = block_shell.layout
 
-    row = QWidget(block)
-    row_layout = QHBoxLayout(row)
-    row_layout.setContentsMargins(0, 0, 0, 0)
-    row_layout.setSpacing(field_spacing)
+    row_shell = build_hbox(
+        block,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=field_spacing),
+    )
+    row = row_shell.widget
+    row_layout = row_shell.layout
 
-    field_host = QWidget(row)
-    field_host_layout = QVBoxLayout(field_host)
-    field_host_layout.setContentsMargins(0, 0, 0, 0)
-    field_host_layout.setSpacing(0)
+    field_host_shell = build_vbox(
+        row,
+        widget_config=WidgetConfig(object_name="outputFieldHost"),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+    )
+    field_host = field_host_shell.widget
+    field_host_layout = field_host_shell.layout
     if field_alignment is None:
         field_host_layout.addWidget(field)
     else:
@@ -515,11 +564,13 @@ def _add_save_block(
     label: QLabel,
     field: QWidget,
 ) -> QWidget:
-    block = QWidget(parent)
-    block.setObjectName("outputCardBlock")
-    block_layout = QVBoxLayout(block)
-    block_layout.setContentsMargins(8, 5, 8, 5)
-    block_layout.setSpacing(5)
+    block_shell = build_vbox(
+        parent,
+        widget_config=WidgetConfig(object_name="outputCardBlock"),
+        layout_config=LayoutConfig(margins=(8, 5, 8, 5), spacing=5),
+    )
+    block = block_shell.widget
+    block_layout = block_shell.layout
     block_layout.addWidget(label)
     block_layout.addWidget(field)
     layout.addWidget(block)
@@ -532,28 +583,42 @@ class DownloadsViewBuilder:
         parent: QWidget,
         callbacks: DownloadsViewCallbacks,
     ) -> _DownloadsStateRefs:
-        state_host = QWidget(parent)
-        state_host.setObjectName("downloadsStateHost")
-        state_host.setFixedSize(0, 0)
+        state_host_shell = build_vbox(
+            parent,
+            widget_config=WidgetConfig(
+                object_name="downloadsStateHost",
+                fixed_width=0,
+                fixed_height=0,
+                visible=False,
+                widget_attributes=(Qt.WidgetAttribute.WA_DontShowOnScreen,),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+        )
+        state_host = state_host_shell.widget
         state_host.move(-10_000, -10_000)
-        state_host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-        state_host.hide()
 
-        source_details_block = QWidget(state_host)
-        source_details_block_layout = QVBoxLayout(source_details_block)
-        source_details_block_layout.setContentsMargins(0, 0, 0, 0)
-        source_details_block_layout.setSpacing(4)
+        source_details_block_shell = build_vbox(
+            state_host,
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=4),
+        )
+        source_details_block = source_details_block_shell.widget
+        source_details_block_layout = source_details_block_shell.layout
         source_details_label = QLabel("", source_details_block)
         source_details_label.setObjectName("sectionFormLabel")
         source_details_block_layout.addWidget(source_details_label)
 
-        source_details_host = QWidget(source_details_block)
-        source_details_host.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        source_details_host_shell = build_vbox(
+            source_details_block,
+            widget_config=WidgetConfig(
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
         )
-        source_details_layout = QVBoxLayout(source_details_host)
-        source_details_layout.setContentsMargins(0, 0, 0, 0)
-        source_details_layout.setSpacing(0)
+        source_details_host = source_details_host_shell.widget
+        source_details_layout = source_details_host_shell.layout
         source_details_stack = QStackedWidget(source_details_host)
         source_details_stack.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -563,10 +628,12 @@ class DownloadsViewBuilder:
         source_details_empty = QWidget(source_details_stack)
         source_details_stack.addWidget(source_details_empty)
 
-        playlist_items_panel = QWidget(source_details_stack)
-        playlist_items_layout = QHBoxLayout(playlist_items_panel)
-        playlist_items_layout.setContentsMargins(0, 1, 0, 1)
-        playlist_items_layout.setSpacing(0)
+        playlist_items_panel_shell = build_hbox(
+            source_details_stack,
+            layout_config=LayoutConfig(margins=(0, 1, 0, 1), spacing=0),
+        )
+        playlist_items_panel = playlist_items_panel_shell.widget
+        playlist_items_layout = playlist_items_panel_shell.layout
         playlist_items_edit = QLineEdit(playlist_items_panel)
         playlist_items_edit.setPlaceholderText("Optional: 1-5,7,10-")
         playlist_items_edit.setSizePolicy(
@@ -596,11 +663,13 @@ class DownloadsViewBuilder:
         register_native_combo: Callable[[_NativeComboBox], None],
         callbacks: DownloadsViewCallbacks,
     ) -> DownloadsViewRefs:
-        main_page = QWidget(panel_stack)
-        main_page.setObjectName("downloadsPage")
-        main_layout = QVBoxLayout(main_page)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(18)
+        main_page_shell = build_vbox(
+            panel_stack,
+            widget_config=WidgetConfig(object_name="downloadsPage"),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=18),
+        )
+        main_page = main_page_shell.widget
+        main_layout = main_page_shell.layout
 
         downloads_state = DownloadsViewBuilder._build_downloads_state(
             main_page, callbacks
@@ -613,10 +682,12 @@ class DownloadsViewBuilder:
         run = RunSectionBuilder.build(main_page, callbacks.run)
         output.layout.insertWidget(max(0, output.layout.count() - 1), run.actions_card)
 
-        workspace = QWidget(main_page)
-        workspace_layout = QHBoxLayout(workspace)
-        workspace_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_layout.setSpacing(18)
+        workspace_shell = build_hbox(
+            main_page,
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=18),
+        )
+        workspace = workspace_shell.widget
+        workspace_layout = workspace_shell.layout
         workspace_layout.addWidget(output.section, stretch=1)
         main_layout.addWidget(workspace, stretch=1)
 
@@ -645,6 +716,8 @@ class DownloadsViewBuilder:
             audio_radio=output.audio_radio,
             content_type_label=output.content_type_label,
             content_type_row=output.content_type_row,
+            playlist_length_group=output.playlist_length_group,
+            playlist_length_edit=output.playlist_length_edit,
             container_combo=output.container_combo,
             convert_check=output.convert_check,
             container_label=output.container_label,
@@ -682,19 +755,26 @@ class DownloadsViewBuilder:
         register_native_combo: Callable[[_NativeComboBox], None],
         callbacks: DownloadsViewCallbacks,
     ) -> _OutputSectionRefs:
-        output_section = QWidget(parent)
-        output_section.setObjectName("outputSection")
-        output_shell_layout = QVBoxLayout(output_section)
-        output_shell_layout.setContentsMargins(0, 0, 0, 0)
-        output_shell_layout.setSpacing(10)
+        output_section_shell = build_vbox(
+            parent,
+            widget_config=WidgetConfig(object_name="outputSection"),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
+        )
+        output_section = output_section_shell.widget
+        output_shell_layout = output_section_shell.layout
 
         output_content = QWidget(output_section)
         output_shell_layout.addWidget(output_content, stretch=1)
-        output_layout = QVBoxLayout(output_content)
-        # Keep a one-pixel safety inset so right-edge button borders do not clip
-        # against the output section boundary at compact widths.
-        output_layout.setContentsMargins(0, 0, 1, 0)
-        output_layout.setSpacing(OUTPUT_CARD_STACK_GAP)
+        output_content_shell = build_vbox(
+            widget=output_content,
+            layout_config=LayoutConfig(
+                # Keep a one-pixel safety inset so right-edge button borders do not
+                # clip against the output section boundary at compact widths.
+                margins=(0, 0, 1, 0),
+                spacing=OUTPUT_CARD_STACK_GAP,
+            ),
+        )
+        output_layout = output_content_shell.layout
 
         link_input = build_link_input_module(
             output_content,
@@ -705,16 +785,24 @@ class DownloadsViewBuilder:
         )
         output_layout.addWidget(link_input.row)
 
-        format_card = QGroupBox("", output_section)
-        format_card.setObjectName("formatSection")
-        format_card.setMinimumWidth(0)
-        format_card.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        format_card_shell = build_vbox(
+            widget=QGroupBox("", output_section),
+            widget_config=WidgetConfig(
+                object_name="formatSection",
+                minimum_width=0,
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(
+                margins=(18, 18, 18, 14),
+                spacing=14,
+                size_constraint=QLayout.SizeConstraint.SetDefaultConstraint,
+            ),
         )
-        format_layout = QVBoxLayout(format_card)
-        format_layout.setContentsMargins(18, 18, 18, 14)
-        format_layout.setSpacing(14)
-        format_layout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
+        format_card = format_card_shell.widget
+        format_layout = format_card_shell.layout
         format_layout.addWidget(
             _build_section_header(format_card, "OUTPUT", compact=True)
         )
@@ -766,11 +854,64 @@ class DownloadsViewBuilder:
             raise TypeError("content mode rail must use a horizontal layout")
         video_radio, audio_radio = mode_buttons
         content_type_label = QLabel("Content type", format_card)
+        content_type_field_shell = build_hbox(
+            format_card,
+            widget_config=WidgetConfig(
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+        )
+        content_type_field = content_type_field_shell.widget
+        content_type_field_layout = content_type_field_shell.layout
+        content_type_field_layout.addStretch(1)
+        content_type_field_layout.addWidget(
+            mode_row,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        playlist_length_group_shell = build_hbox(
+            content_type_field,
+            widget_config=WidgetConfig(
+                size_policy=(
+                    QSizePolicy.Policy.Fixed,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
+        )
+        playlist_length_group = playlist_length_group_shell.widget
+        playlist_length_group_layout = playlist_length_group_shell.layout
+
+        playlist_length_label = QLabel("Playlist range", playlist_length_group)
+        playlist_length_label.setObjectName("sectionFormLabel")
+
+        playlist_length_edit = QLineEdit(playlist_length_group)
+        playlist_length_edit.setPlaceholderText("Range")
+        playlist_length_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        playlist_length_edit.setMinimumWidth(0)
+
+        playlist_length_group_layout.addWidget(playlist_length_label)
+        playlist_length_group_layout.addWidget(playlist_length_edit)
+        playlist_length_group.setVisible(False)
+        content_type_field_layout.addWidget(
+            playlist_length_group,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
 
         container_combo = build_native_combo(
             format_card,
             register_native_combo=register_native_combo,
-            config=NativeComboBoxConfig(minimum_width=190),
+            config=NativeComboBoxConfig(
+                minimum_width=190,
+                hint_text="Select container",
+            ),
         )
         container_combo.currentIndexChanged.connect(callbacks.on_container_change)
         convert_check = QCheckBox("Convert WebM to MP4", format_card)
@@ -821,9 +962,7 @@ class DownloadsViewBuilder:
             _LabeledRowSpec(
                 key="content_type",
                 label=content_type_label,
-                field=mode_row,
-                field_alignment=Qt.AlignmentFlag.AlignLeft
-                | Qt.AlignmentFlag.AlignVCenter,
+                field=content_type_field,
             ),
             _LabeledRowSpec(
                 key="container",
@@ -857,38 +996,60 @@ class DownloadsViewBuilder:
         format_row = output_row_map["format"]
         output_form_rows = [output_row_map[spec.key] for spec in output_row_specs]
 
-        save_card = QWidget(format_card)
-        save_card.setObjectName("saveSection")
-        save_card.setMinimumWidth(0)
-        save_card.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        save_card_shell = build_vbox(
+            format_card,
+            widget_config=WidgetConfig(
+                object_name="saveSection",
+                minimum_width=0,
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(
+                margins=(0, 0, 0, 0),
+                spacing=format_layout.spacing(),
+                size_constraint=QLayout.SizeConstraint.SetDefaultConstraint,
+            ),
         )
-        save_layout = QVBoxLayout(save_card)
-        save_layout.setContentsMargins(0, 0, 0, 0)
-        save_layout.setSpacing(format_layout.spacing())
-        save_layout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
+        save_card = save_card_shell.widget
+        save_layout = save_card_shell.layout
         filename_edit = QLineEdit(save_card)
         filename_edit.setPlaceholderText("Optional...")
         file_name_label = QLabel("File name", save_card)
         file_name_label.setObjectName("outputFormLabel")
 
-        folder_row = QWidget(save_card)
-        folder_row.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        folder_row_shell = build_vbox(
+            save_card,
+            widget_config=WidgetConfig(
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+            ),
+            layout_config=LayoutConfig(
+                margins=(0, 0, 0, 0),
+                spacing=12,
+                size_constraint=QLayout.SizeConstraint.SetMinimumSize,
+            ),
         )
-        folder_row_layout = QVBoxLayout(folder_row)
-        folder_row_layout.setContentsMargins(0, 0, 0, 0)
-        folder_row_layout.setSpacing(12)
-        folder_row_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        folder_row = folder_row_shell.widget
+        folder_row_layout = folder_row_shell.layout
         output_dir_edit = QLineEdit(str(Path.home() / "Downloads"), folder_row)
         output_dir_edit.setReadOnly(True)
         output_dir_edit.setMinimumWidth(0)
-        browse_button = QPushButton("Browse...", folder_row)
-        browse_button.setObjectName("compactButton")
-        browse_button.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        browse_button = build_button(
+            folder_row,
+            spec=ButtonSpec(
+                text="Browse...",
+                object_name="compactButton",
+                size_policy=(
+                    QSizePolicy.Policy.Fixed,
+                    QSizePolicy.Policy.Fixed,
+                ),
+                on_click=callbacks.on_pick_folder,
+            ),
         )
-        browse_button.clicked.connect(callbacks.on_pick_folder)
         folder_row_layout.addWidget(output_dir_edit)
         folder_row_layout.addWidget(browse_button)
         output_folder_label = QLabel("Folder", save_card)
@@ -916,27 +1077,35 @@ class DownloadsViewBuilder:
 
         format_layout.addWidget(save_card)
 
-        metrics_card = QFrame(output_content)
-        metrics_card.setObjectName("progressCard")
-        metrics_card_layout = QVBoxLayout(metrics_card)
-        metrics_card_layout.setContentsMargins(16, 14, 16, 16)
-        metrics_card_layout.setSpacing(12)
+        metrics_card_shell = build_vbox(
+            output_content,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(object_name="progressCard"),
+            layout_config=LayoutConfig(margins=(16, 14, 16, 16), spacing=12),
+        )
+        metrics_card = metrics_card_shell.widget
+        metrics_card_layout = metrics_card_shell.layout
 
         progress_bar = QProgressBar(metrics_card)
         progress_bar.setRange(0, 1000)
         progress_bar.setValue(0)
         progress_bar.setTextVisible(False)
 
-        metrics_details = QWidget(metrics_card)
-        metrics_details_layout = QHBoxLayout(metrics_details)
-        metrics_details_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_details_layout.setSpacing(20)
+        metrics_details_shell = build_hbox(
+            metrics_card,
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=20),
+        )
+        metrics_details = metrics_details_shell.widget
+        metrics_details_layout = metrics_details_shell.layout
 
-        metrics_strip = QFrame(metrics_details)
-        metrics_strip.setObjectName("metricsStrip")
-        metrics_layout = QHBoxLayout(metrics_strip)
-        metrics_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_layout.setSpacing(18)
+        metrics_strip_shell = build_hbox(
+            metrics_details,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(object_name="metricsStrip"),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=18),
+        )
+        metrics_strip = metrics_strip_shell.widget
+        metrics_layout = metrics_strip_shell.layout
         progress_label = QLabel("Progress: -", metrics_strip)
         progress_label.setObjectName("metricInline")
         progress_label.setSizePolicy(
@@ -949,9 +1118,7 @@ class DownloadsViewBuilder:
         )
         eta_label = QLabel("ETA: -", metrics_strip)
         eta_label.setObjectName("metricInline")
-        eta_label.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred
-        )
+        eta_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         item_label = QLabel("Item: -", metrics_strip)
         item_label.setObjectName("metricInlineItem")
         item_label.setMinimumWidth(0)
@@ -979,6 +1146,8 @@ class DownloadsViewBuilder:
             audio_radio=audio_radio,
             content_type_label=content_type_label,
             content_type_row=content_type_row,
+            playlist_length_group=playlist_length_group,
+            playlist_length_edit=playlist_length_edit,
             container_combo=container_combo,
             convert_check=convert_check,
             container_label=container_label,
@@ -1017,11 +1186,13 @@ class MainUiBuilder:
         register_native_combo: Callable[[_NativeComboBox], None],
         callbacks: DownloadsViewCallbacks,
     ) -> UiRefs:
-        root = QWidget(window)
-        root.setObjectName("appRoot")
-        root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(22, 18, 22, 18)
-        root_layout.setSpacing(14)
+        root_shell = build_vbox(
+            window,
+            widget_config=WidgetConfig(object_name="appRoot"),
+            layout_config=LayoutConfig(margins=(22, 18, 22, 18), spacing=14),
+        )
+        root = root_shell.widget
+        root_layout = root_shell.layout
 
         top_bar = TopBarBuilder.build(root)
         root_layout.addWidget(top_bar.header)
@@ -1030,23 +1201,29 @@ class MainUiBuilder:
         panel_stack.setObjectName("panelStack")
         root_layout.addWidget(panel_stack, stretch=1)
 
-        mixed_url_overlay = QFrame(root)
-        mixed_url_overlay.setObjectName("mixedUrlOverlay")
-        mixed_url_overlay_layout = QVBoxLayout(mixed_url_overlay)
-        mixed_url_overlay_layout.setContentsMargins(18, 16, 18, 16)
-        mixed_url_overlay_layout.setSpacing(0)
+        mixed_url_overlay_shell = build_vbox(
+            root,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(object_name="mixedUrlOverlay"),
+            layout_config=LayoutConfig(margins=(18, 16, 18, 16), spacing=0),
+        )
+        mixed_url_overlay = mixed_url_overlay_shell.widget
+        mixed_url_overlay_layout = mixed_url_overlay_shell.layout
         mixed_url_overlay_layout.addStretch(1)
 
-        mixed_url_alert = QFrame(mixed_url_overlay)
-        mixed_url_alert.setObjectName("mixedUrlAlert")
+        mixed_url_alert_shell = build_vbox(
+            mixed_url_overlay,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(object_name="mixedUrlAlert"),
+            layout_config=LayoutConfig(margins=(12, 10, 12, 14), spacing=8),
+        )
+        mixed_url_alert = mixed_url_alert_shell.widget
         mixed_shadow = QGraphicsDropShadowEffect(mixed_url_alert)
         mixed_shadow.setBlurRadius(24)
         mixed_shadow.setOffset(0, 6)
         mixed_shadow.setColor(QColor(15, 91, 81, 68))
         mixed_url_alert.setGraphicsEffect(mixed_shadow)
-        mixed_alert_layout = QVBoxLayout(mixed_url_alert)
-        mixed_alert_layout.setContentsMargins(12, 10, 12, 14)
-        mixed_alert_layout.setSpacing(8)
+        mixed_alert_layout = mixed_url_alert_shell.layout
         mixed_url_alert_label = QLabel(
             "Download this URL as a single video or as a playlist?",
             mixed_url_alert,
@@ -1054,10 +1231,12 @@ class MainUiBuilder:
         mixed_url_alert_label.setObjectName("mixedUrlAlertTitle")
         mixed_url_alert_label.setWordWrap(True)
         mixed_alert_layout.addWidget(mixed_url_alert_label)
-        mixed_buttons = QWidget(mixed_url_alert)
-        mixed_buttons_layout = QHBoxLayout(mixed_buttons)
-        mixed_buttons_layout.setContentsMargins(0, 0, 0, 2)
-        mixed_buttons_layout.setSpacing(4)
+        mixed_buttons_shell = build_hbox(
+            mixed_url_alert,
+            layout_config=LayoutConfig(margins=(0, 0, 0, 2), spacing=4),
+        )
+        mixed_buttons = mixed_buttons_shell.widget
+        mixed_buttons_layout = mixed_buttons_shell.layout
         use_single_video_url_button = build_button(
             mixed_buttons,
             spec=ButtonSpec(

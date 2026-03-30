@@ -553,6 +553,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.audio_radio = downloads.audio_radio
         self.content_type_label = downloads.content_type_label
         self.content_type_row = downloads.content_type_row
+        self.playlist_length_group = downloads.playlist_length_group
+        self.playlist_length_edit = downloads.playlist_length_edit
         self.container_combo = downloads.container_combo
         self.convert_check = downloads.convert_check
         self.container_label = downloads.container_label
@@ -591,6 +593,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.start_button = run.start_button
         self.add_queue_button = run.add_queue_button
         self.cancel_button = run.cancel_button
+
+        self.playlist_items_edit.textChanged.connect(
+            lambda _text: self._sync_playlist_length_from_items()
+        )
+        self.playlist_length_edit.textChanged.connect(self._on_playlist_length_changed)
 
     def _register_native_combo(self, combo: _NativeComboBox) -> None:
         combo.setMinimumHeight(27)
@@ -855,6 +862,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         source_row_inputs = (self.url_edit,)
         text_inputs = (
             self.playlist_items_edit,
+            self.playlist_length_edit,
             self.filename_edit,
             self.output_dir_edit,
         )
@@ -888,6 +896,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.add_queue_button,
             self.cancel_button,
             self.export_diagnostics_button,
+            self.logs_export_button,
             self.logs_clear_button,
         ):
             button.setMinimumHeight(control_height)
@@ -926,6 +935,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 + spacing_total,
                 content_mode_button_height + vertical_inset,
             )
+            self._lock_widget_width(self.playlist_length_group, mode_row.width())
 
         toggle_height = max(
             23 if compact_height else 25,
@@ -1097,6 +1107,50 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self.url_edit.setMinimumWidth(url_width)
 
+    def _output_field_hosts(self) -> tuple[QWidget, ...]:
+        if self.format_card is None:
+            return ()
+        return tuple(self.format_card.findChildren(QWidget, "outputFieldHost"))
+
+    def _trim_output_field_lengths(
+        self,
+        *,
+        min_host_width_for_trim: int = 340,
+        trim_px: int = 12,
+    ) -> None:
+        hosts = self._output_field_hosts()
+        if not hosts:
+            return
+
+        folder_row = self.output_dir_edit.parentWidget()
+        folder_host = folder_row.parentWidget() if folder_row is not None else None
+        min_folder_field_width = (
+            220
+            + self.browse_button.minimumSizeHint().width()
+            + max(0, self.folder_row_layout.spacing())
+        )
+
+        for host in hosts:
+            host_layout = host.layout()
+            if host_layout is None:
+                continue
+            margins = host_layout.contentsMargins()
+            host_width = max(host.contentsRect().width(), host.width())
+            target_inset = 0
+            if self._output_layout_mode == "split" and host_width >= min_host_width_for_trim:
+                target_inset = trim_px
+                if host is folder_host:
+                    target_inset = min(
+                        target_inset,
+                        max(0, host_width - min_folder_field_width),
+                    )
+            host_layout.setContentsMargins(
+                target_inset,
+                margins.top(),
+                margins.right(),
+                margins.bottom(),
+            )
+
     def _normalize_input_widths(self) -> None:
         width = max(1, self.width())
         stacked_mode = self._output_layout_mode == "stacked"
@@ -1108,6 +1162,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         self._constrain_source_row_widths(preferred_url_width=field_width)
         self.playlist_items_edit.setMinimumWidth(field_width)
+        self.playlist_length_edit.setMinimumWidth(0)
         self.filename_edit.setMinimumWidth(field_width)
         self.output_dir_edit.setMinimumWidth(0)
 
@@ -1260,6 +1315,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.playlist_items_edit.setToolTip(
             "Optional playlist range (for example 1-5,7,10-). Leave blank for full playlist."
         )
+        self.playlist_length_edit.setToolTip(
+            "Playlist items to download. Examples: 2-5, 7, 10-, or 1-5,7."
+        )
 
         self.video_radio.setToolTip("Download video and audio.")
         self.audio_radio.setToolTip("Download audio only.")
@@ -1295,6 +1353,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
 
         self.logs_view.setToolTip("Download logs.")
+        self.logs_export_button.setToolTip("Export logs to your output folder.")
         self.logs_clear_button.setToolTip("Clear logs.")
 
     def _refresh_widget_style(self, widget: QWidget) -> None:
@@ -1363,6 +1422,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _refresh_logs_panel_state(self) -> None:
         has_logs = bool(self._log_lines)
         self.logs_stack.setCurrentIndex(self._logs_content_index)
+        self.logs_export_button.setEnabled(has_logs)
         self.logs_clear_button.setEnabled(has_logs)
 
     def _set_source_feedback(
@@ -1637,6 +1697,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             if layout is not None:
                 layout.invalidate()
                 layout.activate()
+        self._trim_output_field_lengths()
         main_layout = self.main_page.layout()
         if main_layout is not None:
             main_layout.invalidate()
@@ -2293,6 +2354,24 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_NONE_INDEX)
         self._sync_source_details_height()
 
+    def _set_playlist_length_visible(self, visible: bool) -> None:
+        self.playlist_length_group.setVisible(bool(visible))
+        self._sync_output_form_row_heights()
+
+    def _sync_playlist_length_from_items(self) -> None:
+        next_value = self.playlist_items_edit.text().strip()
+        if self.playlist_length_edit.text() == next_value:
+            return
+        previously_blocked = self.playlist_length_edit.blockSignals(True)
+        self.playlist_length_edit.setText(next_value)
+        self.playlist_length_edit.blockSignals(previously_blocked)
+
+    def _on_playlist_length_changed(self, text: str) -> None:
+        clean_text = str(text or "").strip()
+        if self.playlist_items_edit.text().strip() == clean_text:
+            return
+        self.playlist_items_edit.setText(clean_text)
+
     def _sync_source_details_height(self) -> None:
         current = self.source_details_stack.currentWidget()
         if current is None:
@@ -2323,8 +2402,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _update_source_details_visibility(self) -> None:
         window_size = self.size()
         prompt_visible = bool(self._pending_mixed_url)
+        playlist_controls_visible = bool(self._playlist_mode) and (not prompt_visible)
         self._set_mixed_url_alert_visible(prompt_visible)
-        self._set_playlist_items_visible(bool(self._playlist_mode) and (not prompt_visible))
+        self._set_playlist_items_visible(playlist_controls_visible)
+        self._set_playlist_length_visible(playlist_controls_visible)
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
 
@@ -2395,12 +2476,19 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _refresh_queue_edit_action(self) -> None:
         editing = self._editing_queue_index() is not None
-        button_text = "Update Queue Item" if editing else "Add to queue"
-        tooltip = (
-            "Save changes back to the selected queue item."
-            if editing
-            else "Add the current URL/settings to queue."
+        playlist_selected = self._playlist_mode or core_urls.is_playlist_url(
+            self.url_edit.text().strip()
         )
+        button_text = "Update Queue Item" if editing else "Add to queue"
+        if editing:
+            tooltip = "Save changes back to the selected queue item."
+        elif playlist_selected:
+            tooltip = (
+                "This URL is being treated as a playlist, so it cannot be added "
+                "to the queue."
+            )
+        else:
+            tooltip = "Add the current URL/settings to queue."
         if self.add_queue_button.text() != button_text:
             self.add_queue_button.setText(button_text)
             self._set_uniform_button_width(

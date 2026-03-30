@@ -66,7 +66,7 @@ class TestAppService(unittest.TestCase):
         mock_ytdl,
         _mock_build_opts,
     ) -> None:
-        from _yt_dlp_stub import ensure_yt_dlp_stub
+        from tests._yt_dlp_stub import ensure_yt_dlp_stub
 
         ensure_yt_dlp_stub()
         from yt_dlp.utils import DownloadCancelled as StubDownloadCancelled

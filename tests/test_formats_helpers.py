@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from _yt_dlp_stub import ensure_yt_dlp_stub
+from tests._yt_dlp_stub import ensure_yt_dlp_stub
 
 ensure_yt_dlp_stub()
 

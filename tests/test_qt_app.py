@@ -29,6 +29,7 @@ try:
         QSizePolicy,
         QStyle,
         QStyleFactory,
+        QStyleOptionComboBox,
         QWidget,
     )
 
@@ -1058,7 +1059,25 @@ class TestQtApp(unittest.TestCase):
             self.window._logs_content_index,
         )
         self.assertEqual(self.window.logs_view.toPlainText(), "")
+        self.assertFalse(self.window.logs_export_button.isEnabled())
         self.assertFalse(self.window.logs_clear_button.isEnabled())
+
+    def test_initial_source_prompt_does_not_populate_activity_log(self) -> None:
+        self.assertEqual(self.window._log_lines, [])
+        self.assertEqual(self.window.logs_view.toPlainText(), "")
+        self.assertFalse(self.window.logs_export_button.isEnabled())
+        self.assertFalse(self.window.logs_clear_button.isEnabled())
+
+    def test_logs_export_button_tracks_log_presence(self) -> None:
+        self.assertFalse(self.window.logs_export_button.isEnabled())
+
+        self.window._append_log("[status] ready")
+
+        self.assertTrue(self.window.logs_export_button.isEnabled())
+
+        self.window._clear_logs()
+
+        self.assertFalse(self.window.logs_export_button.isEnabled())
 
     def test_source_feedback_routes_messages_to_logs(self) -> None:
         self.window._clear_logs()
@@ -1079,6 +1098,17 @@ class TestQtApp(unittest.TestCase):
                 "[source][success] Formats are ready. Choose options and start the download."
             ],
         )
+
+    def test_neutral_source_feedback_does_not_route_messages_to_logs(self) -> None:
+        self.window._clear_logs()
+
+        self.window._set_source_feedback(
+            "Paste a video or playlist URL to load available formats.",
+            tone="neutral",
+        )
+
+        self.assertEqual(self.window._log_lines, [])
+        self.assertEqual(self.window.logs_view.toPlainText(), "")
 
     def test_hidden_source_feedback_resets_dedupe_state(self) -> None:
         self.window._clear_logs()
@@ -1537,6 +1567,14 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window.format_combo.isEnabled())
         self.assertEqual(self.window.format_combo.currentText(), "Auto")
 
+    def test_container_combo_shows_placeholder_text_before_mode_selection(self) -> None:
+        option = QStyleOptionComboBox()
+        self.window.container_combo.initStyleOption(option)
+
+        self.assertEqual(self.window.container_combo.currentIndex(), -1)
+        self.assertEqual(self.window.container_combo.placeholderText(), "Select container")
+        self.assertEqual(option.currentText, "Select container")
+
     def test_output_form_split_layout_uses_right_aligned_label_column(self) -> None:
         self.window.show()
         QApplication.processEvents()
@@ -1586,7 +1624,12 @@ class TestQtApp(unittest.TestCase):
         left_edges = [map_rect_to_format(widget).left() for widget in left_edge_widgets]
         self.assertLessEqual(max(left_edges) - min(left_edges), 2)
 
+        content_mode_field = self.window.video_radio.parentWidget().parentWidget()
+        self.assertIsNotNone(content_mode_field)
+        assert content_mode_field is not None
+
         right_edge_widgets = (
+            content_mode_field,
             self.window.container_combo,
             self.window.codec_combo,
             self.window.format_combo,
@@ -1595,6 +1638,28 @@ class TestQtApp(unittest.TestCase):
         )
         right_edges = [map_rect_to_format(widget).right() for widget in right_edge_widgets]
         self.assertLessEqual(max(right_edges) - min(right_edges), 2)
+
+    def test_output_form_fields_are_slightly_shorter_than_their_split_hosts(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        field_hosts = self.window.format_card.findChildren(QWidget, "outputFieldHost")
+        self.assertTrue(field_hosts)
+        for host in field_hosts:
+            if not host.isVisible():
+                continue
+            layout = host.layout()
+            self.assertIsNotNone(layout)
+            assert layout is not None
+            item = layout.itemAt(0)
+            self.assertIsNotNone(item)
+            widget = item.widget()
+            self.assertIsNotNone(widget)
+            assert widget is not None
+            self.assertIsNotNone(host)
+            self.assertGreaterEqual(widget.x(), 10)
 
     def test_mixed_url_choice_preserves_window_size(self) -> None:
         mixed = "https://www.youtube.com/watch?v=abc123&list=PLXYZ&index=3"
@@ -2550,7 +2615,7 @@ class TestQtApp(unittest.TestCase):
 
                 self.assertLess(mode_row.height(), self.window.container_combo.height())
 
-    def test_content_mode_control_stays_left_aligned_within_its_field_host(self) -> None:
+    def test_content_mode_control_stays_right_aligned_within_its_field_host(self) -> None:
         self.window.show()
         self.window.video_radio.setChecked(True)
         QApplication.processEvents()
@@ -2576,10 +2641,10 @@ class TestQtApp(unittest.TestCase):
         assert field_host is not None
 
         self.assertLess(mode_row.width(), field_host.width())
-        mode_row_left = mode_row.mapToGlobal(mode_row.rect().topLeft()).x()
-        field_host_left = field_host.mapToGlobal(field_host.rect().topLeft()).x()
+        mode_row_right = mode_row.mapToGlobal(mode_row.rect().topRight()).x()
+        field_host_right = field_host.mapToGlobal(field_host.rect().topRight()).x()
         self.assertLessEqual(
-            abs(mode_row_left - field_host_left),
+            abs(mode_row_right - field_host_right),
             2,
         )
 
@@ -3044,6 +3109,131 @@ class TestQtApp(unittest.TestCase):
             "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
         )
 
+    def test_playlist_tooltip_explains_why_queue_add_is_disabled(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats()
+        self.window._on_mode_change()
+        QApplication.processEvents()
+
+        mp4_index = self.window.container_combo.findData("mp4")
+        self.assertGreaterEqual(mp4_index, 0)
+        self.window.container_combo.setCurrentIndex(mp4_index)
+        avc1_index = self.window.codec_combo.findData("avc1")
+        self.assertGreaterEqual(avc1_index, 0)
+        self.window.codec_combo.setCurrentIndex(avc1_index)
+        self.assertGreater(self.window.format_combo.count(), 0)
+        self.window.format_combo.setCurrentIndex(0)
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.add_queue_button.isEnabled())
+        self.assertEqual(
+            self.window.add_queue_button.toolTip(),
+            "Add the current URL/settings to queue.",
+        )
+
+        self.window._playlist_mode = True
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.assertFalse(self.window.add_queue_button.isEnabled())
+        self.assertEqual(
+            self.window.add_queue_button.toolTip(),
+            "This URL is being treated as a playlist, so it cannot be added to the queue.",
+        )
+
+        self.window._playlist_mode = False
+        self.window._update_controls_state()
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.add_queue_button.isEnabled())
+        self.assertEqual(
+            self.window.add_queue_button.toolTip(),
+            "Add the current URL/settings to queue.",
+        )
+
+    def test_playlist_range_helper_syncs_with_playlist_items(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+        self._load_ready_preview_with_formats()
+
+        self.window._playlist_mode = True
+        self.window._update_source_details_visibility()
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.playlist_length_group.isVisible())
+        self.assertEqual(self.window.playlist_length_edit.text(), "")
+
+        self.window.playlist_length_edit.setText("2-5")
+        QApplication.processEvents()
+        self.assertEqual(self.window.playlist_items_edit.text(), "2-5")
+
+        self.window.playlist_items_edit.setText("1-8")
+        QApplication.processEvents()
+        self.assertEqual(self.window.playlist_length_edit.text(), "1-8")
+
+        self.window.playlist_items_edit.setText("2-6")
+        QApplication.processEvents()
+        self.assertEqual(self.window.playlist_length_edit.text(), "2-6")
+
+        self.window.playlist_length_edit.clear()
+        QApplication.processEvents()
+        self.assertEqual(self.window.playlist_items_edit.text(), "")
+
+        self.window._playlist_mode = False
+        self.window._update_source_details_visibility()
+        QApplication.processEvents()
+        self.assertFalse(self.window.playlist_length_group.isVisible())
+
+    def test_playlist_range_control_matches_mode_width_and_shared_right_edge(self) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        mode_row = self.window.video_radio.parentWidget()
+        self.assertIsNotNone(mode_row)
+        assert mode_row is not None
+
+        block_layout = self.window.content_type_row.layout()
+        self.assertIsNotNone(block_layout)
+        assert block_layout is not None
+
+        row = block_layout.itemAt(0).widget()
+        self.assertIsNotNone(row)
+        assert row is not None
+
+        row_layout = row.layout()
+        self.assertIsNotNone(row_layout)
+        assert row_layout is not None
+
+        field_host = row_layout.itemAt(1).widget()
+        self.assertIsNotNone(field_host)
+        assert field_host is not None
+
+        baseline_right = field_host.mapToGlobal(field_host.rect().topRight()).x()
+        self.assertLessEqual(
+            abs(mode_row.mapToGlobal(mode_row.rect().topRight()).x() - baseline_right),
+            2,
+        )
+
+        self.window._playlist_mode = True
+        self.window._update_source_details_visibility()
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.playlist_length_group.isVisible())
+        self.assertEqual(self.window.playlist_length_group.width(), mode_row.width())
+        self.assertLessEqual(
+            abs(
+                self.window.playlist_length_group.mapToGlobal(
+                    self.window.playlist_length_group.rect().topRight()
+                ).x()
+                - baseline_right
+            ),
+            2,
+        )
+
     def test_close_event_while_downloading_requests_cancel(self) -> None:
         self.window._is_downloading = True
         self.window._cancel_requested = False
@@ -3367,6 +3557,45 @@ class TestQtApp(unittest.TestCase):
             [item.get("url") for item in self.window.queue_items],
             ["a", "c"],
         )
+
+    def test_queue_list_inline_action_buttons_show_hover_feedback(self) -> None:
+        self.window.queue_items = [
+            {"url": "a", "settings": {}},
+            {"url": "b", "settings": {}},
+        ]
+        self.window._refresh_queue_panel()
+        self.window.show()
+        self.window._open_panel("queue")
+        QApplication.processEvents()
+
+        item = self.window.queue_list.item(0)
+        self.assertIsNotNone(item)
+        assert item is not None
+        item_rect = self.window.queue_list.visualItemRect(item)
+        self.assertFalse(item_rect.isNull())
+
+        edit_rect = self.window.queue_list.edit_button_rect(0)
+        remove_rect = self.window.queue_list.remove_button_rect(0)
+        self.assertFalse(edit_rect.isNull())
+        self.assertFalse(remove_rect.isNull())
+
+        neutral_pos = QPoint(item_rect.left() + 20, item_rect.center().y())
+        viewport = self.window.queue_list.viewport()
+
+        QTest.mouseMove(viewport, edit_rect.center())
+        QApplication.processEvents()
+        self.assertEqual(self.window.queue_list.hovered_inline_action(), (0, "edit"))
+        self.assertEqual(viewport.cursor().shape(), Qt.CursorShape.PointingHandCursor)
+
+        QTest.mouseMove(viewport, remove_rect.center())
+        QApplication.processEvents()
+        self.assertEqual(self.window.queue_list.hovered_inline_action(), (0, "remove"))
+        self.assertEqual(viewport.cursor().shape(), Qt.CursorShape.PointingHandCursor)
+
+        QTest.mouseMove(viewport, neutral_pos)
+        QApplication.processEvents()
+        self.assertEqual(self.window.queue_list.hovered_inline_action(), (None, None))
+        self.assertEqual(viewport.cursor().shape(), Qt.CursorShape.ArrowCursor)
 
     def test_queue_list_stores_title_and_settings_metadata(self) -> None:
         self.window.queue_items = [
@@ -3710,6 +3939,23 @@ class TestQtApp(unittest.TestCase):
             self.assertIn("line one", payload)
             self.assertTrue(any(line.startswith("[diag] exported ") for line in self.window._log_lines))
             self.assertEqual(self.window.status_value.text(), "Diagnostics exported")
+            info_mock.assert_called_once()
+
+    def test_export_logs_writes_log_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self.window.output_dir_edit.setText(tmp_dir)
+            self.window._log_lines = ["line one", "line two"]
+            self.window._refresh_logs_panel_state()
+
+            with patch.object(self.window._effects.dialogs, "information") as info_mock:
+                self.window._export_logs()
+
+            outputs = list(Path(tmp_dir).glob("yt-dlp-gui-logs-*.txt"))
+            self.assertEqual(len(outputs), 1)
+            payload = outputs[0].read_text(encoding="utf-8")
+            self.assertEqual(payload, "line one\nline two\n")
+            self.assertTrue(any(line.startswith("[logs] exported ") for line in self.window._log_lines))
+            self.assertEqual(self.window.status_value.text(), "Logs exported")
             info_mock.assert_called_once()
 
 

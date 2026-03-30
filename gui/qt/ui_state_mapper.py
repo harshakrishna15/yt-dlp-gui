@@ -31,6 +31,7 @@ def apply_control_state(
 
     window.format_combo.setEnabled(state.format_enabled)
     window.playlist_items_edit.setEnabled(state.playlist_items_enabled)
+    window.playlist_length_edit.setEnabled(state.playlist_items_enabled)
     window.filename_edit.setEnabled(state.filename_enabled)
 
     window.url_edit.setEnabled(state.input_fields_enabled)

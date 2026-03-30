@@ -7,8 +7,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
-    QGridLayout,
-    QHBoxLayout,
     QLayout,
     QLabel,
     QListWidget,
@@ -26,12 +24,17 @@ from ..app_meta import (
 )
 from .widgets import (
     ButtonSpec,
+    LayoutConfig,
     NativeComboBoxConfig,
     QueueEmptyStateWidget,
     QueueListWidget,
+    WidgetConfig,
     _NativeComboBox,
     build_button,
+    build_grid,
+    build_hbox,
     build_native_combo,
+    build_vbox,
 )
 
 
@@ -60,6 +63,7 @@ class LogsPanelRefs:
     logs_empty_index: int
     logs_content_index: int
     logs_view: QPlainTextEdit
+    export_logs_button: QPushButton
     logs_clear_button: QPushButton
 
 
@@ -91,36 +95,48 @@ def _build_panel_shell(
     title: str,
     framed: bool = True,
 ) -> _PanelShellRefs:
-    panel = QWidget(parent)
-    panel.setObjectName("panelPage")
-    root_layout = QVBoxLayout(panel)
-    root_layout.setContentsMargins(0, 0, 0, 0)
-    root_layout.setSpacing(14 if not framed else 0)
+    panel_shell = build_vbox(
+        parent,
+        widget_config=WidgetConfig(object_name="panelPage"),
+        layout_config=LayoutConfig(
+            margins=(0, 0, 0, 0),
+            spacing=14 if not framed else 0,
+        ),
+    )
+    panel = panel_shell.widget
+    root_layout = panel_shell.layout
 
     container: QWidget = panel
     container_layout: QVBoxLayout = root_layout
     if framed:
-        card = QFrame(panel)
-        card.setObjectName("panelCard")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 16, 16, 16)
-        card_layout.setSpacing(14)
+        card_shell = build_vbox(
+            panel,
+            widget_cls=QFrame,
+            widget_config=WidgetConfig(object_name="panelCard"),
+            layout_config=LayoutConfig(margins=(16, 16, 16, 16), spacing=14),
+        )
+        card = card_shell.widget
+        card_layout = card_shell.layout
         root_layout.addWidget(card, stretch=1)
         container = card
         container_layout = card_layout
 
-    header = QWidget(container)
-    header_layout = QVBoxLayout(header)
-    header_layout.setContentsMargins(0, 0, 0, 0)
-    header_layout.setSpacing(3)
+    header_shell = build_vbox(
+        container,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=3),
+    )
+    header = header_shell.widget
+    header_layout = header_shell.layout
     title_label = QLabel(title, header)
     title_label.setObjectName("panelHeaderTitle")
     header_layout.addWidget(title_label)
 
-    body = QWidget(container)
-    body_layout = QVBoxLayout(body)
-    body_layout.setContentsMargins(0, 0, 0, 0)
-    body_layout.setSpacing(10)
+    body_shell = build_vbox(
+        container,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
+    )
+    body = body_shell.widget
+    body_layout = body_shell.layout
 
     container_layout.addWidget(header)
     container_layout.addWidget(body, stretch=1)
@@ -135,20 +151,33 @@ def _build_empty_state(
     description: str,
     hint: str,
 ) -> _EmptyStateRefs:
-    page = QWidget(parent)
-    layout = QVBoxLayout(page)
-    layout.setContentsMargins(28, 12, 28, 12)
-    layout.setSpacing(0)
+    page_shell = build_vbox(
+        parent,
+        layout_config=LayoutConfig(margins=(28, 12, 28, 12), spacing=0),
+    )
+    page = page_shell.widget
+    layout = page_shell.layout
     layout.addStretch(1)
 
-    card = QFrame(page)
-    card.setObjectName("panelEmptyCard")
-    card.setMaximumWidth(520)
-    card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-    card_layout = QVBoxLayout(card)
-    card_layout.setContentsMargins(24, 24, 24, 24)
-    card_layout.setSpacing(10)
-    card_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+    card_shell = build_vbox(
+        page,
+        widget_cls=QFrame,
+        widget_config=WidgetConfig(
+            object_name="panelEmptyCard",
+            maximum_width=520,
+            size_policy=(
+                QSizePolicy.Policy.Preferred,
+                QSizePolicy.Policy.Fixed,
+            ),
+        ),
+        layout_config=LayoutConfig(
+            margins=(24, 24, 24, 24),
+            spacing=10,
+            size_constraint=QLayout.SizeConstraint.SetMinimumSize,
+        ),
+    )
+    card = card_shell.widget
+    card_layout = card_shell.layout
 
     badge_label = QLabel(badge, card)
     badge_label.setObjectName("panelEmptyBadge")
@@ -200,11 +229,14 @@ def _build_settings_card(
     spacing: int = 8,
     title: str = "",
 ) -> _SettingsCardRefs:
-    card = QFrame(parent)
-    card.setObjectName(object_name)
-    layout = QVBoxLayout(card)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(spacing)
+    card_shell = build_vbox(
+        parent,
+        widget_cls=QFrame,
+        widget_config=WidgetConfig(object_name=object_name),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=spacing),
+    )
+    card = card_shell.widget
+    layout = card_shell.layout
 
     title_label: QLabel | None = None
     if title.strip():
@@ -220,10 +252,12 @@ def _build_panel_actions(
     *,
     button_specs: Sequence[ButtonSpec],
 ) -> tuple[QWidget, tuple[QPushButton, ...]]:
-    actions = QWidget(parent)
-    layout = QHBoxLayout(actions)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(10)
+    actions_shell = build_hbox(
+        parent,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
+    )
+    actions = actions_shell.widget
+    layout = actions_shell.layout
 
     buttons: list[QPushButton] = []
     for spec in button_specs:
@@ -247,16 +281,21 @@ def build_settings_panel(
         framed=False,
     )
 
-    form_card = QFrame(shell.panel)
-    form_card.setObjectName("panelFormCard")
-    form_card_layout = QVBoxLayout(form_card)
-    form_card_layout.setContentsMargins(0, 0, 0, 0)
-    form_card_layout.setSpacing(12)
+    form_card_shell = build_vbox(
+        shell.panel,
+        widget_cls=QFrame,
+        widget_config=WidgetConfig(object_name="panelFormCard"),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+    )
+    form_card = form_card_shell.widget
+    form_card_layout = form_card_shell.layout
 
-    settings_stack = QWidget(form_card)
-    settings_stack_layout = QVBoxLayout(settings_stack)
-    settings_stack_layout.setContentsMargins(0, 0, 0, 0)
-    settings_stack_layout.setSpacing(12)
+    settings_stack_shell = build_vbox(
+        form_card,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+    )
+    settings_stack = settings_stack_shell.widget
+    settings_stack_layout = settings_stack_shell.layout
 
     encode_card = _build_settings_card(
         settings_stack,
@@ -303,10 +342,12 @@ def build_settings_panel(
         QSizePolicy.Policy.Fixed,
     )
 
-    app_copy = QWidget(app_card.card)
-    app_copy_layout = QVBoxLayout(app_copy)
-    app_copy_layout.setContentsMargins(0, 0, 0, 0)
-    app_copy_layout.setSpacing(2)
+    app_copy_shell = build_vbox(
+        app_card.card,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=2),
+    )
+    app_copy = app_copy_shell.widget
+    app_copy_layout = app_copy_shell.layout
 
     app_name_label = QLabel(APP_DISPLAY_NAME, app_copy)
     app_name_label.setObjectName("settingsAppName")
@@ -317,10 +358,12 @@ def build_settings_panel(
     app_copy_layout.addWidget(app_name_label)
     app_copy_layout.addWidget(version_label)
 
-    app_actions = QWidget(app_card.card)
-    app_actions_layout = QHBoxLayout(app_actions)
-    app_actions_layout.setContentsMargins(0, 0, 0, 0)
-    app_actions_layout.setSpacing(0)
+    app_actions_shell = build_hbox(
+        app_card.card,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+    )
+    app_actions = app_actions_shell.widget
+    app_actions_layout = app_actions_shell.layout
     export_diagnostics_button = build_button(
         app_actions,
         spec=ButtonSpec(
@@ -365,10 +408,12 @@ def build_queue_panel(
     empty = QueueEmptyStateWidget(queue_stack)
     queue_empty_index = queue_stack.addWidget(empty)
 
-    content = QWidget(queue_stack)
-    content_layout = QVBoxLayout(content)
-    content_layout.setContentsMargins(0, 0, 0, 0)
-    content_layout.setSpacing(10)
+    content_shell = build_vbox(
+        queue_stack,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
+    )
+    content = content_shell.widget
+    content_layout = content_shell.layout
     queue_list = QueueListWidget(content)
     queue_list.setObjectName("panelList")
     queue_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
@@ -389,6 +434,7 @@ def build_logs_panel(
     *,
     parent: QWidget,
     max_lines: int,
+    on_export_logs: Callable[[], None],
     on_clear_logs: Callable[[], None],
 ) -> LogsPanelRefs:
     shell = _build_panel_shell(
@@ -407,17 +453,22 @@ def build_logs_panel(
     )
     logs_empty_index = logs_stack.addWidget(empty.page)
 
-    content = QWidget(logs_stack)
-    content.setObjectName("logsContentPage")
-    content_layout = QVBoxLayout(content)
-    content_layout.setContentsMargins(0, 0, 0, 0)
-    content_layout.setSpacing(12)
+    content_shell = build_vbox(
+        logs_stack,
+        widget_config=WidgetConfig(object_name="logsContentPage"),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+    )
+    content = content_shell.widget
+    content_layout = content_shell.layout
 
-    console_card = QFrame(content)
-    console_card.setObjectName("logsConsoleCard")
-    console_layout = QVBoxLayout(console_card)
-    console_layout.setContentsMargins(0, 0, 0, 0)
-    console_layout.setSpacing(0)
+    console_card_shell = build_vbox(
+        content,
+        widget_cls=QFrame,
+        widget_config=WidgetConfig(object_name="logsConsoleCard"),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+    )
+    console_card = console_card_shell.widget
+    console_layout = console_card_shell.layout
 
     logs_view = QPlainTextEdit(console_card)
     logs_view.setObjectName("logsView")
@@ -431,16 +482,38 @@ def build_logs_panel(
     logs_content_index = logs_stack.addWidget(content)
     shell.body_layout.addWidget(logs_stack, stretch=1)
 
-    actions = QFrame(shell.panel)
-    actions.setObjectName("runActionCard")
-    actions.setSizePolicy(
-        QSizePolicy.Policy.Expanding,
-        QSizePolicy.Policy.Fixed,
+    actions_shell = build_grid(
+        shell.panel,
+        widget_cls=QFrame,
+        widget_config=WidgetConfig(
+            object_name="runActionCard",
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        ),
+        layout_config=LayoutConfig(
+            margins=(0, 0, 0, 0),
+            horizontal_spacing=8,
+            vertical_spacing=0,
+        ),
     )
-    actions_layout = QGridLayout(actions)
-    actions_layout.setContentsMargins(0, 0, 0, 0)
-    actions_layout.setHorizontalSpacing(8)
-    actions_layout.setVerticalSpacing(0)
+    actions = actions_shell.widget
+    actions_layout = actions_shell.layout
+
+    export_logs_button = build_button(
+        actions,
+        spec=ButtonSpec(
+            text="Export logs",
+            on_click=on_export_logs,
+            object_name="secondaryActionButton",
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        ),
+    )
+    actions_layout.addWidget(export_logs_button, 0, 0)
 
     logs_clear_button = build_button(
         actions,
@@ -455,7 +528,9 @@ def build_logs_panel(
         ),
     )
     logs_clear_button.setProperty("pill", True)
-    actions_layout.addWidget(logs_clear_button, 0, 0)
+    actions_layout.addWidget(logs_clear_button, 0, 1)
+    actions_layout.setColumnStretch(0, 1)
+    actions_layout.setColumnStretch(1, 1)
     shell.body_layout.addWidget(actions)
     return LogsPanelRefs(
         panel=shell.panel,
@@ -463,5 +538,6 @@ def build_logs_panel(
         logs_empty_index=logs_empty_index,
         logs_content_index=logs_content_index,
         logs_view=logs_view,
+        export_logs_button=export_logs_button,
         logs_clear_button=logs_clear_button,
     )
