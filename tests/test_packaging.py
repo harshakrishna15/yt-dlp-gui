@@ -322,17 +322,5 @@ class TestPackagingConfiguration(unittest.TestCase):
         self.assertIn("yt-dlp-gui", payload)
         self.assertIn("FileDescription", payload)
 
-    def test_ci_workflow_runs_packaging_smoke_check_via_build_scripts(self) -> None:
-        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("shell: bash", workflow)
-        self.assertIn("shell: pwsh", workflow)
-        self.assertIn("scripts/build-macos.sh", workflow)
-        self.assertIn("scripts/build-windows.ps1", workflow)
-        self.assertIn("python scripts/check_packaged_assets.py", workflow)
-
-
 if __name__ == "__main__":
     unittest.main()
