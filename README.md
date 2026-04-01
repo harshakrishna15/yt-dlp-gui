@@ -40,38 +40,26 @@ Downloads, logs, and preferences stay on your machine. This is a spare-time proj
 
 ## Install And Run
 
-Run these steps from the project root.
+Run these steps from the project root. Setup is the same either way; after that you can launch the app directly with `python -m gui` or use `run_gui.py`.
 
-### macOS
+### 1. Install dependencies once
+
+#### macOS
 
 ```bash
 brew install ffmpeg
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-python3 -m gui
 ```
 
-Convenience launcher:
-
-```bash
-python3 run_gui.py
-```
-
-### Windows
+#### Windows
 
 ```powershell
 winget install ffmpeg
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python -m gui
-```
-
-Convenience launcher:
-
-```powershell
-python run_gui.py
 ```
 
 If `Activate.ps1` is blocked by your PowerShell policy, run this once in the current PowerShell session:
@@ -81,6 +69,48 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 Then activate the environment and continue with the install steps.
+
+### 2. Choose how to launch the app from source
+
+#### Option A: Run the app directly
+
+Use this when you already have the virtual environment activated and want the most explicit entry point.
+
+macOS:
+
+```bash
+source .venv/bin/activate
+python3 -m gui
+```
+
+Windows:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m gui
+```
+
+#### Option B: Use `run_gui.py`
+
+Use this when you want a simple launcher command or want to double-click the script. `run_gui.py` prefers the local `.venv` Python interpreter when it exists, then runs `python -m gui` for you.
+
+macOS:
+
+```bash
+python3 run_gui.py
+```
+
+Windows:
+
+```powershell
+python run_gui.py
+```
+
+You can also pass normal app arguments through the launcher, for example:
+
+```bash
+python3 run_gui.py --ui qt
+```
 
 ## How To Use The App
 
@@ -105,9 +135,9 @@ Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You 
 ## Entry Points
 
 - `python -m gui`
+  Direct source entry point. Best when your virtual environment is already active.
 - `python run_gui.py`
-
-`run_gui.py` prefers the local `.venv` Python interpreter when one exists.
+  Convenience launcher. Best when you want the repo-local `.venv` to be picked automatically or want a double-clickable script.
 
 ## Run Tests
 
@@ -127,9 +157,9 @@ python3 scripts/run_tests.py -v
 python scripts/run_tests.py -v
 ```
 
-## Build Packaged Apps
+## Build Standalone Apps
 
-The packaging scripts create `.venv` if needed, install build dependencies, and generate fresh app icons before running PyInstaller.
+Use the packaging scripts when you want a standalone app bundle instead of running from source. The scripts create `.venv` if needed, install build dependencies, generate fresh app icons, and run PyInstaller.
 
 ### macOS
 
@@ -141,6 +171,12 @@ python3 scripts/check_packaged_assets.py dist/yt-dlp-gui.app
 
 Output: `dist/yt-dlp-gui.app`
 
+Run the built app:
+
+```bash
+open dist/yt-dlp-gui.app
+```
+
 ### Windows
 
 ```powershell
@@ -149,6 +185,12 @@ python scripts/check_packaged_assets.py dist\yt-dlp-gui
 ```
 
 Output: `dist\yt-dlp-gui\yt-dlp-gui.exe`
+
+Run the built app:
+
+```powershell
+.\dist\yt-dlp-gui\yt-dlp-gui.exe
+```
 
 Packaged builds still expect `ffmpeg` and `ffprobe` to be available on the system.
 

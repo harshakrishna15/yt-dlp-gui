@@ -739,8 +739,8 @@ class DownloadsViewBuilder:
                     QSizePolicy.Policy.Maximum,
                     QSizePolicy.Policy.Fixed,
                 ),
-                layout_margins=(3, 3, 3, 3),
-                layout_spacing=6,
+                layout_margins=(2, 2, 2, 2),
+                layout_spacing=4,
                 button_specs=(
                     ButtonSpec(
                         "Video and Audio",
@@ -783,12 +783,12 @@ class DownloadsViewBuilder:
         )
         content_type_field = content_type_field_shell.widget
         content_type_field_layout = content_type_field_shell.layout
-        content_type_field_layout.addStretch(1)
         content_type_field_layout.addWidget(
             mode_row,
             0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
+        content_type_field_layout.addStretch(1)
 
         playlist_length_group_shell = build_hbox(
             content_type_field,

@@ -1149,22 +1149,22 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QWidget#contentModeSegment {
             background: __surface_soft_glass__;
             border: 1px solid __border_soft__;
-            border-radius: 16px;
+            border-radius: 14px;
         }
         QFrame#contentModeSelection {
             background: __accent__;
             border: 1px solid __accent_border__;
-            border-radius: 11px;
+            border-radius: 10px;
         }
         QRadioButton#contentModeButton, QPushButton#contentModeButton {
             background: transparent;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             color: __nav_text__;
             font-size: 14px;
             font-weight: 700;
             spacing: 0px;
-            padding: 0px 16px;
+            padding: 0px 13px;
             text-align: center;
         }
         QRadioButton#contentModeButton::indicator {

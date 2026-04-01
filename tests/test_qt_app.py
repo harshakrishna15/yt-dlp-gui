@@ -489,8 +489,13 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(state_host.height(), 0)
         self.assertLess(state_host.geometry().right(), 0)
 
-    def test_queue_empty_state_defaults_to_centered_placeholder(self) -> None:
-        self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
+    def test_queue_panel_keeps_list_visible_when_empty(self) -> None:
+        self.assertEqual(
+            self.window.queue_stack.currentIndex(),
+            self.window._queue_content_index,
+        )
+        self.assertEqual(self.window.queue_list.count(), 0)
+        self.assertFalse(self.window.queue_clear_button.isEnabled())
         self.assertEqual(self.window.queue_empty_state.placeholder_title.text(), "Queue is empty")
         self.assertEqual(
             self.window.queue_empty_state.placeholder_description.text(),
@@ -1051,7 +1056,12 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.url_edit.width(), baseline_url_width)
 
     def test_secondary_panels_start_with_empty_states(self) -> None:
-        self.assertEqual(self.window.queue_stack.currentIndex(), self.window._queue_empty_index)
+        self.assertEqual(
+            self.window.queue_stack.currentIndex(),
+            self.window._queue_content_index,
+        )
+        self.assertEqual(self.window.queue_list.count(), 0)
+        self.assertFalse(self.window.queue_clear_button.isEnabled())
 
         self.window._clear_logs()
 
@@ -1247,6 +1257,40 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(root_rect.contains(toast_rect))
         self.assertGreater(toast_rect.left(), panel_rect.center().x())
         self.assertLess(toast_rect.top(), panel_rect.top())
+
+    def test_source_feedback_toast_hides_on_secondary_panels_and_reappears_on_downloads(
+        self,
+    ) -> None:
+        self.window.show()
+        self.window.resize(1220, 820)
+        QApplication.processEvents()
+
+        with patch.object(self.window, "_source_feedback_toast_timeout_ms", return_value=0):
+            self.window._set_source_feedback(
+                "Formats are ready. Choose options and start the download.",
+                tone="success",
+            )
+            QApplication.processEvents()
+            QTest.qWait(350)
+            QApplication.processEvents()
+
+            self.assertTrue(self.window.source_feedback_toast.isVisible())
+
+            self.window.queue_button.click()
+            QApplication.processEvents()
+
+            self.assertFalse(self.window.source_feedback_toast.isVisible())
+
+            self.window.downloads_button.click()
+            QApplication.processEvents()
+            QTest.qWait(350)
+            QApplication.processEvents()
+
+            self.assertTrue(self.window.source_feedback_toast.isVisible())
+            root = self.window.centralWidget()
+            self.assertIsNotNone(root)
+            assert root is not None
+            self.assertTrue(root.rect().contains(self.window.source_feedback_toast.geometry()))
 
     def test_source_feedback_success_toast_auto_hides_after_timeout(self) -> None:
         self.window.show()
@@ -2617,7 +2661,7 @@ class TestQtApp(unittest.TestCase):
 
                 self.assertLess(mode_row.height(), self.window.container_combo.height())
 
-    def test_content_mode_control_stays_right_aligned_within_its_field_host(self) -> None:
+    def test_content_mode_control_stays_left_aligned_within_its_field_host(self) -> None:
         self.window.show()
         self.window.video_radio.setChecked(True)
         QApplication.processEvents()
@@ -2643,10 +2687,10 @@ class TestQtApp(unittest.TestCase):
         assert field_host is not None
 
         self.assertLess(mode_row.width(), field_host.width())
-        mode_row_right = mode_row.mapToGlobal(mode_row.rect().topRight()).x()
-        field_host_right = field_host.mapToGlobal(field_host.rect().topRight()).x()
+        mode_row_left = mode_row.mapToGlobal(mode_row.rect().topLeft()).x()
+        field_host_left = field_host.mapToGlobal(field_host.rect().topLeft()).x()
         self.assertLessEqual(
-            abs(mode_row_right - field_host_right),
+            abs(mode_row_left - field_host_left),
             2,
         )
 
@@ -2702,7 +2746,7 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.panel_stack.currentIndex(), self.window._main_page_index)
         self.assertTrue(self.window.downloads_button.isChecked())
 
-    def test_queue_labels_use_title_case_and_panel_has_no_remove_button(self) -> None:
+    def test_queue_labels_use_title_case_and_panel_has_clear_all_button(self) -> None:
         self.window._open_panel("queue")
         QApplication.processEvents()
 
@@ -2710,9 +2754,11 @@ class TestQtApp(unittest.TestCase):
         self.assertIsNotNone(queue_panel)
         assert queue_panel is not None
         self.assertIsNone(queue_panel.findChild(QFrame, "panelCard"))
+        self.assertEqual(self.window.queue_clear_button.text(), "Clear all")
+        self.assertFalse(self.window.queue_clear_button.isEnabled())
         self.assertFalse(
             any(
-                button.text() in {"Remove", "Move up", "Move down", "Clear"}
+                button.text() in {"Remove", "Move up", "Move down"}
                 for button in queue_panel.findChildren(QPushButton)
             )
         )
@@ -2724,6 +2770,43 @@ class TestQtApp(unittest.TestCase):
                 if label.text()
             ],
         )
+
+    def test_queue_clear_button_clears_all_items(self) -> None:
+        self.window.queue_items = [
+            {"url": "https://example.com/watch?v=one", "settings": {}},
+            {"url": "https://example.com/watch?v=two", "settings": {}},
+        ]
+        self.window._refresh_queue_panel()
+        self.window._open_panel("queue")
+        QApplication.processEvents()
+
+        self.assertTrue(self.window.queue_clear_button.isEnabled())
+        self.assertEqual(self.window.queue_list.count(), 2)
+
+        QTest.mouseClick(self.window.queue_clear_button, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.queue_items, [])
+        self.assertEqual(self.window.queue_list.count(), 0)
+        self.assertFalse(self.window.queue_clear_button.isEnabled())
+
+    def test_queue_clear_button_sits_below_list_and_matches_panel_width(self) -> None:
+        self.window.queue_items = [
+            {"url": "https://example.com/watch?v=one", "settings": {}},
+        ]
+        self.window._refresh_queue_panel()
+        self.window._open_panel("queue")
+        self.window.show()
+        QApplication.processEvents()
+
+        button = self.window.queue_clear_button
+        queue_list = self.window.queue_list
+
+        self.assertGreater(
+            button.mapTo(self.window.panel_stack.currentWidget(), button.rect().topLeft()).y(),
+            queue_list.mapTo(self.window.panel_stack.currentWidget(), queue_list.rect().bottomLeft()).y(),
+        )
+        self.assertLessEqual(abs(button.width() - queue_list.width()), 2)
 
     def test_panels_do_not_render_header_subtitles(self) -> None:
         for panel_name in ("queue", "logs", "settings"):
@@ -3215,10 +3298,6 @@ class TestQtApp(unittest.TestCase):
         assert field_host is not None
 
         baseline_right = field_host.mapToGlobal(field_host.rect().topRight()).x()
-        self.assertLessEqual(
-            abs(mode_row.mapToGlobal(mode_row.rect().topRight()).x() - baseline_right),
-            2,
-        )
 
         self.window._playlist_mode = True
         self.window._update_source_details_visibility()

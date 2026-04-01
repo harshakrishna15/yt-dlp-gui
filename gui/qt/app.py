@@ -1224,7 +1224,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if stacked_mode or single_panel_workspace:
             self._unlock_widget_width(self.output_section)
         else:
-            inspector_width = max(440, min(640, int(width * 0.46)))
+            inspector_width = max(420, min(600, int(width * 0.42)))
             self._lock_widget_width(self.output_section, inspector_width)
 
         if stacked_mode:
@@ -1448,10 +1448,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         has_items = self.queue_list.count() > 0
         editable = not self.queue_active
         self._refresh_queue_empty_state()
-        self.queue_stack.setCurrentIndex(
-            self._queue_content_index if has_items else self._queue_empty_index
-        )
+        self.queue_stack.setCurrentIndex(self._queue_content_index)
         self.queue_list.set_queue_editable(editable)
+        self.queue_clear_button.setEnabled(has_items and editable)
 
     def _refresh_logs_panel_state(self) -> None:
         has_logs = bool(self._log_lines)
@@ -1707,18 +1706,34 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._lock_widget_width(self.run_actions_card, target_width)
         self.run_actions_card.updateGeometry()
 
+    def _sync_output_stack_widths(self) -> None:
+        if self._output_layout_mode == "stacked":
+            for widget in (self.format_card, self.metrics_card):
+                self._unlock_widget_width(widget)
+                widget.updateGeometry()
+            return
+
+        target_width = max(
+            0,
+            self.output_section.contentsRect().width() - 8,
+        )
+        if target_width <= 0:
+            return
+
+        for widget in (self.format_card, self.metrics_card):
+            self._lock_widget_width(widget, target_width)
+            widget.updateGeometry()
+
     def _refresh_downloads_page_geometry(self) -> None:
         self.workspace_layout.invalidate()
         self.workspace_layout.activate()
         self.output_layout.invalidate()
         self.output_layout.activate()
-        output_width = max(0, self.output_section.contentsRect().width() - 8)
-        if output_width > 0:
-            self.format_card.setMaximumWidth(output_width)
-            self.format_card.updateGeometry()
+        self._sync_output_stack_widths()
         refreshed_widgets: list[QWidget] = []
         for widget in (
             self.format_card,
+            self.metrics_card,
             self.save_card,
             self.output_section,
             self.main_page,
@@ -1801,6 +1816,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.panel_stack.setCurrentIndex(self._main_page_index)
             self._sync_current_panel_geometry()
         self._set_main_workspace_selection()
+        self._sync_source_feedback_visibility()
         self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
@@ -2026,6 +2042,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if name == "logs" and self._logs_alert_active:
             self._logs_alert_active = False
         self._apply_panel_selection(name)
+        self._sync_source_feedback_visibility()
         self._set_mixed_url_alert_visible(False)
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)
@@ -2042,6 +2059,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.panel_stack.setCurrentIndex(self._main_page_index)
         self._sync_current_panel_geometry()
         self._set_main_workspace_selection()
+        self._sync_source_feedback_visibility()
         self._set_mixed_url_alert_visible(bool(self._pending_mixed_url))
         if self.isVisible() and self.size() != window_size:
             self.resize(window_size)

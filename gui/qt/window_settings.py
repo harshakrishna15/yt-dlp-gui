@@ -58,12 +58,14 @@ class WindowSettingsMixin:
     def _build_queue_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_queue_panel(
             parent=self,
+            on_clear_queue=self._run_queue_controller.on_queue_clear,
         )
         self.queue_stack = refs.queue_stack
         self._queue_empty_index = refs.queue_empty_index
         self._queue_content_index = refs.queue_content_index
         self.queue_empty_state = refs.queue_empty_state
         self.queue_list = refs.queue_list
+        self.queue_clear_button = refs.clear_queue_button
         self.queue_list.itemSelectionChanged.connect(self._refresh_queue_panel_state)
         self.queue_list.edit_requested.connect(self._queue_edit_row)
         self.queue_list.remove_requested.connect(self._queue_remove_row)

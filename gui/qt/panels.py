@@ -58,6 +58,7 @@ class QueuePanelRefs:
     queue_content_index: int
     queue_empty_state: QueueEmptyStateWidget
     queue_list: QueueListWidget
+    clear_queue_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -458,6 +459,7 @@ def build_settings_panel(
 def build_queue_panel(
     *,
     parent: QWidget,
+    on_clear_queue: Callable[[], None],
 ) -> QueuePanelRefs:
     shell = _build_panel_shell(
         parent=parent,
@@ -481,6 +483,42 @@ def build_queue_panel(
     content_layout.addWidget(queue_list, stretch=1)
     queue_content_index = queue_stack.addWidget(content)
     shell.body_layout.addWidget(queue_stack, stretch=1)
+
+    clear_panel = build_button_panel(
+        shell.panel,
+        card_config=WidgetConfig(
+            object_name="runActionCard",
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        ),
+        host_config=WidgetConfig(
+            size_policy=(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            ),
+        ),
+        buttons_layout_config=LayoutConfig(
+            margins=(0, 0, 0, 0),
+            horizontal_spacing=0,
+            vertical_spacing=0,
+        ),
+        button_specs=(
+            ButtonSpec(
+                text="Clear all",
+                object_name="secondaryActionButton",
+                size_policy=(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
+                ),
+                on_click=on_clear_queue,
+            ),
+        ),
+    )
+    clear_queue_button = clear_panel.buttons[0]
+    shell.body_layout.addWidget(clear_panel.card)
+
     return QueuePanelRefs(
         panel=shell.panel,
         queue_stack=queue_stack,
@@ -488,6 +526,7 @@ def build_queue_panel(
         queue_content_index=queue_content_index,
         queue_empty_state=empty,
         queue_list=queue_list,
+        clear_queue_button=clear_queue_button,
     )
 
 
