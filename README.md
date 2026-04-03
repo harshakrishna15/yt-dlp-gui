@@ -32,14 +32,6 @@ py -3 -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-If `Activate.ps1` is blocked by your PowerShell policy, run this once in the current PowerShell session:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-Then activate the environment and continue with the install steps.
-
 ### 2. Run from source with `run_gui.py`
 
 This is the main source-based way to launch the app. `run_gui.py` prefers the repo-local `.venv` interpreter when it exists, then runs the Qt app for you.
@@ -136,6 +128,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
 That bypass applies only to that command.
+
+### `Activate.ps1` is blocked
+
+Run this once in the current PowerShell session:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+```
+
+Then activate the virtual environment again and continue with the install steps.
 
 ### The packaged app was built but does not work
 
