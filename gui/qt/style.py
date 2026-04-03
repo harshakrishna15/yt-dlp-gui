@@ -582,21 +582,21 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 12px;
             font-weight: 700;
         }
-        QFrame#queueEmptyPlaceholder {
-            background: transparent;
-            border: none;
+        QFrame#queueEmptySurface {
+            background: __surface__;
+            border: 1px solid __field_border__;
+            border-radius: 18px;
         }
         QLabel#queueEmptyIcon {
-            background: __surface_soft_alt__;
+            background: transparent;
             color: __text_inverse__;
             border: none;
-            border-radius: 18px;
             font-size: 28px;
             font-weight: 800;
         }
         QLabel#queueEmptyTitle {
             color: __text_primary__;
-            font-size: 18px;
+            font-size: 19px;
             font-weight: 800;
         }
         QLabel#queueEmptyDescription {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Generic, Sequence, TypeVar
 
 from PySide6.QtCore import (
@@ -17,7 +18,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPalette, QPen, QStandardItemModel
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
@@ -335,7 +336,9 @@ class AnimatedSegmentedRail(QWidget):
             return
 
         self._stop_selection_animation()
-        self._selection_anim = QPropertyAnimation(self._selection_frame, b"geometry", self)
+        self._selection_anim = QPropertyAnimation(
+            self._selection_frame, b"geometry", self
+        )
         self._selection_anim.setDuration(self._ANIMATION_MS)
         self._selection_anim.setStartValue(start_rect)
         self._selection_anim.setEndValue(target_rect)
@@ -351,12 +354,16 @@ class AnimatedSegmentedRail(QWidget):
             QEvent.Type.Resize,
             QEvent.Type.Show,
         }:
-            self.sync_selection(animate=self._selection_anim is not None or self._sync_queued)
+            self.sync_selection(
+                animate=self._selection_anim is not None or self._sync_queued
+            )
         return super().eventFilter(watched, event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self.sync_selection(animate=self._selection_anim is not None or self._sync_queued)
+        self.sync_selection(
+            animate=self._selection_anim is not None or self._sync_queued
+        )
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -613,7 +620,9 @@ def build_labeled_fields(
 
         row_shell = build_hbox(
             block,
-            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=spec.field_spacing),
+            layout_config=LayoutConfig(
+                margins=(0, 0, 0, 0), spacing=spec.field_spacing
+            ),
         )
         row = row_shell.widget
         row_layout = row_shell.layout
@@ -819,7 +828,9 @@ class _QueueItemDelegate(QStyledItemDelegate):
 
     def set_hovered_action(self, row: int | None, action: str | None) -> bool:
         normalized_action = action if action in {"edit", "remove"} else None
-        normalized_row = int(row) if normalized_action is not None and row is not None else -1
+        normalized_row = (
+            int(row) if normalized_action is not None and row is not None else -1
+        )
         changed = (
             self._hovered_row != normalized_row
             or self._hovered_action != normalized_action
@@ -967,7 +978,9 @@ class _QueueItemDelegate(QStyledItemDelegate):
                     self._REMOVE_BORDER_HOVER if remove_hovered else self._REMOVE_BORDER
                 )
             )
-            painter.setBrush(self._REMOVE_BG_HOVER if remove_hovered else self._REMOVE_BG)
+            painter.setBrush(
+                self._REMOVE_BG_HOVER if remove_hovered else self._REMOVE_BG
+            )
             painter.drawEllipse(remove_frame)
             icon_pen = QPen(
                 self._REMOVE_TEXT_HOVER if remove_hovered else self._REMOVE_TEXT,
@@ -1176,9 +1189,7 @@ class WorkspaceSummaryWidget(QFrame):
         meta_label = QLabel(str(meta or ""), copy_col)
         meta_label.setObjectName("workspaceSummaryMeta")
         meta_label.setWordWrap(False)
-        meta_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        meta_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         meta_label.setVisible(bool(str(meta or "").strip()))
 
         copy_col_layout.addWidget(title_label)
@@ -1249,45 +1260,63 @@ class QueueEmptyStateWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
-        root_layout.setContentsMargins(24, 24, 24, 24)
-        root_layout.setSpacing(10)
-        root_layout.addStretch(1)
-
-        placeholder_card = QFrame(self)
-        placeholder_card.setObjectName("queueEmptyPlaceholder")
-        placeholder_card.setMaximumWidth(360)
-        placeholder_card.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        self.surface_card = QFrame(self)
+        self.surface_card.setObjectName("queueEmptySurface")
+        self.surface_card.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
         )
-        placeholder_card_layout = QVBoxLayout(placeholder_card)
-        placeholder_card_layout.setContentsMargins(24, 24, 24, 24)
-        placeholder_card_layout.setSpacing(8)
+        surface_layout = QVBoxLayout(self.surface_card)
+        surface_layout.setContentsMargins(0, 0, 0, 0)
+        surface_layout.setSpacing(0)
+        surface_layout.addStretch(1)
 
-        self.placeholder_icon = QLabel("↓", placeholder_card)
+        content = QWidget(self.surface_card)
+        content.setObjectName("queueEmptyContent")
+        content.setFixedWidth(440)
+        content.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
+        self.placeholder_icon = QLabel("", content)
         self.placeholder_icon.setObjectName("queueEmptyIcon")
         self.placeholder_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.placeholder_icon.setFixedSize(64, 64)
-        self.placeholder_title = QLabel("Queue is empty", placeholder_card)
+        self.placeholder_icon.setFixedSize(32, 32)
+        queue_icon_path = (
+            Path(__file__).resolve().parent / "assets" / "queue-active.svg"
+        )
+        queue_icon = QIcon(queue_icon_path.as_posix())
+        if not queue_icon.isNull():
+            self.placeholder_icon.setPixmap(queue_icon.pixmap(QSize(32, 32)))
+        self.placeholder_title = QLabel("Queue is empty", content)
         self.placeholder_title.setObjectName("queueEmptyTitle")
         self.placeholder_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_title.setWordWrap(True)
         self.placeholder_description = QLabel(
-            "Paste a URL above to get started",
-            placeholder_card,
+            "Use Add to Queue on the Downloads screen to add videos here.",
+            content,
         )
         self.placeholder_description.setObjectName("queueEmptyDescription")
         self.placeholder_description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_description.setWordWrap(True)
 
-        placeholder_card_layout.addWidget(
+        content_layout.addWidget(
             self.placeholder_icon,
             alignment=Qt.AlignmentFlag.AlignHCenter,
         )
-        placeholder_card_layout.addWidget(self.placeholder_title)
-        placeholder_card_layout.addWidget(self.placeholder_description)
-        root_layout.addWidget(
-            placeholder_card,
-            alignment=Qt.AlignmentFlag.AlignHCenter,
+        content_layout.addWidget(
+            self.placeholder_title,
         )
-        root_layout.addStretch(1)
+        content_layout.addWidget(
+            self.placeholder_description,
+        )
+        surface_layout.addWidget(content, alignment=Qt.AlignmentFlag.AlignHCenter)
+        surface_layout.addStretch(1)
+        root_layout.addWidget(self.surface_card, stretch=1)
 
 
 def _style_combo_popup(combo: QComboBox, *, border_color: str = "#353d39") -> None:
@@ -1382,15 +1411,15 @@ class _NativeComboBox(QComboBox):
         option.currentText = placeholder
         placeholder_color = option.palette.color(QPalette.ColorRole.PlaceholderText)
         if not placeholder_color.isValid() or placeholder_color.alpha() == 0:
-            placeholder_color = QColor(option.palette.color(QPalette.ColorRole.ButtonText))
+            placeholder_color = QColor(
+                option.palette.color(QPalette.ColorRole.ButtonText)
+            )
             placeholder_color.setAlpha(190)
         option.palette.setColor(QPalette.ColorRole.ButtonText, placeholder_color)
         option.palette.setColor(QPalette.ColorRole.Text, placeholder_color)
         option.palette.setColor(QPalette.ColorRole.WindowText, placeholder_color)
 
-    def set_before_popup_callback(
-        self, callback: Callable[[], None] | None
-    ) -> None:
+    def set_before_popup_callback(self, callback: Callable[[], None] | None) -> None:
         self._before_popup_callback = callback
 
     def showPopup(self) -> None:

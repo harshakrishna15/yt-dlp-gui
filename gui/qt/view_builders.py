@@ -233,6 +233,7 @@ class _OutputSectionRefs:
     eta_label: QLabel
     item_label: QLabel
 
+
 class TopBarBuilder:
     @staticmethod
     def build(parent: QWidget) -> TopBarRefs:
@@ -401,7 +402,7 @@ class RunSectionBuilder:
                     on_click=callbacks.on_start,
                 ),
                 ButtonSpec(
-                    text="Add to queue",
+                    text="Add to Queue",
                     object_name="secondaryActionButton",
                     size_policy=action_button_policy,
                     on_click=callbacks.on_add_to_queue,
@@ -485,6 +486,7 @@ def _content_mode_selection_rect(button: QPushButton) -> QRect:
     if inset_rect.width() <= 0 or inset_rect.height() <= 0:
         return rect
     return inset_rect
+
 
 class DownloadsViewBuilder:
     @staticmethod
@@ -992,7 +994,7 @@ class DownloadsViewBuilder:
         )
         folder_row_layout.addWidget(output_dir_edit)
         folder_row_layout.addWidget(browse_button)
- 
+
         save_row_specs = (
             LabeledFieldSpec(
                 key="file_name",
@@ -1014,7 +1016,9 @@ class DownloadsViewBuilder:
         )
         file_name_label = save_row_refs["file_name"].label
         output_folder_label = save_row_refs["output_folder"].label
-        output_form_labels.extend(save_row_refs[spec.key].label for spec in save_row_specs)
+        output_form_labels.extend(
+            save_row_refs[spec.key].label for spec in save_row_specs
+        )
         output_form_rows.extend(save_row_refs[spec.key].row for spec in save_row_specs)
 
         format_layout.addWidget(save_card)

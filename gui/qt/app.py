@@ -5,7 +5,16 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QEasingCurve, QObject, QPropertyAnimation, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QEasingCurve,
+    QObject,
+    QPropertyAnimation,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import (
     QCloseEvent,
     QColor,
@@ -69,7 +78,12 @@ from .constants import (
     TOP_ACTION_ICON_PX,
     VIDEO_CONTAINERS,
 )
-from .controllers import RunQueueController, RunQueueState, SourceController, SourceState
+from .controllers import (
+    RunQueueController,
+    RunQueueState,
+    SourceController,
+    SourceState,
+)
 from .ports import SideEffectPorts
 from .qt_ports import build_qt_side_effect_ports
 from .presenter import StatusPresenter
@@ -456,9 +470,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             on_use_single_video_url=lambda: self._apply_mixed_url_choice(
                 use_playlist=False
             ),
-            on_use_playlist_url=lambda: self._apply_mixed_url_choice(
-                use_playlist=True
-            ),
+            on_use_playlist_url=lambda: self._apply_mixed_url_choice(use_playlist=True),
             run=RunSectionCallbacks(
                 on_start=self._on_start,
                 on_add_to_queue=self._on_add_to_queue,
@@ -498,9 +510,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.settings_button.clicked.connect(
             lambda _checked: self._toggle_panel("settings")
         )
-        self.queue_button.clicked.connect(
-            lambda _checked: self._toggle_panel("queue")
-        )
+        self.queue_button.clicked.connect(lambda _checked: self._toggle_panel("queue"))
         self.logs_button.clicked.connect(lambda _checked: self._toggle_panel("logs"))
         self._set_main_workspace_selection()
 
@@ -670,7 +680,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         scroll_needed = popup_height < ((row_height * combo.count()) + frame_height + 8)
         scrollbar = view.verticalScrollBar()
         scrollbar_width = (
-            scrollbar.sizeHint().width() if scroll_needed and scrollbar is not None else 0
+            scrollbar.sizeHint().width()
+            if scroll_needed and scrollbar is not None
+            else 0
         )
         combo.setMaxVisibleItems(max(1, combo.count()))
         view.setMinimumWidth(
@@ -702,22 +714,32 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 width = max(width, label.sizeHint().width())
         for label in labels:
             label.setMinimumWidth(width)
-            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
 
     def _set_output_form_label_width(self, *, min_width: int = 96) -> None:
-        labels = [label for label in getattr(self, "_output_form_labels", []) if label is not None]
+        labels = [
+            label
+            for label in getattr(self, "_output_form_labels", [])
+            if label is not None
+        ]
         if not labels:
             return
         stacked_mode = self._output_layout_mode == "stacked"
         if stacked_mode:
             for label in labels:
                 self._unlock_widget_width(label)
-                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                label.setAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                )
             return
         width = max(min_width, max(label.sizeHint().width() for label in labels))
         for label in labels:
             self._lock_widget_width(label, width)
-            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
 
     def _set_uniform_button_width(
         self,
@@ -934,7 +956,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _run_action_button_width_samples(self) -> dict[QPushButton, tuple[str, ...]]:
         return {
             self.add_queue_button: (
-                "Add to queue",
+                "Add to Queue",
                 "Update Queue Item",
             ),
         }
@@ -1129,7 +1151,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 for widget in controls
             ),
         )
-        row_margins = self.source_row.layout().contentsMargins() if self.source_row.layout() else None
+        row_margins = (
+            self.source_row.layout().contentsMargins()
+            if self.source_row.layout()
+            else None
+        )
         if row_margins is not None:
             shell_vertical_inset = 0
             url_shell = self.url_edit.parentWidget()
@@ -1176,7 +1202,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if shell_layout is not None:
             shell_margins = shell_layout.contentsMargins()
             shell_extra_width += shell_margins.left() + shell_margins.right()
-            shell_extra_width += shell_layout.spacing() * max(0, shell_layout.count() - 1)
+            shell_extra_width += shell_layout.spacing() * max(
+                0, shell_layout.count() - 1
+            )
             for index in range(shell_layout.count()):
                 widget = shell_layout.itemAt(index).widget()
                 if widget is None or widget is self.url_edit:
@@ -1255,9 +1283,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.folder_row_layout.setDirection(profile.folder_row_direction)
         self.folder_row_layout.setSpacing(profile.folder_row_spacing)
 
-    def _set_run_section_layout_mode(
-        self, profile: _ResponsiveLayoutProfile
-    ) -> None:
+    def _set_run_section_layout_mode(self, profile: _ResponsiveLayoutProfile) -> None:
         compact_height = profile.compact_run
 
         action_margin = 0
@@ -1336,7 +1362,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         self.url_edit.setToolTip("Paste a video or playlist URL.")
         self.paste_button.setToolTip("Paste URL from clipboard.")
-        self.analyze_button.setToolTip("Load formats and preview details for the current URL.")
+        self.analyze_button.setToolTip(
+            "Load formats and preview details for the current URL."
+        )
         self.mixed_url_alert.setToolTip(
             "Choose how to treat URLs that contain both video and playlist IDs."
         )
@@ -1448,7 +1476,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         has_items = self.queue_list.count() > 0
         editable = not self.queue_active
         self._refresh_queue_empty_state()
-        self.queue_stack.setCurrentIndex(self._queue_content_index)
+        self.queue_stack.setCurrentIndex(
+            self._queue_content_index if has_items else self._queue_empty_index
+        )
         self.queue_list.set_queue_editable(editable)
         self.queue_clear_button.setEnabled(has_items and editable)
 
@@ -1513,7 +1543,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._hide_source_feedback_toast(animated=False)
         elif (
             self._source_feedback_uses_toast(tone, message)
-            and self._last_toasted_source_feedback_version != self._source_feedback_version
+            and self._last_toasted_source_feedback_version
+            != self._source_feedback_version
         ):
             self._show_source_feedback_toast(message, tone=tone, title=title)
             self._last_toasted_source_feedback_version = self._source_feedback_version
@@ -1631,14 +1662,14 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 layout.invalidate()
                 layout.activate()
             if row is compact_row:
-                target_height = max(row.minimumSizeHint().height(), row.sizeHint().height())
+                target_height = max(
+                    row.minimumSizeHint().height(), row.sizeHint().height()
+                )
             else:
                 target_height = max(control_height, row.minimumSizeHint().height())
             if expand_visible_quality_row and row is quality_row:
                 target_height = max(target_height, row.sizeHint().height())
-            row.setMinimumHeight(
-                target_height
-            )
+            row.setMinimumHeight(target_height)
             row.updateGeometry()
         save_layout = self.save_card.layout()
         if save_layout is not None:
@@ -1660,9 +1691,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         ):
             return
         cards = tuple(
-            card
-            for card in (self.format_card, self.save_card)
-            if card is not None
+            card for card in (self.format_card, self.save_card) if card is not None
         )
         if len(cards) < 2:
             return
@@ -1683,9 +1712,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         available_height = (
             output_parent.contentsRect().height() if output_parent is not None else 0
         )
-        required_height = (
-            target_height * len(cards)
-        ) + (self.output_layout.spacing() * (len(cards) - 1))
+        required_height = (target_height * len(cards)) + (
+            self.output_layout.spacing() * (len(cards) - 1)
+        )
         if available_height < required_height:
             return
         for card in cards:
@@ -2106,7 +2135,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self,
         parent: QWidget | None = None,
     ) -> _SourceFeedbackToastEntry:
-        toast_parent = parent or self._source_feedback_toast_parent or self.centralWidget()
+        toast_parent = (
+            parent or self._source_feedback_toast_parent or self.centralWidget()
+        )
         if toast_parent is None:
             toast_parent = self
         refs = build_source_feedback_toast(toast_parent)
@@ -2120,13 +2151,21 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             timer=timer,
         )
         refs.dismiss_button.clicked.connect(
-            lambda checked=False, toast=entry: self._dismiss_source_feedback_toast(toast)
+            lambda checked=False, toast=entry: self._dismiss_source_feedback_toast(
+                toast
+            )
         )
-        timer.timeout.connect(lambda toast=entry: self._dismiss_source_feedback_toast(toast))
+        timer.timeout.connect(
+            lambda toast=entry: self._dismiss_source_feedback_toast(toast)
+        )
         return entry
 
     def _sync_source_feedback_toast_refs(self) -> None:
-        entry = self._source_feedback_toasts[0] if self._source_feedback_toasts else self._source_feedback_toast_placeholder
+        entry = (
+            self._source_feedback_toasts[0]
+            if self._source_feedback_toasts
+            else self._source_feedback_toast_placeholder
+        )
         if entry is None:
             return
         self.source_feedback_toast = entry.card
@@ -2138,7 +2177,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self,
         toasts: list[_SourceFeedbackToastEntry] | None = None,
     ) -> list[QRect]:
-        toast_items = list(toasts if toasts is not None else self._source_feedback_toasts)
+        toast_items = list(
+            toasts if toasts is not None else self._source_feedback_toasts
+        )
         if not toast_items:
             return []
         anchor_rect = self._source_feedback_toast_anchor_rect()
@@ -2163,7 +2204,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         return rects
 
     def _source_feedback_toast_target_rect(self) -> QRect:
-        rects = self._source_feedback_toast_target_rects(self._source_feedback_toasts[:1])
+        rects = self._source_feedback_toast_target_rects(
+            self._source_feedback_toasts[:1]
+        )
         return rects[0] if rects else QRect()
 
     def _source_feedback_toast_hidden_rect(self, target: QRect) -> QRect:
@@ -2324,7 +2367,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._hide_source_feedback_toast()
             return
         toast = self._source_feedback_toast_entry()
-        toast_title = str(title or "").strip() or self._source_feedback_toast_title(tone)
+        toast_title = str(title or "").strip() or self._source_feedback_toast_title(
+            tone
+        )
         toast.title_label.setText(toast_title)
         toast.message_label.setText(clean)
         self._set_widget_property(toast.card, "tone", str(tone or "success"))
@@ -2372,9 +2417,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             )
 
     def _visible_source_feedback_toasts(self) -> list[_SourceFeedbackToastEntry]:
-        return [toast for toast in self._source_feedback_toasts if toast.card.isVisible()]
+        return [
+            toast for toast in self._source_feedback_toasts if toast.card.isVisible()
+        ]
 
-    def _show_feedback_popup(self, *, title: str, message: str, critical: bool = False) -> None:
+    def _show_feedback_popup(
+        self, *, title: str, message: str, critical: bool = False
+    ) -> None:
         clean_message = str(message or "").strip() or "Something went wrong."
         detail = str(self._last_error_log or "").strip()
         body = clean_message
@@ -2393,7 +2442,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_PLAYLIST_INDEX)
         else:
             self.source_details_label.setText("")
-            if self.source_details_stack.currentIndex() == SOURCE_DETAILS_PLAYLIST_INDEX:
+            if (
+                self.source_details_stack.currentIndex()
+                == SOURCE_DETAILS_PLAYLIST_INDEX
+            ):
                 self.source_details_stack.setCurrentIndex(SOURCE_DETAILS_NONE_INDEX)
         self._sync_source_details_height()
 
@@ -2424,7 +2476,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if self.source_details_stack.currentIndex() == SOURCE_DETAILS_NONE_INDEX:
             target = 0
         else:
-            target = max(0, current.sizeHint().height(), current.minimumSizeHint().height())
+            target = max(
+                0, current.sizeHint().height(), current.minimumSizeHint().height()
+            )
         self._set_widget_fixed_height(self.source_details_host, target)
         self._set_widget_fixed_height(self.source_details_stack, target)
 
@@ -2522,7 +2576,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         playlist_selected = self._playlist_mode or core_urls.is_playlist_url(
             self.url_edit.text().strip()
         )
-        button_text = "Update Queue Item" if editing else "Add to queue"
+        button_text = "Update Queue Item" if editing else "Add to Queue"
         if editing:
             tooltip = "Save changes back to the selected queue item."
         elif playlist_selected:
@@ -2576,7 +2630,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         *,
         apply_format_label: bool,
     ) -> None:
-        self._set_output_dir_text(str(settings.get("output_dir") or self._default_output_dir()))
+        self._set_output_dir_text(
+            str(settings.get("output_dir") or self._default_output_dir())
+        )
         self.playlist_items_edit.setText(str(settings.get("playlist_items") or ""))
         self.filename_edit.setText(str(settings.get("custom_filename") or ""))
         encoder_value = str(settings.get("edit_friendly_encoder") or "auto")
@@ -2789,7 +2845,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             codec_label_text = "Codec"
             codec_tooltip = "No codec selection is needed for audio-only downloads."
             format_label_text = "Quality"
-            format_tooltip = "Best audio is selected automatically for audio-only downloads."
+            format_tooltip = (
+                "Best audio is selected automatically for audio-only downloads."
+            )
             format_visible = True
             codec_prompt_text = "Auto"
         else:
@@ -2805,7 +2863,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.codec_label.text() != codec_label_text
             or self.format_label.text() != format_label_text
         )
-        if self.codec_combo.count() > 0 and self.codec_combo.itemText(0) != codec_prompt_text:
+        if (
+            self.codec_combo.count() > 0
+            and self.codec_combo.itemText(0) != codec_prompt_text
+        ):
             self.codec_combo.setItemText(0, codec_prompt_text)
         self.format_combo.setVisible(format_visible)
         self.codec_label.setText(codec_label_text)
@@ -2830,7 +2891,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if info is not None:
             return info
         if self._current_mode() == "audio":
-            return self._audio_lookup.get(label) or dict(format_pipeline.BEST_AUDIO_INFO)
+            return self._audio_lookup.get(label) or dict(
+                format_pipeline.BEST_AUDIO_INFO
+            )
         return None
 
     def _snapshot_download_options(self) -> DownloadOptions:
@@ -3058,10 +3121,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             force_quit = self._effects.dialogs.question(
                 self,
                 "Cancellation in progress",
-                (
-                    "A download is still shutting down.\n\n"
-                    "Force close now?"
-                ),
+                ("A download is still shutting down.\n\n" "Force close now?"),
                 default_yes=False,
             )
             if force_quit:
