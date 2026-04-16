@@ -18,7 +18,7 @@ BUNDLE_ID="$(python3 -c 'from gui.app_meta import APP_BUNDLE_IDENTIFIER; print(A
 rm -rf build dist
 
 # Generate a fresh macOS app icon for the app bundle.
-python3 scripts/make-macos-icon.py --output build/yt-dlp-gui-icon.icns --size 1024
+python3 scripts/make-macos-icon.py --output build/yt-dlp-gui-icon.icns --size 1024 --variant macos
 
 python3 -m PyInstaller \
   --noconfirm \
@@ -27,6 +27,7 @@ python3 -m PyInstaller \
   --name "yt-dlp-gui" \
   --osx-bundle-identifier "$BUNDLE_ID" \
   --icon "build/yt-dlp-gui-icon.icns" \
+  --hidden-import "PySide6.QtSvg" \
   --add-data "gui/qt/assets:gui/qt/assets" \
   pyinstaller_entry.py
 

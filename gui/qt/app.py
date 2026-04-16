@@ -61,6 +61,8 @@ from ..app_meta import (
     APP_SHORTCUT_LINES,
     APP_VERSION,
 )
+from .assets_manifest import asset_path
+from .icon_assets import load_icon_asset, style_asset_path
 from . import style as qt_style
 from .constants import (
     AUDIO_CONTAINERS,
@@ -514,9 +516,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.logs_button.clicked.connect(lambda _checked: self._toggle_panel("logs"))
         self._set_main_workspace_selection()
 
-        combo_arrow_path = (
-            Path(__file__).resolve().parent / "assets" / "combo-down-arrow.svg"
-        ).as_posix()
+        combo_arrow_path = style_asset_path(
+            "combo-down-arrow.svg",
+            size=QSize(10, 6),
+        )
         self.setStyleSheet(qt_style.build_stylesheet(combo_arrow_path))
         self._normalize_control_sizing()
         self._set_logs_alert(False)
@@ -1394,7 +1397,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.browse_button.setToolTip("Choose output folder.")
         self.edit_friendly_encoder_combo.setToolTip(
             "Choose how edit-friendly MP4 re-encoding selects hardware. "
-            "Entries are grayed out when your installed ffmpeg does not support them."
+            "Automatic mode prefers the GPU detected on this computer, and "
+            "falls back to CPU encoding when needed."
         )
         self.open_folder_after_download_check.setToolTip(
             "Open the selected output folder after downloads finish."
@@ -1875,16 +1879,16 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         return QIcon(pixmap)
 
     def _load_asset_icon(self, filename: str) -> QIcon:
-        path = Path(__file__).resolve().parent / "assets" / filename
-        if not path.exists():
-            return self._legacy_log_alert_icon
-        icon = QIcon(path.as_posix())
+        icon = load_icon_asset(
+            filename,
+            size=QSize(TOP_ACTION_ICON_PX, TOP_ACTION_ICON_PX),
+        )
         if icon.isNull():
             return self._legacy_log_alert_icon
         return icon
 
     def _apply_window_icon(self) -> None:
-        path = Path(__file__).resolve().parent / "assets" / APP_ICON_FILENAME
+        path = asset_path(APP_ICON_FILENAME)
         if not path.exists():
             return
         icon = QIcon(path.as_posix())

@@ -3299,8 +3299,14 @@ class TestQtApp(unittest.TestCase):
         combo.showPopup()
         QApplication.processEvents()
 
-        self.assertTrue(combo.view().window().isVisible())
-        popup_stylesheet = combo.view().window().styleSheet()
+        popup = combo.view().window()
+        self.assertTrue(popup.isVisible())
+        self.assertTrue(
+            popup.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        )
+        self.assertFalse(popup.autoFillBackground())
+        popup_stylesheet = popup.styleSheet()
+        self.assertIn("background: transparent;", popup_stylesheet)
         self.assertIn("QListView#nativeComboView", popup_stylesheet)
         self.assertIn("background: #1f2422;", popup_stylesheet)
         self.assertIn("border-radius: 20px;", popup_stylesheet)

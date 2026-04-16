@@ -9,7 +9,6 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QPoint,
-    QPropertyAnimation,
     QPointF,
     QRect,
     QRectF,
@@ -17,6 +16,7 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
     Signal,
+    QVariantAnimation,
 )
 from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QStandardItemModel
 from PySide6.QtWidgets import (
@@ -39,11 +39,14 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyleOptionComboBox,
+    QStyleOption,
     QStyleOptionViewItem,
     QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
+
+from .icon_assets import load_icon_asset
 
 
 TWidget = TypeVar("TWidget", bound=QWidget)
@@ -247,6 +250,18 @@ class StableSizeHintButton(QPushButton):
 
 class AnimatedSegmentedRail(QWidget):
     _ANIMATION_MS = 220
+    _SELECTION_STYLE_BY_NAME = {
+        "topNavSelection": {
+            "fill": QColor("#24453b"),
+            "border": QColor("#418e75"),
+            "radius": 18.0,
+        },
+        "contentModeSelection": {
+            "fill": QColor("#2d8f70"),
+            "border": QColor("#418e75"),
+            "radius": 10.0,
+        },
+    }
 
     def __init__(
         self,
@@ -259,20 +274,15 @@ class AnimatedSegmentedRail(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._buttons: list[QAbstractButton] = []
         self._selected_button: QAbstractButton | None = None
-        self._selection_anim: QPropertyAnimation | None = None
+        self._selection_anim: QVariantAnimation | None = None
+        self._selection_rect = QRect()
+        self._selection_frame_object_name = selection_frame_object_name
         self._sync_queued = False
         self._selection_rect_getter = selection_rect_getter
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        self._selection_frame = QFrame(self)
-        self._selection_frame.setObjectName(selection_frame_object_name)
-        self._selection_frame.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
-        )
-        self._selection_frame.hide()
 
     def add_button(self, button: QAbstractButton, *, stretch: int = 0) -> None:
         if button in self._buttons:
@@ -291,23 +301,24 @@ class AnimatedSegmentedRail(QWidget):
         if target is None:
             self._stop_selection_animation()
             self._selected_button = None
-            self._selection_frame.hide()
+            self._selection_rect = QRect()
+            self.update()
             return
 
         target_rect = self._selection_target_rect(target)
         if target_rect.width() <= 0 or target_rect.height() <= 0:
-            self._selection_frame.hide()
+            self._selection_rect = QRect()
+            self.update()
             return
 
-        self._selection_frame.lower()
         for button in self._buttons:
             button.raise_()
 
-        if self._selected_button is None or not self._selection_frame.isVisible():
+        if self._selected_button is None or self._selection_rect.isNull():
             self._stop_selection_animation()
-            self._selection_frame.setGeometry(target_rect)
-            self._selection_frame.show()
+            self._selection_rect = QRect(target_rect)
             self._selected_button = target
+            self.update()
             return
 
         previous = self._selected_button
@@ -317,34 +328,30 @@ class AnimatedSegmentedRail(QWidget):
             if active_animation is not None and animate:
                 end_rect = active_animation.endValue()
                 if isinstance(end_rect, QRect) and end_rect == target_rect:
-                    self._selection_frame.show()
                     return
             if not animate or not self.isVisible():
                 self._stop_selection_animation()
-                self._selection_frame.setGeometry(target_rect)
-                self._selection_frame.show()
+                self._selection_rect = QRect(target_rect)
+                self.update()
                 return
         elif not animate or not self.isVisible():
             self._stop_selection_animation()
-            self._selection_frame.setGeometry(target_rect)
-            self._selection_frame.show()
+            self._selection_rect = QRect(target_rect)
+            self.update()
             return
 
-        start_rect = self._selection_frame.geometry()
+        start_rect = QRect(self._selection_rect)
         if start_rect == target_rect:
-            self._selection_frame.show()
             return
 
         self._stop_selection_animation()
-        self._selection_anim = QPropertyAnimation(
-            self._selection_frame, b"geometry", self
-        )
+        self._selection_anim = QVariantAnimation(self)
         self._selection_anim.setDuration(self._ANIMATION_MS)
         self._selection_anim.setStartValue(start_rect)
         self._selection_anim.setEndValue(target_rect)
         self._selection_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._selection_anim.valueChanged.connect(self._set_selection_rect)
         self._selection_anim.finished.connect(self._clear_selection_animation)
-        self._selection_frame.show()
         self._selection_anim.start()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
@@ -368,6 +375,24 @@ class AnimatedSegmentedRail(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         QTimer.singleShot(0, self._sync_without_animation)
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOption()
+        option.initFrom(self)
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+        if self._selection_rect.isNull():
+            return
+        style = self._SELECTION_STYLE_BY_NAME.get(
+            self._selection_frame_object_name,
+            self._SELECTION_STYLE_BY_NAME["topNavSelection"],
+        )
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(style["border"], 1))
+        painter.setBrush(style["fill"])
+        rect = QRectF(self._selection_rect).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = float(style["radius"])
+        painter.drawRoundedRect(rect, radius, radius)
 
     def _visible_checked_button(self) -> QAbstractButton | None:
         for button in self._buttons:
@@ -393,6 +418,11 @@ class AnimatedSegmentedRail(QWidget):
     def _sync_without_animation(self) -> None:
         self.sync_selection(animate=False)
 
+    def _set_selection_rect(self, value) -> None:
+        if isinstance(value, QRect):
+            self._selection_rect = QRect(value)
+            self.update()
+
     def _stop_selection_animation(self) -> None:
         if self._selection_anim is None:
             return
@@ -402,7 +432,7 @@ class AnimatedSegmentedRail(QWidget):
 
     def _clear_selection_animation(self) -> None:
         animation = self.sender()
-        if isinstance(animation, QPropertyAnimation):
+        if isinstance(animation, QVariantAnimation):
             animation.deleteLater()
         self._selection_anim = None
 
@@ -919,7 +949,13 @@ class _QueueItemDelegate(QStyledItemDelegate):
             title_font = painter.font()
             title_font.setBold(True)
             meta_font = painter.font()
-            meta_font.setPointSize(max(10, meta_font.pointSize() - 1))
+            point_size = meta_font.pointSizeF()
+            if point_size > 0:
+                meta_font.setPointSizeF(max(10.0, point_size - 1.0))
+            else:
+                pixel_size = meta_font.pixelSize()
+                if pixel_size > 0:
+                    meta_font.setPixelSize(max(10, pixel_size - 1))
 
             title_rect = QRect(text_rect)
             title_rect.setHeight(max(0, int(text_rect.height() * 0.55)))
@@ -1286,10 +1322,7 @@ class QueueEmptyStateWidget(QWidget):
         self.placeholder_icon.setObjectName("queueEmptyIcon")
         self.placeholder_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder_icon.setFixedSize(32, 32)
-        queue_icon_path = (
-            Path(__file__).resolve().parent / "assets" / "queue-active.svg"
-        )
-        queue_icon = QIcon(queue_icon_path.as_posix())
+        queue_icon = load_icon_asset("queue-active.svg", size=QSize(32, 32))
         if not queue_icon.isNull():
             self.placeholder_icon.setPixmap(queue_icon.pixmap(QSize(32, 32)))
         self.placeholder_title = QLabel("Queue is empty", content)
@@ -1321,15 +1354,14 @@ class QueueEmptyStateWidget(QWidget):
 
 def _style_combo_popup(combo: QComboBox, *, border_color: str = "#353d39") -> None:
     popup = combo.view().window()
-    popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-    popup.setAutoFillBackground(True)
+    popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    popup.setAutoFillBackground(False)
     popup.setContentsMargins(0, 0, 0, 0)
     popup.setStyleSheet(
         f"""
         QWidget {{
-            background: #0d1110;
+            background: transparent;
             border: none;
-            border-radius: 24px;
         }}
         QListView#nativeComboView {{
             background: #1f2422;
