@@ -19,14 +19,15 @@
       <stop offset="18%" stop-color="#ffffff" stop-opacity="0.22"/>
       <stop offset="100%" stop-color="#8b6e4a" stop-opacity="0.16"/>
     </linearGradient>
-    <radialGradient id="halo" cx="0.5" cy="0.42" r="0.34">
-      <stop offset="0%" stop-color="#8bdcbe" stop-opacity="0.34"/>
-      <stop offset="52%" stop-color="#8bdcbe" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#8bdcbe" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="glyphShadow" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#163f34" stop-opacity="0.24"/>
-      <stop offset="100%" stop-color="#163f34" stop-opacity="0"/>
+    <linearGradient id="arrowFill" x1="0.5" y1="0.23" x2="0.5" y2="0.78">
+      <stop offset="0%" stop-color="#39a982"/>
+      <stop offset="58%" stop-color="#2f9474"/>
+      <stop offset="100%" stop-color="#25745e"/>
+    </linearGradient>
+    <linearGradient id="trayFill" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#36a17f"/>
+      <stop offset="72%" stop-color="#2d8f70"/>
+      <stop offset="100%" stop-color="#24745d"/>
     </linearGradient>
     <clipPath id="tileClip">
       <rect x="110" y="90" width="804" height="804" rx="208"/>
@@ -41,23 +42,14 @@
     <path d="M110 700C248 654 382 632 512 632C642 632 776 654 914 700V894H110Z" fill="#e2d0b7" fill-opacity="0.10"/>
 
     <g transform="translate(512 500) scale(0.92) translate(-512 -500)">
-      <circle cx="512" cy="430" r="224" fill="url(#halo)"/>
-      <ellipse cx="512" cy="758" rx="226" ry="58" fill="url(#glyphShadow)"/>
+      <rect x="278" y="318" width="468" height="270" rx="54" fill="none" stroke="#2d8f70" stroke-opacity="0.13" stroke-width="18"/>
 
-      <g transform="translate(0 18)" fill="#226d55" fill-opacity="0.16">
-        <path d="M512 258C536.301 258 556 277.699 556 302V478H690L512 680L334 478H468V302C468 277.699 487.699 258 512 258Z"/>
-        <rect x="310" y="704" width="404" height="90" rx="45"/>
-      </g>
+      <path d="M512 240C536.301 240 556 259.699 556 284V460H690L512 662L334 460H468V284C468 259.699 487.699 240 512 240Z" fill="url(#arrowFill)"/>
+      <rect x="310" y="686" width="404" height="90" rx="45" fill="url(#trayFill)"/>
 
-      <g fill="#2d8f70">
-        <path d="M512 240C536.301 240 556 259.699 556 284V460H690L512 662L334 460H468V284C468 259.699 487.699 240 512 240Z"/>
-        <rect x="310" y="686" width="404" height="90" rx="45"/>
-      </g>
-
-      <path d="M468 240H556V302C532 296 501 296 468 302Z" fill="#38a27f" fill-opacity="0.20"/>
-      <path d="M432 302H592V448H654L512 516L370 448H432Z" fill="#8bdcbe" fill-opacity="0.18"/>
       <path d="M374 510H650L512 662Z" fill="#418e75" fill-opacity="0.14"/>
-      <rect x="356" y="714" width="312" height="24" rx="12" fill="#8bdcbe" fill-opacity="0.34"/>
+      <rect x="326" y="734" width="372" height="30" rx="15" fill="#145a46" fill-opacity="0.10"/>
+      <rect x="356" y="719" width="312" height="24" rx="12" fill="#8bdcbe" fill-opacity="0.34"/>
     </g>
   </g>
   <rect x="113" y="93" width="798" height="798" rx="205" fill="none" stroke="url(#tileEdge)" stroke-width="5"/>
