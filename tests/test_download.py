@@ -940,12 +940,16 @@ class TestEditFriendlyProgressParsing(unittest.TestCase):
 
 
 class TestEditFriendlyEncoderSelection(unittest.TestCase):
-    @patch("gui.common.download.sys.platform", "darwin")
+    @patch("gui.common.download.tooling.detect_gpu_preferences", return_value=("apple",))
     @patch(
         "gui.common.download._available_h264_video_encoders",
         return_value={"h264_nvenc", "h264_videotoolbox", "libx264"},
     )
-    def test_select_prefers_videotoolbox_on_macos(self, _mock_available) -> None:
+    def test_select_prefers_videotoolbox_on_macos(
+        self,
+        _mock_available,
+        _mock_detect_gpu_preferences,
+    ) -> None:
         logs: list[str] = []
         selected = download._select_edit_friendly_video_codec(
             ffmpeg_path=Path("/usr/bin/ffmpeg"),
@@ -954,12 +958,16 @@ class TestEditFriendlyEncoderSelection(unittest.TestCase):
         )
         self.assertEqual(selected, "h264_videotoolbox")
 
-    @patch("gui.common.download.sys.platform", "linux")
+    @patch("gui.common.download.tooling.detect_gpu_preferences", return_value=("intel",))
     @patch(
         "gui.common.download._available_h264_video_encoders",
         return_value={"h264_qsv", "libx264"},
     )
-    def test_select_prefers_qsv_when_no_nvenc_or_amf(self, _mock_available) -> None:
+    def test_select_prefers_qsv_when_intel_gpu_is_detected(
+        self,
+        _mock_available,
+        _mock_detect_gpu_preferences,
+    ) -> None:
         logs: list[str] = []
         selected = download._select_edit_friendly_video_codec(
             ffmpeg_path=Path("/usr/bin/ffmpeg"),
@@ -968,7 +976,27 @@ class TestEditFriendlyEncoderSelection(unittest.TestCase):
         )
         self.assertEqual(selected, "h264_qsv")
 
-    @patch("gui.common.download.sys.platform", "darwin")
+    @patch("gui.common.download.tooling.detect_gpu_preferences", return_value=("intel",))
+    @patch(
+        "gui.common.download._available_h264_video_encoders",
+        return_value={"h264_nvenc", "h264_qsv", "libx264"},
+    )
+    def test_select_auto_prefers_detected_gpu_when_multiple_hardware_encoders_exist(
+        self,
+        _mock_available,
+        _mock_detect_gpu_preferences,
+    ) -> None:
+        logs: list[str] = []
+        selected = download._select_edit_friendly_video_codec(
+            ffmpeg_path=Path("/usr/bin/ffmpeg"),
+            preferred="auto",
+            log=logs.append,
+        )
+        self.assertEqual(selected, "h264_qsv")
+        self.assertTrue(
+            any("Auto-detected GPU preference order: intel" in line for line in logs)
+        )
+
     @patch(
         "gui.common.download._available_h264_video_encoders",
         return_value={"h264_nvenc", "h264_videotoolbox", "libx264"},
@@ -982,7 +1010,6 @@ class TestEditFriendlyEncoderSelection(unittest.TestCase):
         )
         self.assertEqual(selected, "h264_nvenc")
 
-    @patch("gui.common.download.sys.platform", "linux")
     @patch(
         "gui.common.download._available_h264_video_encoders",
         return_value={"h264_qsv", "libx264"},
@@ -1091,7 +1118,52 @@ class TestProgressHookResilience(unittest.TestCase):
         downloading_updates = [u for u in updates if u.get("status") == "downloading"]
         self.assertTrue(downloading_updates)
         self.assertIsNone(downloading_updates[-1]["percent"])
-        self.assertEqual(downloading_updates[-1]["eta"], "—")
+        self.assertEqual(downloading_updates[-1]["eta"], "-")
+
+    def test_progress_hook_derives_speed_and_eta_from_elapsed_bytes(self) -> None:
+        updates: list[dict] = []
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=updates.append,
+            cancel_event=None,
+            ranges=[],
+        )
+        hook(
+            {
+                "status": "downloading",
+                "downloaded_bytes": 3 * 1024 * 1024,
+                "total_bytes": 9 * 1024 * 1024,
+                "elapsed": 2,
+                "info_dict": {"playlist_index": 1, "title": "Title"},
+            }
+        )
+        downloading_updates = [u for u in updates if u.get("status") == "downloading"]
+        self.assertTrue(downloading_updates)
+        self.assertEqual(downloading_updates[-1]["speed"], "1.50 MiB/s")
+        self.assertEqual(downloading_updates[-1]["eta"], "0:04")
+
+    def test_progress_hook_uses_string_speed_and_eta_fallbacks(self) -> None:
+        updates: list[dict] = []
+        hook = download._progress_hook_factory(
+            log=lambda _line: None,
+            update_progress=updates.append,
+            cancel_event=None,
+            ranges=[],
+        )
+        hook(
+            {
+                "status": "downloading",
+                "downloaded_bytes": 50,
+                "total_bytes": 100,
+                "_speed_str": "1.50MiB/s",
+                "_eta_str": "0:04",
+                "info_dict": {"playlist_index": 1, "title": "Title"},
+            }
+        )
+        downloading_updates = [u for u in updates if u.get("status") == "downloading"]
+        self.assertTrue(downloading_updates)
+        self.assertEqual(downloading_updates[-1]["speed"], "1.50 MiB/s")
+        self.assertEqual(downloading_updates[-1]["eta"], "0:04")
 
     def test_progress_hook_emits_single_video_item_title_once(self) -> None:
         updates: list[dict] = []

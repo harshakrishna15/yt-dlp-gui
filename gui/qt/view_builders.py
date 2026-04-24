@@ -262,6 +262,7 @@ class TopBarBuilder:
             top_actions,
             spec=SegmentedRailSpec(
                 object_name="topNavRail",
+                selection_rect_getter=_top_nav_selection_rect,
                 layout_margins=(4, 4, 4, 4),
                 layout_spacing=4,
                 button_specs=(
@@ -488,6 +489,14 @@ def _content_mode_selection_rect(button: QPushButton) -> QRect:
     return inset_rect
 
 
+def _top_nav_selection_rect(button: QPushButton) -> QRect:
+    rect = button.geometry()
+    inset_rect = rect.adjusted(1, 1, -1, -1)
+    if inset_rect.width() <= 0 or inset_rect.height() <= 0:
+        return rect
+    return inset_rect
+
+
 class DownloadsViewBuilder:
     @staticmethod
     def _build_downloads_state(
@@ -706,7 +715,7 @@ class DownloadsViewBuilder:
         output_layout.addWidget(link_input.row)
 
         format_card_shell = build_vbox(
-            widget=QGroupBox("", output_section),
+            widget=QFrame(output_section),
             widget_config=WidgetConfig(
                 object_name="formatSection",
                 minimum_width=0,
@@ -714,6 +723,7 @@ class DownloadsViewBuilder:
                     QSizePolicy.Policy.Expanding,
                     QSizePolicy.Policy.Fixed,
                 ),
+                widget_attributes=(Qt.WidgetAttribute.WA_StyledBackground,),
             ),
             layout_config=LayoutConfig(
                 margins=(18, 18, 18, 14),

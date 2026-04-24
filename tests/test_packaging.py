@@ -8,6 +8,7 @@ import unittest
 import zlib
 from pathlib import Path
 
+from gui import app_meta
 from gui.qt.assets_manifest import REQUIRED_ASSET_FILENAMES, assets_dir
 from scripts import check_packaged_assets
 from scripts import write_pyinstaller_version_info
@@ -273,6 +274,65 @@ class TestPackagingConfiguration(unittest.TestCase):
                     else:
                         self.assertEqual(alpha, 255)
 
+    def test_generated_windows_png_fills_canvas(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "icon.png"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "make-macos-icon.py"),
+                    "--output",
+                    str(output),
+                    "--size",
+                    "512",
+                    "--variant",
+                    "windows",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            samples = _png_alpha_samples(
+                output,
+                (
+                    (0, 0),
+                    (511, 0),
+                    (0, 511),
+                    (511, 511),
+                    (256, 256),
+                ),
+            )
+            for (x, y), alpha in samples.items():
+                with self.subTest(x=x, y=y):
+                    self.assertEqual(alpha, 255)
+
+    def test_icon_generator_can_write_windows_ico_without_explicit_pillow_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "icon.ico"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "make-macos-icon.py"),
+                    "--output",
+                    str(output),
+                    "--size",
+                    "1024",
+                    "--variant",
+                    "windows",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 0)
+
     @unittest.skipUnless(sys.platform == "darwin", "icns generation is macOS-only")
     def test_icon_generator_can_write_icns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -307,8 +367,10 @@ class TestPackagingConfiguration(unittest.TestCase):
         self.assertIn('--add-data "gui/qt/assets:gui/qt/assets"', macos_script)
         self.assertIn("--osx-bundle-identifier", macos_script)
         self.assertIn('--icon "build/yt-dlp-gui-icon.icns"', macos_script)
+        self.assertIn("--variant macos", macos_script)
         self.assertIn('--add-data "gui/qt/assets;gui/qt/assets"', windows_script)
         self.assertIn('--icon "build/yt-dlp-gui-icon.ico"', windows_script)
+        self.assertIn("--variant windows", windows_script)
         self.assertIn('--version-file "build/pyinstaller-version-info.txt"', windows_script)
         self.assertIn("pip install pyinstaller pillow", macos_script)
         self.assertIn("-m pip install pyinstaller pillow", windows_script)
@@ -321,6 +383,16 @@ class TestPackagingConfiguration(unittest.TestCase):
         self.assertIn("ProductName", payload)
         self.assertIn("yt-dlp-gui", payload)
         self.assertIn("FileDescription", payload)
+
+    def test_app_icon_filename_changes_for_windows(self) -> None:
+        self.assertEqual(
+            app_meta.app_icon_filename_for_platform("win32"),
+            app_meta.WINDOWS_APP_ICON_FILENAME,
+        )
+        self.assertEqual(
+            app_meta.app_icon_filename_for_platform("darwin"),
+            app_meta.MACOS_APP_ICON_FILENAME,
+        )
 
 if __name__ == "__main__":
     unittest.main()

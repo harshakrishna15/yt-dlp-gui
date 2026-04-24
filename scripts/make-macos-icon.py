@@ -27,13 +27,14 @@ except ModuleNotFoundError:  # pragma: no cover - build-only dependency
     Image = None
 
 
-def _icon_source_svg_path() -> Path:
+def _icon_source_svg_path(variant: str) -> Path:
+    filename = "app-icon-source-windows.svg" if variant == "windows" else "app-icon-source.svg"
     return (
         Path(__file__).resolve().parent.parent
         / "gui"
         / "qt"
         / "assets"
-        / "app-icon-source.svg"
+        / filename
     )
 
 
@@ -58,10 +59,14 @@ def _tile_clip_path(size: int) -> "QPainterPath":
     return path
 
 
-def _render_svg_icon(size: int) -> QImage:
+def _uses_tile_clip(variant: str) -> bool:
+    return variant == "macos"
+
+
+def _render_svg_icon(size: int, variant: str) -> QImage:
     if not HAS_QT:
         raise RuntimeError("PySide6 with QtSvg is required for direct SVG rendering")
-    svg_path = _icon_source_svg_path()
+    svg_path = _icon_source_svg_path(variant)
     renderer = QSvgRenderer(str(svg_path))
     if not renderer.isValid():
         raise RuntimeError(f"Failed to load SVG icon source: {svg_path}")
@@ -71,20 +76,22 @@ def _render_svg_icon(size: int) -> QImage:
     p = QPainter(image)
     p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-    # Qt's SVG rasterizer can leak low-alpha pixels past rounded clipPaths.
-    # Apply the final tile mask at the painter level so exported PNG/ICNS
-    # never carry corner ghosting regardless of renderer behavior.
-    p.setClipPath(_tile_clip_path(size))
+    if _uses_tile_clip(variant):
+        # Qt's SVG rasterizer can leak low-alpha pixels past rounded clipPaths.
+        # Apply the final tile mask at the painter level so exported PNG/ICNS
+        # never carry corner ghosting regardless of renderer behavior.
+        p.setClipPath(_tile_clip_path(size))
     renderer.render(p)
     p.end()
     return image
 
 
-def _master_png_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "gui" / "qt" / "assets" / "tmp-mac-app-icon.png"
+def _master_png_path(variant: str) -> Path:
+    filename = "tmp-windows-app-icon.png" if variant == "windows" else "tmp-mac-app-icon.png"
+    return Path(__file__).resolve().parent.parent / "gui" / "qt" / "assets" / filename
 
 
-def _render_svg_icon_with_appkit(output_path: Path, size: int) -> None:
+def _render_svg_icon_with_appkit(output_path: Path, size: int, variant: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     scale = float(size) / _ICON_VIEWBOX_SIZE
     tile_x = _ICON_TILE_X * scale
@@ -95,7 +102,7 @@ def _render_svg_icon_with_appkit(output_path: Path, size: int) -> None:
 import AppKit
 import Foundation
 
-let input = URL(fileURLWithPath: {json.dumps(str(_icon_source_svg_path()))})
+let input = URL(fileURLWithPath: {json.dumps(str(_icon_source_svg_path(variant)))})
 let output = URL(fileURLWithPath: {json.dumps(str(output_path))})
 let size = NSSize(width: {int(size)}, height: {int(size)})
 let tileRect = CGRect(x: {tile_x}, y: {tile_y}, width: {tile_size}, height: {tile_size})
@@ -127,7 +134,9 @@ guard let context = NSGraphicsContext(bitmapImageRep: rep) else {{
 }}
 NSGraphicsContext.current = context
 context.cgContext.clear(CGRect(origin: .zero, size: size))
-NSBezierPath(roundedRect: tileRect, xRadius: tileRadius, yRadius: tileRadius).addClip()
+if {str(_uses_tile_clip(variant)).lower()} {{
+    NSBezierPath(roundedRect: tileRect, xRadius: tileRadius, yRadius: tileRadius).addClip()
+}}
 image.draw(in: CGRect(origin: .zero, size: size))
 context.flushGraphics()
 NSGraphicsContext.restoreGraphicsState()
@@ -188,16 +197,16 @@ def _resize_png_with_pillow(source_png: Path, output_path: Path, size: int) -> N
         resized.save(output_path, format="PNG")
 
 
-def write_icon_png(output_path: Path, size: int) -> None:
+def write_icon_png(output_path: Path, size: int, variant: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if HAS_QT:
-        if not _render_svg_icon(size).save(str(output_path), "PNG"):
+        if not _render_svg_icon(size, variant).save(str(output_path), "PNG"):
             raise RuntimeError(f"Failed to write {output_path}")
         return
     if sys.platform == "darwin":
-        _render_svg_icon_with_appkit(output_path, size)
+        _render_svg_icon_with_appkit(output_path, size, variant)
         return
-    master_png = _master_png_path()
+    master_png = _master_png_path(variant)
     if not master_png.is_file():
         raise RuntimeError(f"Missing master icon PNG: {master_png}")
     if int(size) == 1024:
@@ -209,13 +218,45 @@ def write_icon_png(output_path: Path, size: int) -> None:
     raise RuntimeError("PySide6 or Pillow is required to generate resized PNG icons on this platform")
 
 
-def write_icon_ico(output_path: Path, size: int) -> None:
-    if Image is None:
-        raise RuntimeError("Pillow is required to generate .ico files")
+def write_icon_ico(output_path: Path, size: int, variant: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    icon_sizes = (256, 128, 64, 48, 32, 16)
+    if Image is None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            entries: list[bytes] = []
+            payloads: list[bytes] = []
+            offset = 6 + (16 * len(icon_sizes))
+            for target_size in icon_sizes:
+                png_path = tmp_path / f"icon-{target_size}.png"
+                write_icon_png(png_path, target_size, variant)
+                data = png_path.read_bytes()
+                width = 0 if target_size == 256 else target_size
+                height = 0 if target_size == 256 else target_size
+                entries.append(
+                    struct.pack(
+                        "<BBBBHHII",
+                        width,
+                        height,
+                        0,
+                        0,
+                        1,
+                        32,
+                        len(data),
+                        offset,
+                    )
+                )
+                payloads.append(data)
+                offset += len(data)
+            output_path.write_bytes(
+                struct.pack("<HHH", 0, 1, len(icon_sizes))
+                + b"".join(entries)
+                + b"".join(payloads)
+            )
+        return
     with tempfile.TemporaryDirectory() as tmp:
         png_path = Path(tmp) / "icon.png"
-        write_icon_png(png_path, size)
+        write_icon_png(png_path, size, variant)
         with Image.open(png_path) as image:
             image.save(
                 output_path,
@@ -224,12 +265,12 @@ def write_icon_ico(output_path: Path, size: int) -> None:
             )
 
 
-def write_icon_icns(output_path: Path, size: int) -> None:
+def write_icon_icns(output_path: Path, size: int, variant: str) -> None:
     if HAS_QT and Image is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as tmp:
             png_path = Path(tmp) / "icon.png"
-            write_icon_png(png_path, size)
+            write_icon_png(png_path, size, variant)
             with Image.open(png_path) as image:
                 image.save(output_path, format="ICNS")
         return
@@ -251,7 +292,7 @@ def write_icon_icns(output_path: Path, size: int) -> None:
         chunks: list[bytes] = []
         for chunk_type, target_size in icns_entries:
             png_path = tmp_path / f"{chunk_type}.png"
-            write_icon_png(png_path, target_size)
+            write_icon_png(png_path, target_size, variant)
             data = png_path.read_bytes()
             chunks.append(
                 chunk_type.encode("ascii")
@@ -262,15 +303,24 @@ def write_icon_icns(output_path: Path, size: int) -> None:
         output_path.write_bytes(b"icns" + struct.pack(">I", len(body) + 8) + body)
 
 
-def write_icon(output_path: Path, size: int) -> None:
+def _detect_variant(output_path: Path, variant: str | None) -> str:
+    if variant:
+        return variant
+    if output_path.suffix.lower() == ".ico":
+        return "windows"
+    return "macos"
+
+
+def write_icon(output_path: Path, size: int, variant: str | None = None) -> None:
+    resolved_variant = _detect_variant(output_path, variant)
     suffix = output_path.suffix.lower()
     if suffix == ".ico":
-        write_icon_ico(output_path, size)
+        write_icon_ico(output_path, size, resolved_variant)
         return
     if suffix == ".icns":
-        write_icon_icns(output_path, size)
+        write_icon_icns(output_path, size, resolved_variant)
         return
-    write_icon_png(output_path, size)
+    write_icon_png(output_path, size, resolved_variant)
 
 
 def main() -> int:
@@ -286,9 +336,15 @@ def main() -> int:
         default=1024,
         help="Square icon size in pixels (default: 1024)",
     )
+    parser.add_argument(
+        "--variant",
+        choices=("macos", "windows"),
+        default=None,
+        help="Icon variant to export (default: infer from output suffix)",
+    )
     args = parser.parse_args()
 
-    write_icon(Path(args.output), int(args.size))
+    write_icon(Path(args.output), int(args.size), args.variant)
     return 0
 
 

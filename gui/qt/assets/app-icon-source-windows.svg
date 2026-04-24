@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0.08" y1="0.04" x2="0.92" y2="0.96">
+      <stop offset="0%" stop-color="#eef2ef"/>
+      <stop offset="58%" stop-color="#e3e9e5"/>
+      <stop offset="100%" stop-color="#d4dcd7"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="0.18" cy="0.12" r="0.92">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.92"/>
+      <stop offset="42%" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0.14" y1="0.1" x2="0.86" y2="0.9">
+      <stop offset="0%" stop-color="#a9ead0"/>
+      <stop offset="54%" stop-color="#76d0ab"/>
+      <stop offset="100%" stop-color="#51b891"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0.16" y1="0.08" x2="0.84" y2="0.92">
+      <stop offset="0%" stop-color="#fffdfa"/>
+      <stop offset="60%" stop-color="#f7efe1"/>
+      <stop offset="100%" stop-color="#ecd9be"/>
+    </linearGradient>
+    <radialGradient id="panelGlow" cx="0.24" cy="0.14" r="0.84">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.90"/>
+      <stop offset="40%" stop-color="#ffffff" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panelEdge" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.78"/>
+      <stop offset="22%" stop-color="#ffffff" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#8a6c47" stop-opacity="0.18"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.4" r="0.36">
+      <stop offset="0%" stop-color="#8bdcbe" stop-opacity="0.34"/>
+      <stop offset="54%" stop-color="#8bdcbe" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#8bdcbe" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glyph" x1="0.5" y1="0.06" x2="0.5" y2="0.94">
+      <stop offset="0%" stop-color="#39a37f"/>
+      <stop offset="100%" stop-color="#2d8d6f"/>
+    </linearGradient>
+    <linearGradient id="glyphHighlight" x1="0.18" y1="0.14" x2="0.82" y2="0.86">
+      <stop offset="0%" stop-color="#90e0c2"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="shadow" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#163f34" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#163f34" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#bgGlow)"/>
+  <path d="M0 798C154 736 326 704 516 704C700 704 870 734 1024 796V1024H0Z" fill="#8bdcbe" fill-opacity="0.10"/>
+  <path d="M0 0H1024V258C860 214 690 204 514 226C332 248 160 302 0 390Z" fill="#ffffff" fill-opacity="0.08"/>
+
+  <rect x="182" y="212" width="624" height="624" rx="132" fill="url(#accent)"/>
+  <rect x="204" y="162" width="624" height="624" rx="124" fill="#163f34" fill-opacity="0.12"/>
+  <rect x="196" y="148" width="624" height="624" rx="124" fill="url(#panel)"/>
+  <rect x="196" y="148" width="624" height="624" rx="124" fill="url(#panelGlow)"/>
+  <path d="M196 618C308 578 414 558 514 558C614 558 720 578 820 618V772H196Z" fill="#e6d3b9" fill-opacity="0.16"/>
+  <rect x="200" y="152" width="616" height="616" rx="120" fill="none" stroke="url(#panelEdge)" stroke-width="6"/>
+
+  <g transform="translate(512 498) scale(1.02) translate(-512 -498)">
+    <circle cx="512" cy="392" r="214" fill="url(#halo)"/>
+    <ellipse cx="512" cy="786" rx="230" ry="56" fill="url(#shadow)"/>
+
+    <g transform="translate(12 22)" fill="#226d55" fill-opacity="0.15">
+      <path d="M512 236C540.719 236 564 259.281 564 288V452H692L512 662L332 452H460V288C460 259.281 483.281 236 512 236Z"/>
+      <rect x="320" y="680" width="404" height="104" rx="52"/>
+    </g>
+
+    <g fill="url(#glyph)">
+      <path d="M512 220C540.719 220 564 243.281 564 272V436H692L512 646L332 436H460V272C460 243.281 483.281 220 512 220Z"/>
+      <rect x="320" y="664" width="404" height="104" rx="52"/>
+    </g>
+
+    <path d="M460 220H564V296C538 288 503 288 460 296Z" fill="url(#glyphHighlight)" fill-opacity="0.42"/>
+    <path d="M410 288H614V430H670L512 516L354 430H410Z" fill="#8bdcbe" fill-opacity="0.20"/>
+    <path d="M374 506H650L512 646Z" fill="#225e4d" fill-opacity="0.12"/>
+    <rect x="362" y="704" width="320" height="24" rx="12" fill="#8bdcbe" fill-opacity="0.34"/>
+  </g>
+</svg>

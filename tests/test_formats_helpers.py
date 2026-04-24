@@ -157,6 +157,42 @@ class TestTooling(unittest.TestCase):
         self.assertEqual(str(path), "/usr/local/bin/ffmpeg")
         self.assertEqual(source, "system")
 
+    @patch("gui.common.tooling.sys.platform", "win32")
+    @patch("gui.common.tooling.subprocess.run")
+    def test_detect_gpu_preferences_prefers_nvidia_when_detected_on_windows(
+        self,
+        mock_run,
+    ) -> None:
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout="Intel(R) UHD Graphics\nNVIDIA GeForce RTX 4060 Laptop GPU\n",
+            stderr="",
+        )
+
+        detected = tooling.detect_gpu_preferences()
+
+        self.assertEqual(detected, ("nvidia", "intel"))
+
+    @patch("gui.common.tooling.sys.platform", "linux")
+    @patch("gui.common.tooling._linux_gpu_vendors_from_sysfs", return_value=())
+    @patch("gui.common.tooling.subprocess.run")
+    def test_detect_gpu_preferences_uses_lspci_when_sysfs_is_unavailable(
+        self,
+        mock_run,
+        _mock_sysfs,
+    ) -> None:
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout=(
+                "00:02.0 VGA compatible controller: Intel Corporation Iris Xe Graphics\n"
+            ),
+            stderr="",
+        )
+
+        detected = tooling.detect_gpu_preferences()
+
+        self.assertEqual(detected, ("intel",))
+
     @patch("gui.common.tooling.subprocess.run")
     def test_available_ffmpeg_encoders_parses_requested_candidates(
         self,

@@ -5,7 +5,7 @@ Double-click this file or run `python run_gui.py`.
 Prefers the local .venv interpreter if present.
 """
 
-import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,7 +22,14 @@ def main() -> None:
     if not package_dir.exists():
         sys.stderr.write("Could not find gui/\n")
         sys.exit(1)
-    os.execv(str(python_bin), [str(python_bin), "-m", "gui", *sys.argv[1:]])
+
+    # `os.execv` can mis-handle Windows paths with spaces in some environments.
+    result = subprocess.run(
+        [str(python_bin), "-m", "gui", *sys.argv[1:]],
+        cwd=str(repo_root),
+        check=False,
+    )
+    raise SystemExit(result.returncode)
 
 
 if __name__ == "__main__":

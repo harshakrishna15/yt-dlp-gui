@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..core import options as core_options
+from . import tooling
 from .types import FormatInfo, ProgressUpdate
 from .tooling import available_ffmpeg_encoders, resolve_binary
 
@@ -94,6 +95,12 @@ EDIT_FRIENDLY_HARDWARE_VIDEO_CODECS = (
     "h264_amf",
     "h264_qsv",
 )
+EDIT_FRIENDLY_VENDOR_VIDEO_CODECS = {
+    "apple": "h264_videotoolbox",
+    "nvidia": "h264_nvenc",
+    "amd": "h264_amf",
+    "intel": "h264_qsv",
+}
 
 
 def _thumbnail_embed_container(
@@ -688,7 +695,7 @@ def _reencode_edit_friendly_mp4_file(
                     {
                         "status": "downloading",
                         "percent": percent,
-                        "speed": f"{speed_ratio:.2f}x" if speed_ratio else "—",
+                        "speed": f"{speed_ratio:.2f}x" if speed_ratio else "-",
                         "eta": format_duration(eta_seconds)
                         if eta_seconds is not None
                         else "Finalizing",
@@ -731,7 +738,7 @@ def _reencode_edit_friendly_mp4_file(
                     total_duration_s=total_duration_s,
                     out_seconds=duration_s if duration_s is not None else 0.0,
                 ),
-                "speed": "—",
+                "speed": "-",
                 "eta": "Finalizing",
                 "playlist_eta": "",
             }
@@ -794,13 +801,8 @@ def _select_edit_friendly_video_codec(
 ) -> str:
     preference = core_options.normalize_edit_friendly_encoder_preference(preferred)
     encoders = _available_h264_video_encoders(ffmpeg_path)
-    manual_map = {
-        "apple": "h264_videotoolbox",
-        "nvidia": "h264_nvenc",
-        "amd": "h264_amf",
-        "intel": "h264_qsv",
-        "cpu": EDIT_FRIENDLY_VIDEO_CODEC,
-    }
+    manual_map = dict(EDIT_FRIENDLY_VENDOR_VIDEO_CODECS)
+    manual_map["cpu"] = EDIT_FRIENDLY_VIDEO_CODEC
     if preference in manual_map:
         codec = manual_map[preference]
         if codec in encoders:
@@ -812,7 +814,7 @@ def _select_edit_friendly_video_codec(
         )
         return EDIT_FRIENDLY_VIDEO_CODEC
 
-    preferred_hardware = _hardware_encoder_priority()
+    preferred_hardware = _hardware_encoder_priority(log=log)
     for codec in preferred_hardware:
         if codec in encoders:
             log(f"[export] Using hardware encoder: {codec}")
@@ -824,7 +826,24 @@ def _select_edit_friendly_video_codec(
     return EDIT_FRIENDLY_VIDEO_CODEC
 
 
-def _hardware_encoder_priority() -> tuple[str, ...]:
+def _hardware_encoder_priority(
+    *,
+    log: Callable[[str], None] | None = None,
+) -> tuple[str, ...]:
+    detected_preferences = tooling.detect_gpu_preferences()
+    if detected_preferences:
+        detected_codecs = tuple(
+            EDIT_FRIENDLY_VENDOR_VIDEO_CODECS[preference]
+            for preference in detected_preferences
+            if preference in EDIT_FRIENDLY_VENDOR_VIDEO_CODECS
+        )
+        if detected_codecs:
+            if log is not None:
+                log(
+                    "[export] Auto-detected GPU preference order: "
+                    + ", ".join(detected_preferences)
+                )
+            return detected_codecs
     if sys.platform == "darwin":
         return (
             "h264_videotoolbox",
@@ -997,6 +1016,7 @@ def _progress_hook_factory(
     *,
     record_output: Callable[[Path], None] | None = None,
 ) -> Callable[[dict], None]:
+    placeholder_text = "-"
     last_log = {"ts": 0.0}
     last_item = {"key": None}
     active_item = {"key": None, "started_at": None}
@@ -1016,7 +1036,7 @@ def _progress_hook_factory(
 
     def _format_speed(bytes_per_sec: float | None) -> str:
         if not bytes_per_sec or bytes_per_sec <= 0:
-            return "—"
+            return placeholder_text
         units = ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s"]
         value = float(bytes_per_sec)
         unit_idx = 0
@@ -1029,11 +1049,11 @@ def _progress_hook_factory(
 
     def _format_eta(seconds: float | None) -> str:
         if seconds is None:
-            return "—"
+            return placeholder_text
         try:
             seconds_i = int(max(0, seconds))
         except (TypeError, ValueError, OverflowError):
-            return "—"
+            return placeholder_text
         m, s = divmod(seconds_i, 60)
         h, m = divmod(m, 60)
         if h:
@@ -1057,6 +1077,79 @@ def _progress_hook_factory(
         if parsed < 0:
             return None
         return parsed
+
+    def _clean_status_text(value: object) -> str:
+        if not isinstance(value, str):
+            return ""
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        if cleaned.lower() in {
+            "-",
+            "--",
+            "n/a",
+            "na",
+            "nan",
+            "none",
+            "unknown",
+            "inf",
+        }:
+            return ""
+        return cleaned
+
+    def _speed_from_status_value(value: object) -> float | None:
+        parsed = _as_non_negative_float(value)
+        if parsed is not None:
+            return parsed
+        cleaned = _clean_status_text(value)
+        if not cleaned:
+            return None
+        match = re.search(
+            r"([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b/s)",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        magnitude = _as_non_negative_float(match.group(1))
+        if magnitude is None:
+            return None
+        multipliers = {
+            "b/s": 1.0,
+            "kib/s": 1024.0,
+            "mib/s": 1024.0**2,
+            "gib/s": 1024.0**3,
+            "tib/s": 1024.0**4,
+        }
+        return magnitude * multipliers.get(match.group(2).lower(), 1.0)
+
+    def _eta_seconds_from_status_value(value: object) -> float | None:
+        parsed = _as_non_negative_float(value)
+        if parsed is not None:
+            return parsed
+        cleaned = _clean_status_text(value)
+        if not cleaned:
+            return None
+        numeric_text = _as_non_negative_float(cleaned)
+        if numeric_text is not None:
+            return numeric_text
+        match = re.fullmatch(r"(?:(\d+):)?(\d{1,2}):(\d{2})", cleaned)
+        if not match:
+            return None
+        hours = int(match.group(1) or 0)
+        minutes = int(match.group(2))
+        seconds = int(match.group(3))
+        return float((hours * 3600) + (minutes * 60) + seconds)
+
+    def _derived_speed_bps(
+        downloaded_bytes: float | None,
+        elapsed_seconds: float | None,
+    ) -> float | None:
+        if downloaded_bytes is None or downloaded_bytes <= 0:
+            return None
+        if elapsed_seconds is None or elapsed_seconds <= 0:
+            return None
+        return downloaded_bytes / elapsed_seconds
 
     def _percent_from_status_string(value: object) -> float | None:
         if not isinstance(value, str):
@@ -1114,23 +1207,39 @@ def _progress_hook_factory(
                 last_log["ts"] = now
                 downloaded = status.get("downloaded_bytes")
                 total = status.get("total_bytes") or status.get("total_bytes_estimate")
+                downloaded_bytes = _as_non_negative_float(downloaded)
+                total_bytes = _as_non_negative_float(total)
+                elapsed_s = _as_non_negative_float(status.get("elapsed"))
                 try:
                     pct_val = (float(downloaded) / float(total) * 100.0) if downloaded and total else None
                 except (TypeError, ValueError, ZeroDivisionError):
                     pct_val = None
                 if pct_val is None:
                     pct_val = _percent_from_status_string(status.get("_percent_str"))
-                eta_s = _as_non_negative_float(status.get("eta"))
+                speed_bps = _speed_from_status_value(status.get("speed"))
+                if speed_bps is None:
+                    speed_bps = _speed_from_status_value(status.get("_speed_str"))
+                if speed_bps is None:
+                    speed_bps = _derived_speed_bps(downloaded_bytes, elapsed_s)
+
+                eta_s = _eta_seconds_from_status_value(status.get("eta"))
+                if eta_s is None:
+                    eta_s = _eta_seconds_from_status_value(status.get("_eta_str"))
+                if (
+                    eta_s is None
+                    and speed_bps is not None
+                    and speed_bps > 0
+                    and total_bytes is not None
+                    and downloaded_bytes is not None
+                ):
+                    eta_s = max(0.0, total_bytes - downloaded_bytes) / speed_bps
                 if pct_val is None and eta_s is not None:
-                    elapsed_s = _as_non_negative_float(status.get("elapsed"))
                     if elapsed_s is not None:
                         total_time_s = elapsed_s + eta_s
                         if total_time_s > 0:
                             pct_val = (elapsed_s / total_time_s) * 100.0
                 if pct_val is not None:
                     pct_val = max(0.0, min(100.0, float(pct_val)))
-                speed_bps = _as_non_negative_float(status.get("speed"))
-                downloaded_bytes = _as_non_negative_float(downloaded)
                 playlist_eta = ""
                 if playlist_count and display_index and eta_s is not None:
                     remaining_after_current = max(

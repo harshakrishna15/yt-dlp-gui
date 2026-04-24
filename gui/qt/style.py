@@ -216,7 +216,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: transparent;
             border: none;
         }
-        QGroupBox#formatSection {
+        QFrame#formatSection {
             margin-top: 0px;
             padding: 0px;
             background: __surface__;
@@ -232,13 +232,13 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
             border-radius: 0px;
         }
-        QWidget#outputSection[stage="ready"] QGroupBox#formatSection {
+        QWidget#outputSection[stage="ready"] QFrame#formatSection {
             background: __surface__;
         }
-        QGroupBox#formatSection[stage="staged"] {
+        QFrame#formatSection[stage="staged"] {
             background: __surface__;
         }
-        QGroupBox#formatSection[stage="loading"] {
+        QFrame#formatSection[stage="loading"] {
             background: __surface__;
         }
         QWidget#commandBar {
@@ -756,15 +756,15 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __accent_border__;
             background: __field_surface_focus__;
         }
-        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit {
+        QFrame#formatSection QWidget#outputCardBlock QLineEdit {
             background: __field_surface__;
             border: 1px solid __border_soft__;
             border-radius: 16px;
         }
-        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:hover {
+        QFrame#formatSection QWidget#outputCardBlock QLineEdit:hover {
             background: __field_surface_hover__;
         }
-        QGroupBox#formatSection QWidget#outputCardBlock QLineEdit:focus {
+        QFrame#formatSection QWidget#outputCardBlock QLineEdit:focus {
             background: __field_surface_focus__;
             border: 1px solid __accent_border__;
         }
