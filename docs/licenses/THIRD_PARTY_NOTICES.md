@@ -9,7 +9,7 @@ Project scope: hobby/personal use.
 
 | Package | Version | License (metadata) | Upstream |
 |---|---|---|---|
-| yt-dlp | 2026.1.29 | Unlicense | https://github.com/yt-dlp/yt-dlp |
+| yt-dlp | 2026.7.4 | Unlicense | https://github.com/yt-dlp/yt-dlp |
 | brotli | 1.2.0 | MIT | https://github.com/google/brotli |
 | certifi | 2026.1.4 | MPL-2.0 | https://github.com/certifi/python-certifi |
 | charset-normalizer | 3.4.4 | MIT | https://github.com/jawah/charset_normalizer |

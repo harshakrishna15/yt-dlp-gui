@@ -250,18 +250,6 @@ class StableSizeHintButton(QPushButton):
 
 class AnimatedSegmentedRail(QWidget):
     _ANIMATION_MS = 220
-    _SELECTION_STYLE_BY_NAME = {
-        "topNavSelection": {
-            "fill": QColor("#24453b"),
-            "border": QColor("#418e75"),
-            "radius": 18.0,
-        },
-        "contentModeSelection": {
-            "fill": QColor("#2d8f70"),
-            "border": QColor("#418e75"),
-            "radius": 10.0,
-        },
-    }
 
     def __init__(
         self,
@@ -277,6 +265,12 @@ class AnimatedSegmentedRail(QWidget):
         self._selection_anim: QVariantAnimation | None = None
         self._selection_rect = QRect()
         self._selection_frame_object_name = selection_frame_object_name
+        self._selection_frame = QFrame(self)
+        self._selection_frame.setObjectName(selection_frame_object_name)
+        self._selection_frame.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self._selection_frame.hide()
         self._sync_queued = False
         self._selection_rect_getter = selection_rect_getter
 
@@ -302,12 +296,14 @@ class AnimatedSegmentedRail(QWidget):
             self._stop_selection_animation()
             self._selected_button = None
             self._selection_rect = QRect()
+            self._sync_selection_frame()
             self.update()
             return
 
         target_rect = self._selection_target_rect(target)
         if target_rect.width() <= 0 or target_rect.height() <= 0:
             self._selection_rect = QRect()
+            self._sync_selection_frame()
             self.update()
             return
 
@@ -318,6 +314,7 @@ class AnimatedSegmentedRail(QWidget):
             self._stop_selection_animation()
             self._selection_rect = QRect(target_rect)
             self._selected_button = target
+            self._sync_selection_frame()
             self.update()
             return
 
@@ -332,11 +329,13 @@ class AnimatedSegmentedRail(QWidget):
             if not animate or not self.isVisible():
                 self._stop_selection_animation()
                 self._selection_rect = QRect(target_rect)
+                self._sync_selection_frame()
                 self.update()
                 return
         elif not animate or not self.isVisible():
             self._stop_selection_animation()
             self._selection_rect = QRect(target_rect)
+            self._sync_selection_frame()
             self.update()
             return
 
@@ -381,18 +380,6 @@ class AnimatedSegmentedRail(QWidget):
         option.initFrom(self)
         painter = QPainter(self)
         self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
-        if self._selection_rect.isNull():
-            return
-        style = self._SELECTION_STYLE_BY_NAME.get(
-            self._selection_frame_object_name,
-            self._SELECTION_STYLE_BY_NAME["topNavSelection"],
-        )
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(style["border"], 1))
-        painter.setBrush(style["fill"])
-        rect = QRectF(self._selection_rect).adjusted(0.5, 0.5, -0.5, -0.5)
-        radius = float(style["radius"])
-        painter.drawRoundedRect(rect, radius, radius)
 
     def _visible_checked_button(self) -> QAbstractButton | None:
         for button in self._buttons:
@@ -421,7 +408,18 @@ class AnimatedSegmentedRail(QWidget):
     def _set_selection_rect(self, value) -> None:
         if isinstance(value, QRect):
             self._selection_rect = QRect(value)
+            self._sync_selection_frame()
             self.update()
+
+    def _sync_selection_frame(self) -> None:
+        if self._selection_rect.isNull():
+            self._selection_frame.hide()
+            return
+        self._selection_frame.setGeometry(self._selection_rect)
+        self._selection_frame.show()
+        self._selection_frame.lower()
+        for button in self._buttons:
+            button.raise_()
 
     def _stop_selection_animation(self) -> None:
         if self._selection_anim is None:
