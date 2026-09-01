@@ -166,7 +166,9 @@ class SourceController:
     def start_fetch_formats(self) -> None:
         w = self.window
         s = self.state
-        if w._is_downloading:
+        if w._is_downloading or bool(
+            getattr(w, "_yt_dlp_update_in_progress", False)
+        ):
             return
         url = w.url_edit.text().strip()
         if not url or s.pending_mixed_url:
@@ -330,7 +332,9 @@ class RunQueueController:
         self._refresh_run_state()
         w = self.window
         s = self.state
-        if s.is_downloading:
+        if s.is_downloading or bool(
+            getattr(w, "_yt_dlp_update_in_progress", False)
+        ):
             return
         if s.queue_items:
             self.start_queue_download()
@@ -654,6 +658,8 @@ class RunQueueController:
         self._refresh_run_state()
         w = self.window
         s = self.state
+        if bool(getattr(w, "_yt_dlp_update_in_progress", False)):
+            return
         queue_check = core_workflow.validate_queue_start(
             is_downloading=s.is_downloading,
             queue_items=s.queue_items,

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import threading
 import unittest
@@ -10,7 +11,7 @@ ensure_yt_dlp_stub()
 
 from yt_dlp.utils import DownloadCancelled
 
-from gui.common import download
+from gui.common import download, yt_dlp_binary, yt_dlp_cli
 
 
 class TestPlaylistParsing(unittest.TestCase):
@@ -914,6 +915,75 @@ class TestRunDownload(unittest.TestCase):
         self.assertTrue(any("[retry]" in line for line in self.logs))
         self.assertTrue(any("[cancelled] Download cancelled." in line for line in self.logs))
         self.assertIn({"status": "cancelled"}, self.updates)
+
+
+class TestExternalYtDlpDownload(unittest.TestCase):
+    def test_run_download_uses_resolved_external_binary(self) -> None:
+        logs: list[str] = []
+        updates: list[dict] = []
+        recorded: list[Path] = []
+        resolved = yt_dlp_binary.YtDlpBinary(
+            path=Path("/opt/yt-dlp-gui/yt-dlp"),
+            source="managed",
+            version="2026.08.19",
+        )
+
+        def _run_process(args: list[str], **kwargs):
+            self.assertEqual(args[0], str(resolved.path))
+            kwargs["on_progress"](
+                {
+                    "status": "downloading",
+                    "downloaded_bytes": 50,
+                    "total_bytes": 100,
+                    "info_dict": {"title": "Example"},
+                }
+            )
+            kwargs["on_output"](Path("/tmp/Example.m4a"))
+            return yt_dlp_cli.YtDlpProcessResult(returncode=0, cancelled=False)
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("YT_DLP_GUI_PYTHON_BACKEND", None)
+            with patch.object(download, "YoutubeDL", None):
+                with patch.object(
+                    download.yt_dlp_binary,
+                    "resolve_yt_dlp_binary",
+                    return_value=resolved,
+                ):
+                    with patch.object(
+                        download,
+                        "resolve_binary",
+                        return_value=(None, "missing"),
+                    ):
+                        with patch.object(
+                            download.yt_dlp_cli,
+                            "run_download_process",
+                            side_effect=_run_process,
+                        ) as run_process:
+                            result = download.run_download(
+                                url="https://example.test/audio",
+                                output_dir=Path("/tmp"),
+                                fmt_info={
+                                    "format_id": "140",
+                                    "vcodec": "none",
+                                    "acodec": "mp4a.40.2",
+                                    "ext": "m4a",
+                                },
+                                fmt_label="Audio M4A",
+                                format_filter="m4a",
+                                convert_to_mp4=False,
+                                playlist_enabled=False,
+                                playlist_items=None,
+                                cancel_event=threading.Event(),
+                                log=logs.append,
+                                update_progress=updates.append,
+                                record_output=recorded.append,
+                            )
+
+        self.assertEqual(result, download.DOWNLOAD_SUCCESS)
+        run_process.assert_called_once()
+        self.assertIn(Path("/tmp/Example.m4a"), recorded)
+        self.assertTrue(any(update.get("status") == "downloading" for update in updates))
+        self.assertIn("[done] Download complete.", logs)
 
 
 class TestEditFriendlyProgressParsing(unittest.TestCase):

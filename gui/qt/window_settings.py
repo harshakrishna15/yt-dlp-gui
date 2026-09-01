@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtWidgets import QWidget
 
-from ..common import diagnostics, settings_store, tooling
+from ..common import diagnostics, settings_store, tooling, yt_dlp_binary
 from . import panels as qt_panels
 from .constants import LOG_MAX_LINES
+from .platform_paths import system_downloads_path
 
 if TYPE_CHECKING:
     from .app import QtYtDlpGui
@@ -47,11 +48,15 @@ class WindowSettingsMixin:
         refs = qt_panels.build_settings_panel(
             parent=self,
             register_native_combo=self._register_native_combo,
+            on_update_yt_dlp=self._update_yt_dlp,
             on_export_diagnostics=self._export_diagnostics,
         )
         self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
         self.open_folder_after_download_check = refs.open_folder_after_download_check
+        self.yt_dlp_version_label = refs.yt_dlp_version_label
+        self.yt_dlp_update_button = refs.yt_dlp_update_button
         self.export_diagnostics_button = refs.export_diagnostics_button
+        self._refresh_yt_dlp_version()
         self._refresh_edit_friendly_encoder_availability()
         return refs.panel
 
@@ -88,7 +93,7 @@ class WindowSettingsMixin:
         return refs.panel
 
     def _default_output_dir(self: "QtYtDlpGui") -> str:
-        return str(Path.home() / "Downloads")
+        return str(system_downloads_path())
 
     def _set_output_dir_text(self: "QtYtDlpGui", value: str) -> None:
         raw = str(value or self._default_output_dir()).strip() or self._default_output_dir()
@@ -111,16 +116,6 @@ class WindowSettingsMixin:
 
     def _settings_bindings(self: "QtYtDlpGui") -> tuple[_SettingBinding, ...]:
         return (
-            _SettingBinding(
-                key="output_dir",
-                apply=lambda value: self._set_output_dir_text(
-                    str(value or self._default_output_dir())
-                ),
-                capture=lambda: self.output_dir_edit.text().strip(),
-                connect=lambda callback: self.output_dir_edit.textChanged.connect(
-                    lambda _text: callback()
-                ),
-            ),
             _SettingBinding(
                 key="edit_friendly_encoder",
                 apply=self._set_edit_friendly_encoder_preference,
@@ -146,11 +141,10 @@ class WindowSettingsMixin:
         )
 
     def _load_user_settings(self: "QtYtDlpGui") -> None:
-        settings = settings_store.load_settings(
-            default_output_dir=self._default_output_dir()
-        )
+        settings = settings_store.load_settings()
         self._applying_user_settings = True
         try:
+            self._set_output_dir_text(self._default_output_dir())
             for binding in self._settings_bindings():
                 binding.apply(settings.get(binding.key))
         finally:
@@ -165,10 +159,7 @@ class WindowSettingsMixin:
     def _save_user_settings(self: "QtYtDlpGui") -> None:
         if self._applying_user_settings:
             return
-        settings_store.save_settings(
-            self._capture_user_settings(),
-            default_output_dir=self._default_output_dir(),
-        )
+        settings_store.save_settings(self._capture_user_settings())
 
     def _connect_settings_autosave(self: "QtYtDlpGui") -> None:
         for binding in self._settings_bindings():
@@ -187,6 +178,93 @@ class WindowSettingsMixin:
                 preference,
                 codec in available_codecs,
                 disabled_tooltip=_EDIT_FRIENDLY_ENCODER_DISABLED_TOOLTIP,
+            )
+
+    def _refresh_yt_dlp_version(
+        self: "QtYtDlpGui", *, force: bool = False
+    ) -> None:
+        if self._yt_dlp_binary_source and not force:
+            self._sync_yt_dlp_update_button()
+            return
+        resolved = yt_dlp_binary.resolve_yt_dlp_binary()
+        if resolved is None:
+            self._yt_dlp_binary_source = "missing"
+            self.yt_dlp_version_label.setText("yt-dlp unavailable")
+            self.yt_dlp_update_button.setEnabled(False)
+            return
+        self._yt_dlp_binary_source = resolved.source
+        self.yt_dlp_version_label.setText(f"yt-dlp {resolved.version}")
+        self._sync_yt_dlp_update_button()
+
+    def _sync_yt_dlp_update_button(self: "QtYtDlpGui") -> None:
+        self.yt_dlp_update_button.setEnabled(
+            self._yt_dlp_binary_source == "managed"
+            and not self._yt_dlp_update_in_progress
+            and not self._is_downloading
+            and not self._is_fetching
+        )
+
+    def _update_yt_dlp(self: "QtYtDlpGui") -> None:
+        if (
+            self._yt_dlp_update_in_progress
+            or self._is_downloading
+            or self._is_fetching
+        ):
+            return
+        resolved = yt_dlp_binary.resolve_yt_dlp_binary()
+        if resolved is None or resolved.source != "managed":
+            self._effects.dialogs.critical(
+                self,
+                "yt-dlp update unavailable",
+                "The managed yt-dlp executable is not available in this build.",
+            )
+            return
+        self._yt_dlp_update_in_progress = True
+        self.yt_dlp_version_label.setText("Checking for yt-dlp updates...")
+        self.yt_dlp_update_button.setEnabled(False)
+        self._set_status("Updating yt-dlp...")
+        self._update_controls_state()
+        self._effects.worker_executor.submit(self._update_yt_dlp_worker)
+
+    def _update_yt_dlp_worker(self: "QtYtDlpGui") -> None:
+        try:
+            result = yt_dlp_binary.update_managed_yt_dlp()
+        except Exception as exc:
+            result = yt_dlp_binary.YtDlpUpdateResult(
+                success=False,
+                changed=False,
+                version="unknown",
+                message=f"yt-dlp update failed: {exc}",
+            )
+        self._signals.yt_dlp_update_done.emit(result)
+
+    def _on_yt_dlp_update_done(
+        self: "QtYtDlpGui", result: object
+    ) -> None:
+        self._yt_dlp_update_in_progress = False
+        if not isinstance(result, yt_dlp_binary.YtDlpUpdateResult):
+            result = yt_dlp_binary.YtDlpUpdateResult(
+                success=False,
+                changed=False,
+                version="unknown",
+                message="yt-dlp update returned an invalid result.",
+            )
+        self._yt_dlp_binary_source = ""
+        self._refresh_yt_dlp_version(force=True)
+        self._append_log(f"[update] {result.message}")
+        self._set_status("yt-dlp updated" if result.success else "yt-dlp update failed")
+        self._update_controls_state()
+        if result.success:
+            self._effects.dialogs.information(
+                self,
+                "yt-dlp update",
+                result.message,
+            )
+        else:
+            self._effects.dialogs.critical(
+                self,
+                "yt-dlp update failed",
+                result.message,
             )
 
     def _maybe_open_output_folder(self: "QtYtDlpGui") -> None:

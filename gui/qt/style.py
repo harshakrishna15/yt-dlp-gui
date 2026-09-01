@@ -559,6 +559,11 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-size: 13px;
             font-weight: 700;
         }
+        QLabel#settingsEngineVersion {
+            color: __text_muted__;
+            font-size: 13px;
+            font-weight: 700;
+        }
         QLabel#panelEmptyBadge {
             background: __accent_soft__;
             border: none;

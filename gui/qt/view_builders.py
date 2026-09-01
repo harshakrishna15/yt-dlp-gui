@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Sequence
 
 from PySide6.QtCore import Qt
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from .constants import OUTPUT_CARD_STACK_GAP
 from .link_input import LinkInputRefs, build_link_input_module
+from .platform_paths import system_downloads_path
 from .widgets import (
     ButtonSpec,
     CheckBoxSpec,
@@ -985,7 +985,7 @@ class DownloadsViewBuilder:
         output_dir_edit = build_line_edit(
             folder_row,
             spec=LineEditSpec(
-                text=str(Path.home() / "Downloads"),
+                text=str(system_downloads_path()),
                 widget_config=WidgetConfig(minimum_width=0),
                 read_only=True,
             ),

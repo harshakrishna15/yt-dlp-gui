@@ -57,6 +57,9 @@ You can still run the app directly if you want:
 ## Build A Packaged App
 
 Use the packaging scripts when you want a standalone app instead of running from source.
+Each build downloads and verifies the latest stable official yt-dlp executable.
+Packaged apps keep an updateable copy in the user's application-data directory;
+use `Update yt-dlp` in Preferences for later yt-dlp releases.
 
 ### macOS
 
@@ -89,7 +92,9 @@ Output:
 4. Click `Download` to start immediately, or `Add to Queue` to send it to the queue panel.
 5. Use `Queue`, `Logs`, and `Preferences` as needed.
 
-Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can override that path with `YT_DLP_GUI_SETTINGS_PATH`.
+Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can
+override that path with `YT_DLP_GUI_SETTINGS_PATH`. The output folder is
+session-only and resets to the computer's Downloads folder each time the app starts.
 
 ## Troubleshooting
 

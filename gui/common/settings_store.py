@@ -64,17 +64,15 @@ def prepare_output_dir_path(
     return fallback
 
 
-def default_settings(*, default_output_dir: str | None = None) -> dict[str, Any]:
-    output_dir = str(default_output_dir_path(default_output_dir=default_output_dir))
+def default_settings() -> dict[str, Any]:
     return {
-        "output_dir": output_dir,
         "edit_friendly_encoder": "auto",
         "open_folder_after_download": False,
     }
 
 
-def load_settings(*, default_output_dir: str | None = None) -> dict[str, Any]:
-    settings = default_settings(default_output_dir=default_output_dir)
+def load_settings() -> dict[str, Any]:
+    settings = default_settings()
     path = user_settings_path()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -87,10 +85,8 @@ def load_settings(*, default_output_dir: str | None = None) -> dict[str, Any]:
 
 def save_settings(
     settings: Mapping[str, Any],
-    *,
-    default_output_dir: str | None = None,
 ) -> bool:
-    defaults = default_settings(default_output_dir=default_output_dir)
+    defaults = default_settings()
     normalized = _normalize_settings(settings, defaults=defaults)
     path = user_settings_path()
     try:
@@ -110,10 +106,6 @@ def _normalize_settings(
     defaults: Mapping[str, Any],
 ) -> dict[str, Any]:
     out = dict(defaults)
-
-    output_dir = str(payload.get("output_dir", "")).strip()
-    if output_dir:
-        out["output_dir"] = output_dir
 
     out["edit_friendly_encoder"] = _coerce_edit_friendly_encoder(
         payload.get("edit_friendly_encoder", defaults.get("edit_friendly_encoder", "auto"))

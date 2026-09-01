@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..core import options as core_options
-from . import tooling
+from . import tooling, yt_dlp_binary, yt_dlp_cli
 from .types import FormatInfo, ProgressUpdate
 from .tooling import available_ffmpeg_encoders, resolve_binary
 
@@ -339,6 +339,84 @@ def run_download(
     edit_friendly_encoder: str = "auto",
     record_output: Callable[[Path], None] | None = None,
 ) -> str:
+    binary = yt_dlp_binary.resolve_yt_dlp_binary()
+    force_python = os.environ.get("YT_DLP_GUI_PYTHON_BACKEND", "").strip() == "1"
+    if binary is None or force_python or YoutubeDL is not None:
+        return _run_download_python(
+            url=url,
+            output_dir=output_dir,
+            fmt_info=fmt_info,
+            fmt_label=fmt_label,
+            format_filter=format_filter,
+            convert_to_mp4=convert_to_mp4,
+            playlist_enabled=playlist_enabled,
+            playlist_items=playlist_items,
+            cancel_event=cancel_event,
+            log=log,
+            update_progress=update_progress,
+            network_retries=network_retries,
+            network_timeout_s=network_timeout_s,
+            retry_backoff_s=retry_backoff_s,
+            concurrent_fragments=concurrent_fragments,
+            subtitle_languages=subtitle_languages,
+            write_subtitles=write_subtitles,
+            embed_subtitles=embed_subtitles,
+            audio_language=audio_language,
+            custom_filename=custom_filename,
+            edit_friendly_encoder=edit_friendly_encoder,
+            record_output=record_output,
+        )
+    return _run_download_cli(
+        binary_path=binary.path,
+        url=url,
+        output_dir=output_dir,
+        fmt_info=fmt_info,
+        fmt_label=fmt_label,
+        format_filter=format_filter,
+        convert_to_mp4=convert_to_mp4,
+        playlist_enabled=playlist_enabled,
+        playlist_items=playlist_items,
+        cancel_event=cancel_event,
+        log=log,
+        update_progress=update_progress,
+        network_retries=network_retries,
+        network_timeout_s=network_timeout_s,
+        retry_backoff_s=retry_backoff_s,
+        concurrent_fragments=concurrent_fragments,
+        subtitle_languages=subtitle_languages,
+        write_subtitles=write_subtitles,
+        embed_subtitles=embed_subtitles,
+        audio_language=audio_language,
+        custom_filename=custom_filename,
+        edit_friendly_encoder=edit_friendly_encoder,
+        record_output=record_output,
+    )
+
+
+def _run_download_python(
+    url: str,
+    output_dir: Path,
+    fmt_info: FormatInfo | None,
+    fmt_label: str,
+    format_filter: str,
+    convert_to_mp4: bool,
+    playlist_enabled: bool,
+    playlist_items: str | None,
+    cancel_event: threading.Event | None,
+    log: Callable[[str], None],
+    update_progress: Callable[[ProgressUpdate], None],
+    network_retries: int = YDL_ATTEMPT_RETRIES,
+    network_timeout_s: int = YDL_SOCKET_TIMEOUT_SECONDS,
+    retry_backoff_s: float = YDL_RETRY_BACKOFF_SECONDS,
+    concurrent_fragments: int = YDL_MAX_CONCURRENT_FRAGMENTS,
+    subtitle_languages: list[str] | None = None,
+    write_subtitles: bool = False,
+    embed_subtitles: bool = False,
+    audio_language: str = "",
+    custom_filename: str = "",
+    edit_friendly_encoder: str = "auto",
+    record_output: Callable[[Path], None] | None = None,
+) -> str:
     """Run a yt-dlp download with progress callbacks."""
     start_ts = time.time()
     result = DOWNLOAD_SUCCESS
@@ -457,6 +535,175 @@ def run_download(
             result = DOWNLOAD_SUCCESS
             log("[done] Download complete.")
             break
+    elapsed = time.time() - start_ts
+    log(f"[time] Total item time: {format_duration(elapsed)}")
+    return result
+
+
+def _run_download_cli(
+    *,
+    binary_path: Path,
+    url: str,
+    output_dir: Path,
+    fmt_info: FormatInfo | None,
+    fmt_label: str,
+    format_filter: str,
+    convert_to_mp4: bool,
+    playlist_enabled: bool,
+    playlist_items: str | None,
+    cancel_event: threading.Event | None,
+    log: Callable[[str], None],
+    update_progress: Callable[[ProgressUpdate], None],
+    network_retries: int,
+    network_timeout_s: int,
+    retry_backoff_s: float,
+    concurrent_fragments: int,
+    subtitle_languages: list[str] | None,
+    write_subtitles: bool,
+    embed_subtitles: bool,
+    audio_language: str,
+    custom_filename: str,
+    edit_friendly_encoder: str,
+    record_output: Callable[[Path], None] | None,
+) -> str:
+    start_ts = time.time()
+    result = DOWNLOAD_SUCCESS
+    attempts = max(1, int(network_retries) + 1)
+    update_warning_logged = {"value": False}
+
+    def _safe_update(payload: ProgressUpdate) -> None:
+        try:
+            update_progress(payload)
+        except Exception as exc:
+            if update_warning_logged["value"]:
+                return
+            update_warning_logged["value"] = True
+            log(f"[progress] UI update failed: {exc}")
+
+    def _mark_cancelled() -> None:
+        nonlocal result
+        result = DOWNLOAD_CANCELLED
+        log("[cancelled] Download cancelled.")
+        _safe_update({"status": "cancelled"})
+
+    for attempt in range(1, attempts + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            _mark_cancelled()
+            break
+        attempt_outputs: list[Path] = []
+        seen_outputs: set[str] = set()
+
+        def _record_output(path: Path) -> None:
+            try:
+                candidate = Path(path)
+            except (TypeError, ValueError):
+                return
+            key = str(candidate)
+            if key and key not in seen_outputs:
+                seen_outputs.add(key)
+                attempt_outputs.append(candidate)
+            if record_output is None:
+                return
+            try:
+                record_output(candidate)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                pass
+
+        opts = build_ydl_opts(
+            url=url,
+            output_dir=output_dir,
+            fmt_info=fmt_info,
+            fmt_label=fmt_label,
+            format_filter=format_filter,
+            convert_to_mp4=convert_to_mp4,
+            playlist_enabled=playlist_enabled,
+            playlist_items=playlist_items,
+            cancel_event=cancel_event,
+            log=log,
+            update_progress=update_progress,
+            network_timeout_s=network_timeout_s,
+            concurrent_fragments=concurrent_fragments,
+            subtitle_languages=subtitle_languages,
+            write_subtitles=write_subtitles,
+            embed_subtitles=embed_subtitles,
+            audio_language=audio_language,
+            custom_filename=custom_filename,
+            record_output=_record_output,
+        )
+        command = yt_dlp_cli.build_download_args(
+            binary_path,
+            url=url,
+            options=opts,
+        )
+        progress_hook = opts["progress_hooks"][0]
+        try:
+            process_result = yt_dlp_cli.run_download_process(
+                command,
+                cancel_event=cancel_event,
+                on_progress=progress_hook,
+                on_output=_record_output,
+                log=log,
+            )
+        except DownloadCancelled:
+            _mark_cancelled()
+            break
+        except KeyboardInterrupt:
+            _mark_cancelled()
+            break
+        except OSError as exc:
+            process_result = None
+            log(f"[error] Could not start yt-dlp: {exc}")
+
+        if process_result is not None and process_result.cancelled:
+            _mark_cancelled()
+            break
+        if process_result is None or process_result.returncode != 0:
+            result = DOWNLOAD_ERROR
+            if process_result is not None:
+                log(f"[error] yt-dlp exited with status {process_result.returncode}.")
+            if attempt >= attempts:
+                break
+            wait_s = max(0.0, float(retry_backoff_s)) * (2 ** (attempt - 1))
+            log(
+                f"[retry] Attempt {attempt}/{attempts - 1} failed; "
+                f"retrying in {wait_s:.1f}s"
+            )
+            if wait_s > 0:
+                deadline = time.time() + wait_s
+                while time.time() < deadline:
+                    if cancel_event is not None and cancel_event.is_set():
+                        _mark_cancelled()
+                        break
+                    time.sleep(0.1)
+                if result == DOWNLOAD_CANCELLED:
+                    break
+            continue
+
+        postprocessor_hook = opts["postprocessor_hooks"][0]
+        for output_path in tuple(attempt_outputs):
+            if output_path.exists():
+                postprocessor_hook(
+                    {"status": "finished", "filename": str(output_path)}
+                )
+        try:
+            _postprocess_edit_friendly_mp4(
+                output_paths=attempt_outputs,
+                format_filter=format_filter,
+                fmt_info=fmt_info,
+                edit_friendly_encoder=edit_friendly_encoder,
+                cancel_event=cancel_event,
+                update_progress=_safe_update,
+                log=log,
+            )
+        except DownloadCancelled:
+            _mark_cancelled()
+            break
+        except Exception as exc:
+            log(f"[export] edit-friendly step failed: {exc}")
+        result = DOWNLOAD_SUCCESS
+        log("[done] Download complete.")
+        break
+
     elapsed = time.time() - start_ts
     log(f"[time] Total item time: {format_duration(elapsed)}")
     return result
@@ -1304,6 +1551,7 @@ def _progress_hook_factory(
             _safe_update({"status": "finished"})
 
     return hook
+
 
 def _postprocessor_hook_factory(
     log: Callable[[str], None],

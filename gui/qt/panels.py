@@ -47,6 +47,8 @@ class SettingsPanelRefs:
     panel: QWidget
     edit_friendly_encoder_combo: _NativeComboBox
     open_folder_after_download_check: QCheckBox
+    yt_dlp_version_label: QLabel
+    yt_dlp_update_button: QPushButton
     export_diagnostics_button: QPushButton
 
 
@@ -324,6 +326,7 @@ def build_settings_panel(
     *,
     parent: QWidget,
     register_native_combo: Callable[[_NativeComboBox], None],
+    on_update_yt_dlp: Callable[[], None],
     on_export_diagnostics: Callable[[], None],
 ) -> SettingsPanelRefs:
     shell = _build_panel_shell(
@@ -372,6 +375,37 @@ def build_settings_panel(
         edit_friendly_encoder_combo, alignment=Qt.AlignmentFlag.AlignLeft
     )
     settings_stack_layout.addWidget(encode_card.card)
+
+    engine_card = _build_settings_card(
+        settings_stack,
+        title="Download engine",
+    )
+    engine_row_shell = build_hbox(
+        engine_card.card,
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
+    )
+    engine_row = engine_row_shell.widget
+    engine_row_layout = engine_row_shell.layout
+    yt_dlp_version_label = build_label(
+        engine_row,
+        spec=LabelSpec(
+            text="yt-dlp unavailable",
+            widget_config=WidgetConfig(object_name="settingsEngineVersion"),
+        ),
+    )
+    yt_dlp_update_button = build_button(
+        engine_row,
+        spec=ButtonSpec(
+            text="Update yt-dlp",
+            on_click=on_update_yt_dlp,
+            object_name="ghostButton",
+        ),
+    )
+    engine_row_layout.addWidget(yt_dlp_version_label)
+    engine_row_layout.addStretch(1)
+    engine_row_layout.addWidget(yt_dlp_update_button)
+    engine_card.layout.addWidget(engine_row)
+    settings_stack_layout.addWidget(engine_card.card)
 
     open_folder_after_download_check = build_checkbox(
         settings_stack,
@@ -452,6 +486,8 @@ def build_settings_panel(
         panel=shell.panel,
         edit_friendly_encoder_combo=edit_friendly_encoder_combo,
         open_folder_after_download_check=open_folder_after_download_check,
+        yt_dlp_version_label=yt_dlp_version_label,
+        yt_dlp_update_button=yt_dlp_update_button,
         export_diagnostics_button=export_diagnostics_button,
     )
 

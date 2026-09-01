@@ -9,6 +9,7 @@ ensure_yt_dlp_stub()
 
 from gui.common import formats as formats_mod
 from gui.common import tooling
+from gui.common import yt_dlp_binary
 from gui.common import yt_dlp_helpers as helpers
 
 
@@ -235,23 +236,19 @@ class TestTooling(unittest.TestCase):
 
 class TestToolchainDetection(unittest.TestCase):
     @patch("gui.common.yt_dlp_helpers.resolve_binary")
-    @patch("gui.common.yt_dlp_helpers._import_yt_dlp")
+    @patch("gui.common.yt_dlp_helpers.yt_dlp_binary.resolve_yt_dlp_binary")
     def test_detect_toolchain_reports_versions_and_paths(
         self,
-        mock_import_yt_dlp,
+        mock_resolve_yt_dlp,
         mock_resolve_binary,
     ) -> None:
-        class _FakeVersion:
-            __version__ = "2026.1.29"
-
-        class _FakeYtDlpModule:
-            version = _FakeVersion()
-
-        mock_import_yt_dlp.return_value = _FakeYtDlpModule
+        mock_resolve_yt_dlp.return_value = yt_dlp_binary.YtDlpBinary(
+            path=Path("/usr/local/bin/yt-dlp"),
+            source="system",
+            version="2026.08.19",
+        )
 
         def _resolve(tool: str):
-            if tool == "yt-dlp":
-                return (Path("/usr/local/bin/yt-dlp"), "system")
             if tool == "ffmpeg":
                 return (Path("/usr/local/bin/ffmpeg"), "system")
             if tool == "ffprobe":
@@ -261,7 +258,7 @@ class TestToolchainDetection(unittest.TestCase):
         mock_resolve_binary.side_effect = _resolve
         detected = helpers.detect_toolchain()
 
-        self.assertEqual(detected["yt_dlp_module_version"], "2026.1.29")
+        self.assertEqual(detected["yt_dlp_module_version"], "2026.08.19")
         self.assertEqual(detected["yt_dlp_binary_source"], "system")
         self.assertEqual(detected["yt_dlp_binary_path"], "/usr/local/bin/yt-dlp")
         self.assertEqual(detected["ffmpeg_source"], "system")

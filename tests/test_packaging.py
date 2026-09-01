@@ -11,6 +11,7 @@ from pathlib import Path
 from gui import app_meta
 from gui.qt.assets_manifest import REQUIRED_ASSET_FILENAMES, assets_dir
 from scripts import check_packaged_assets
+from scripts import fetch_yt_dlp_binary
 from scripts import write_pyinstaller_version_info
 
 
@@ -368,14 +369,44 @@ class TestPackagingConfiguration(unittest.TestCase):
         self.assertIn("--osx-bundle-identifier", macos_script)
         self.assertIn('--icon "build/yt-dlp-gui-icon.icns"', macos_script)
         self.assertIn("--variant macos", macos_script)
+        self.assertIn("scripts/fetch_yt_dlp_binary.py", macos_script)
+        self.assertIn(
+            '--add-binary "build/yt-dlp-bin/yt-dlp:yt_dlp_bin"',
+            macos_script,
+        )
+        self.assertIn(
+            '--add-data "build/yt-dlp-bin/VERSION:yt_dlp_bin"',
+            macos_script,
+        )
+        self.assertIn(
+            '--add-data "build/yt-dlp-bin/THIRD_PARTY_LICENSES.txt:yt_dlp_bin"',
+            macos_script,
+        )
         self.assertIn('--add-data "gui/qt/assets;gui/qt/assets"', windows_script)
         self.assertIn('--icon "build/yt-dlp-gui-icon.ico"', windows_script)
         self.assertIn("--variant windows", windows_script)
+        self.assertIn("scripts/fetch_yt_dlp_binary.py", windows_script)
+        self.assertIn(
+            '--add-binary "build/yt-dlp-bin/yt-dlp.exe;yt_dlp_bin"',
+            windows_script,
+        )
+        self.assertIn(
+            '--add-data "build/yt-dlp-bin/VERSION;yt_dlp_bin"',
+            windows_script,
+        )
+        self.assertIn(
+            '--add-data "build/yt-dlp-bin/THIRD_PARTY_LICENSES.txt;yt_dlp_bin"',
+            windows_script,
+        )
         self.assertIn('--version-file "build/pyinstaller-version-info.txt"', windows_script)
         self.assertIn("pip install pyinstaller pillow", macos_script)
         self.assertIn("-m pip install pyinstaller pillow", windows_script)
         self.assertNotIn("font:font", macos_script)
         self.assertNotIn("font;font", windows_script)
+
+    def test_latest_release_assets_match_supported_platforms(self) -> None:
+        self.assertEqual(fetch_yt_dlp_binary.ASSETS["macos"], "yt-dlp_macos")
+        self.assertEqual(fetch_yt_dlp_binary.ASSETS["windows"], "yt-dlp.exe")
 
     def test_windows_version_info_includes_product_metadata(self) -> None:
         payload = write_pyinstaller_version_info.build_version_info()

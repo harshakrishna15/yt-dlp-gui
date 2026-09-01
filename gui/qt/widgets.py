@@ -59,6 +59,7 @@ class _QtSignals(QObject):
     log = Signal(str)
     download_done = Signal(str)
     queue_item_done = Signal(bool, bool)
+    yt_dlp_update_done = Signal(object)
 
 
 QUEUE_SOURCE_INDEX_ROLE = Qt.ItemDataRole.UserRole

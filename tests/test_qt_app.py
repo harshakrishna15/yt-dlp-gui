@@ -33,7 +33,7 @@ try:
         QWidget,
     )
 
-    from gui.common import download
+    from gui.common import download, yt_dlp_binary
     from gui.app_meta import (
         APP_DESCRIPTION,
         APP_DISPLAY_NAME,
@@ -75,7 +75,6 @@ class TestQtApp(unittest.TestCase):
         self._load_settings_patch = patch(
             "gui.qt.app.settings_store.load_settings",
             return_value={
-                "output_dir": str(Path.home() / "Downloads"),
                 "edit_friendly_encoder": "auto",
                 "open_folder_after_download": False,
             },
@@ -88,19 +87,30 @@ class TestQtApp(unittest.TestCase):
             "gui.qt.window_settings.tooling.available_ffmpeg_encoders",
             return_value={"h264_nvenc", "libx264"},
         )
+        self._resolve_yt_dlp_patch = patch(
+            "gui.qt.window_settings.yt_dlp_binary.resolve_yt_dlp_binary",
+            return_value=yt_dlp_binary.YtDlpBinary(
+                path=Path("/tmp/yt-dlp-gui/yt-dlp"),
+                source="managed",
+                version="2026.08.19",
+            ),
+        )
         self._load_settings_patch.start()
         self._resolve_ffmpeg_patch.start()
         self._available_ffmpeg_encoders = self._available_encoders_patch.start()
+        self._resolve_yt_dlp = self._resolve_yt_dlp_patch.start()
         self.window = QtYtDlpGui()
 
     def tearDown(self) -> None:
         self.window._is_downloading = False
+        self.window._yt_dlp_update_in_progress = False
         self.window._close_after_cancel = False
         self.window.close()
         self.window.deleteLater()
         self._load_settings_patch.stop()
         self._resolve_ffmpeg_patch.stop()
         self._available_encoders_patch.stop()
+        self._resolve_yt_dlp_patch.stop()
 
     def _assert_visible_text_widgets_fit(
         self,
@@ -1480,26 +1490,41 @@ class TestQtApp(unittest.TestCase):
         self.assertIn(APP_PRIVACY_NOTE, message)
         self.assertIn(APP_SHORTCUT_LINES[0], message)
 
-    def test_load_settings_applies_saved_output_folder(self) -> None:
+    def test_load_settings_uses_system_downloads_folder_not_saved_folder(self) -> None:
         with patch(
+            "gui.qt.platform_paths.QStandardPaths.writableLocation",
+            return_value="/tmp/system-downloads",
+        ), patch(
             "gui.qt.app.settings_store.load_settings",
             return_value={
-                "output_dir": "/tmp/custom",
+                "output_dir": "/tmp/legacy-custom",
                 "open_folder_after_download": False,
             },
         ):
             window = QtYtDlpGui()
         try:
-            self.assertEqual(window.output_dir_edit.text().strip(), "/tmp/custom")
+            self.assertEqual(
+                window.output_dir_edit.text().strip(), "/tmp/system-downloads"
+            )
         finally:
             window.close()
             window.deleteLater()
+
+    def test_output_folder_change_is_not_saved_during_session_or_close(self) -> None:
+        with patch(
+            "gui.qt.window_settings.settings_store.save_settings"
+        ) as save_settings:
+            self.window._set_output_dir_text("/tmp/session-only")
+            self.window.close()
+
+        save_settings.assert_called_once()
+        saved = save_settings.call_args.args[0]
+        self.assertNotIn("output_dir", saved)
 
     def test_load_settings_applies_edit_friendly_encoder_preference(self) -> None:
         with patch(
             "gui.qt.app.settings_store.load_settings",
             return_value={
-                "output_dir": "/tmp/custom",
                 "edit_friendly_encoder": "nvidia",
                 "open_folder_after_download": False,
             },
@@ -3090,6 +3115,53 @@ class TestQtApp(unittest.TestCase):
         self.assertNotIn("\n".join(APP_SHORTCUT_LINES), label_text)
         self.assertIsNone(settings_panel.findChild(QLabel, "settingsAppIcon"))
 
+    def test_settings_panel_shows_managed_yt_dlp_version(self) -> None:
+        self.window._open_panel("settings")
+        QApplication.processEvents()
+
+        self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
+        self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+
+    def test_update_yt_dlp_submits_background_worker_and_locks_controls(self) -> None:
+        with patch.object(self.window._effects.worker_executor, "submit") as submit:
+            self.window._update_yt_dlp()
+
+        self.assertTrue(self.window._yt_dlp_update_in_progress)
+        self.assertEqual(
+            self.window.yt_dlp_version_label.text(),
+            "Checking for yt-dlp updates...",
+        )
+        self.assertFalse(self.window.yt_dlp_update_button.isEnabled())
+        self.assertFalse(self.window.url_edit.isEnabled())
+        submit.assert_called_once()
+        self.assertEqual(submit.call_args.args[0], self.window._update_yt_dlp_worker)
+
+    def test_update_completion_refreshes_version_and_reports_success(self) -> None:
+        self.window._yt_dlp_update_in_progress = True
+        self._resolve_yt_dlp.return_value = yt_dlp_binary.YtDlpBinary(
+            path=Path("/tmp/yt-dlp-gui/yt-dlp"),
+            source="managed",
+            version="2026.09.01",
+        )
+        result = yt_dlp_binary.YtDlpUpdateResult(
+            success=True,
+            changed=True,
+            version="2026.09.01",
+            message="yt-dlp updated to 2026.09.01.",
+        )
+
+        with patch.object(self.window._effects.dialogs, "information") as information:
+            self.window._on_yt_dlp_update_done(result)
+
+        self.assertFalse(self.window._yt_dlp_update_in_progress)
+        self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.09.01")
+        self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+        information.assert_called_once_with(
+            self.window,
+            "yt-dlp update",
+            "yt-dlp updated to 2026.09.01.",
+        )
+
     def test_settings_app_footer_is_bottom_centered_without_app_heading(self) -> None:
         self.window.show()
         self.window.resize(900, 760)
@@ -3521,6 +3593,16 @@ class TestQtApp(unittest.TestCase):
         self.assertTrue(self.window._cancel_requested)
         self.assertIsNotNone(self.window._cancel_event)
         self.assertTrue(self.window._cancel_event.is_set())
+
+    def test_close_event_waits_for_yt_dlp_update(self) -> None:
+        self.window._yt_dlp_update_in_progress = True
+        event = QCloseEvent()
+
+        with patch.object(self.window._effects.dialogs, "information") as information:
+            self.window.closeEvent(event)
+
+        self.assertFalse(event.isAccepted())
+        information.assert_called_once()
 
     def test_on_download_done_closes_after_cancel(self) -> None:
         self.window._is_downloading = True

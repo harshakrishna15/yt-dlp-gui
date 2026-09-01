@@ -48,6 +48,12 @@ $env:PIP_REQUIRE_VIRTUALENV = "true"
 if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 
+& $VenvPython scripts/fetch_yt_dlp_binary.py `
+  --platform windows `
+  --output "build/yt-dlp-bin/yt-dlp.exe" `
+  --license-output "build/yt-dlp-bin/THIRD_PARTY_LICENSES.txt"
+if ($LASTEXITCODE -ne 0) { throw "Failed to fetch yt-dlp" }
+
 & $VenvPython scripts/make-macos-icon.py --output "build/yt-dlp-gui-icon.ico" --size 1024 --variant windows
 & $VenvPython scripts/write_pyinstaller_version_info.py --output "build/pyinstaller-version-info.txt"
 
@@ -59,6 +65,9 @@ if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
   --icon "build/yt-dlp-gui-icon.ico" `
   --version-file "build/pyinstaller-version-info.txt" `
   --hidden-import "PySide6.QtSvg" `
+  --add-binary "build/yt-dlp-bin/yt-dlp.exe;yt_dlp_bin" `
+  --add-data "build/yt-dlp-bin/VERSION;yt_dlp_bin" `
+  --add-data "build/yt-dlp-bin/THIRD_PARTY_LICENSES.txt;yt_dlp_bin" `
   --add-data "gui/qt/assets;gui/qt/assets" `
   pyinstaller_entry.py
 

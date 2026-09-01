@@ -223,6 +223,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._effects = effects or build_qt_side_effect_ports()
         self._source_state = SourceState()
         self._run_queue_state = RunQueueState()
+        self._yt_dlp_update_in_progress = False
+        self._yt_dlp_binary_source = ""
 
         self._signals = _QtSignals()
         self._signals.formats_loaded.connect(self._on_formats_loaded)
@@ -230,6 +232,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._signals.log.connect(self._append_log)
         self._signals.download_done.connect(self._on_download_done)
         self._signals.queue_item_done.connect(self._on_queue_item_done)
+        self._signals.yt_dlp_update_done.connect(self._on_yt_dlp_update_done)
 
         self._fetch_timer = QTimer(self)
         self._fetch_timer.setInterval(FETCH_DEBOUNCE_MS)
@@ -1016,6 +1019,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self.start_button,
             self.add_queue_button,
             self.cancel_button,
+            self.yt_dlp_update_button,
             self.export_diagnostics_button,
             self.logs_export_button,
             self.logs_clear_button,
@@ -1117,6 +1121,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self._set_uniform_button_width(
             [
+                self.yt_dlp_update_button,
                 self.export_diagnostics_button,
             ],
             extra_px=24,
@@ -1402,6 +1407,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self.open_folder_after_download_check.setToolTip(
             "Open the selected output folder after downloads finish."
+        )
+        self.yt_dlp_update_button.setToolTip(
+            "Check for and install the latest stable yt-dlp release."
         )
         self.export_diagnostics_button.setToolTip(
             "Export a diagnostics report to your output folder."
@@ -2070,6 +2078,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return
         if name == "settings":
             self._refresh_edit_friendly_encoder_availability()
+            self._refresh_yt_dlp_version(force=True)
         self.panel_stack.setCurrentIndex(index)
         self._sync_current_panel_geometry()
         if name == "logs" and self._logs_alert_active:
@@ -3082,6 +3091,14 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             state,
             pending_mixed_url=self._pending_mixed_url,
         )
+        if self._yt_dlp_update_in_progress:
+            for control in (
+                self.analyze_button,
+                self.start_button,
+                self.add_queue_button,
+                self.url_edit,
+            ):
+                control.setEnabled(False)
         self._refresh_queue_edit_action()
         self._sync_format_combo_visibility()
         self._refresh_download_sections_state(
@@ -3089,6 +3106,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             has_formats_data=has_formats_data,
             is_fetching=self._is_fetching,
         )
+        if hasattr(self, "yt_dlp_update_button"):
+            self._sync_yt_dlp_update_button()
 
         self._refresh_ready_summary()
         self._sync_current_panel_geometry()
@@ -3118,6 +3137,14 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_user_settings()
+        if self._yt_dlp_update_in_progress:
+            self._effects.dialogs.information(
+                self,
+                "yt-dlp update in progress",
+                "Wait for the yt-dlp update to finish before closing the app.",
+            )
+            event.ignore()
+            return
         if not self._is_downloading:
             event.accept()
             return

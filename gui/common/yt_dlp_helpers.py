@@ -1,5 +1,6 @@
 from typing import Any
 
+from . import yt_dlp_binary, yt_dlp_cli
 from .types import FormatInfo
 from .tooling import resolve_binary
 
@@ -19,6 +20,10 @@ def _import_yt_dlp():
 
 def fetch_info(url: str) -> dict:
     """Fetch info dict without downloading."""
+    binary = yt_dlp_binary.resolve_yt_dlp_binary()
+    if binary is not None:
+        return yt_dlp_cli.fetch_info(binary.path, url)
+
     yt_dlp = _import_yt_dlp()
     ydl_opts = {
         "quiet": True,
@@ -31,20 +36,30 @@ def fetch_info(url: str) -> dict:
 
 
 def detect_toolchain() -> dict[str, str]:
-    yt_dlp = _import_yt_dlp()
-    yt_dlp_bin, yt_dlp_source = resolve_binary("yt-dlp")
+    resolved = yt_dlp_binary.resolve_yt_dlp_binary()
     ffmpeg_bin, ffmpeg_source = resolve_binary("ffmpeg")
     ffprobe_bin, ffprobe_source = resolve_binary("ffprobe")
-    yt_dlp_module_version = getattr(getattr(yt_dlp, "version", None), "__version__", "unknown")
+    if resolved is not None:
+        yt_dlp_version = resolved.version
+        yt_dlp_source = resolved.source
+        yt_dlp_path = str(resolved.path)
+    else:
+        yt_dlp = _import_yt_dlp()
+        yt_dlp_version = getattr(
+            getattr(yt_dlp, "version", None), "__version__", "unknown"
+        )
+        yt_dlp_source = "python"
+        yt_dlp_path = "not found"
     return {
-        "yt_dlp_module_version": str(yt_dlp_module_version),
+        "yt_dlp_module_version": str(yt_dlp_version),
         "yt_dlp_binary_source": yt_dlp_source,
-        "yt_dlp_binary_path": str(yt_dlp_bin) if yt_dlp_bin else "not found",
+        "yt_dlp_binary_path": yt_dlp_path,
         "ffmpeg_source": ffmpeg_source,
         "ffmpeg_path": str(ffmpeg_bin) if ffmpeg_bin else "not found",
         "ffprobe_source": ffprobe_source,
         "ffprobe_path": str(ffprobe_bin) if ffprobe_bin else "not found",
     }
+
 
 def split_and_filter_formats(
     formats: list[FormatInfo],
