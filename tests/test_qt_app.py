@@ -3208,6 +3208,41 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
 
+    def test_resize_burst_coalesces_and_skips_unchanged_control_sizing(self) -> None:
+        window = self.window
+        window.show()
+        QTest.qWait(50)
+        with patch.object(window, "_refresh_downloads_page_geometry", wraps=window._refresh_downloads_page_geometry) as refresh, patch.object(window, "_normalize_control_sizing", wraps=window._normalize_control_sizing) as sizing:
+            for width in range(1000, 1100, 5):
+                window.resize(width, 750)
+            refresh.assert_not_called()
+            QApplication.processEvents()
+            refresh.assert_called_once()
+            sizing.assert_not_called()
+        self.assertFalse(window._resize_sync_timer.isActive())
+
+    def test_resize_across_density_threshold_recalculates_control_sizing(self) -> None:
+        window = self.window
+        window.show()
+        QTest.qWait(50)
+        with patch.object(window, "_normalize_control_sizing", wraps=window._normalize_control_sizing) as sizing:
+            window.resize(1180, 1100)
+            QApplication.processEvents()
+            sizing.assert_called_once()
+        self.assertFalse(window._responsive_layout_profile().compact_content)
+
+    def test_font_change_invalidates_resize_measurements(self) -> None:
+        window = self.window
+        window.show()
+        QTest.qWait(50)
+        with patch.object(window, "_normalize_control_sizing", wraps=window._normalize_control_sizing) as sizing:
+            font = window.font()
+            font.setPointSize(font.pointSize() + 1)
+            window.setFont(font)
+            window._queue_deferred_resize_sync()
+            QApplication.processEvents()
+            self.assertGreaterEqual(sizing.call_count, 1)
+
     def test_progress_burst_renders_latest_snapshot_once(self) -> None:
         window = self.window
         with patch.object(window, "_on_progress_update") as render:

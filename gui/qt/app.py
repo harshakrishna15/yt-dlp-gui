@@ -255,6 +255,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._resize_sync_timer = QTimer(self)
         self._resize_sync_timer.setSingleShot(True)
         self._resize_sync_timer.timeout.connect(self._run_deferred_resize_sync)
+        self._resize_profile_key: tuple | None = None
 
         self.queue_empty_state = None
 
@@ -1838,9 +1839,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             widget.updateGeometry()
 
     def _refresh_downloads_page_geometry(self) -> None:
-        self.workspace_layout.invalidate()
         self.workspace_layout.activate()
-        self.output_layout.invalidate()
         self.output_layout.activate()
         self._sync_output_stack_widths()
         refreshed_widgets: list[QWidget] = []
@@ -1857,36 +1856,30 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             widget.updateGeometry()
             layout = widget.layout()
             if layout is not None:
-                layout.invalidate()
                 layout.activate()
         main_layout = self.main_page.layout()
-        if main_layout is not None:
-            main_layout.invalidate()
-            main_layout.activate()
         self._sync_output_card_heights()
-        if main_layout is not None:
-            main_layout.invalidate()
-            main_layout.activate()
         self._sync_run_section_split_widths()
         if main_layout is not None:
-            main_layout.invalidate()
             main_layout.activate()
         self._sync_current_panel_geometry()
 
     def _queue_deferred_resize_sync(self) -> None:
-        self._resize_sync_timer.start(0)
+        if not self._resize_sync_timer.isActive():
+            self._resize_sync_timer.start(0)
 
     def _run_deferred_resize_sync(self) -> None:
+        key = (
+            self._responsive_layout_profile(), self.font().toString(),
+            self.logicalDpiX(), self.logicalDpiY(), self.devicePixelRatioF(),
+        )
+        if key != self._resize_profile_key:
+            self._normalize_control_sizing()
+            self._apply_responsive_layout()
+            self._resize_profile_key = key
+        else:
+            self._normalize_input_widths()
         self._refresh_downloads_page_geometry()
-        for widget in (
-            self.main_page,
-            self.output_section,
-            self.format_card,
-            self.save_card,
-        ):
-            layout = widget.layout()
-            if layout is not None:
-                layout.activate()
         self._layout_mixed_url_overlay()
         self._refresh_current_item_text()
 
@@ -2894,13 +2887,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
-        self._normalize_control_sizing()
-        self._apply_responsive_layout()
-        self._refresh_downloads_page_geometry()
-        self._layout_mixed_url_overlay()
-        self._refresh_current_item_text()
-        if self._is_downloading:
-            self._set_metrics_visible(True)
         self._queue_deferred_resize_sync()
 
     def closeEvent(self, event: QCloseEvent) -> None:
