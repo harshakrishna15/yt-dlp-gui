@@ -2760,38 +2760,45 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def _refresh_queue_panel(self) -> None:
         queue_list_scroll = self._list_scroll_value(self.queue_list)
-        self.queue_list.clear()
-        summary_context = queue_presentation.QueueSummaryContext(
+        with QSignalBlocker(self.queue_list):
+            while self.queue_list.count() > len(self.queue_items):
+                self.queue_list.takeItem(self.queue_list.count() - 1)
+            while self.queue_list.count() < len(self.queue_items):
+                self.queue_list.addItem(QListWidgetItem())
+            for row in range(len(self.queue_items)):
+                self._update_queue_row(row)
+            editing_index = self._editing_queue_index()
+            if editing_index is not None and 0 <= editing_index < self.queue_list.count():
+                self.queue_list.setCurrentRow(int(editing_index))
+        self._refresh_queue_panel_state()
+        self._restore_list_scroll_value(self.queue_list, queue_list_scroll)
+
+    def _update_queue_row(self, row: int) -> None:
+        if not 0 <= row < len(self.queue_items):
+            return
+        list_item = self.queue_list.item(row)
+        if list_item is None:
+            return
+        context = queue_presentation.QueueSummaryContext(
             current_url=self.url_edit.text(),
             current_preview_title=self._preview_title_raw,
             current_item_title=self._current_item_title_tooltip,
-            progress_text=self.progress_label.text(),
-            speed_text=self.speed_label.text(),
-            eta_text=self.eta_label.text(),
         )
-        for idx, item in enumerate(self.queue_items, start=1):
-            is_active = (
-                self.queue_active
-                and self.queue_index is not None
-                and (idx - 1) == self.queue_index
-            )
-            entry = queue_presentation.build_queue_list_entry(
-                item,
-                idx=idx,
-                active=is_active,
-                context=summary_context,
-            )
-            list_item = QListWidgetItem(entry.title)
-            list_item.setData(QUEUE_SOURCE_INDEX_ROLE, idx - 1)
-            list_item.setData(QUEUE_TITLE_ROLE, entry.title)
-            list_item.setData(QUEUE_META_ROLE, entry.meta)
+        entry = queue_presentation.build_queue_list_entry(
+            self.queue_items[row], idx=row + 1,
+            active=self.queue_active and self.queue_index == row, context=context,
+        )
+        if list_item.text() != entry.title:
+            list_item.setText(entry.title)
+        for role, value in (
+            (QUEUE_SOURCE_INDEX_ROLE, row),
+            (QUEUE_TITLE_ROLE, entry.title),
+            (QUEUE_META_ROLE, entry.meta),
+        ):
+            if list_item.data(role) != value:
+                list_item.setData(role, value)
+        if list_item.toolTip() != entry.tooltip:
             list_item.setToolTip(entry.tooltip)
-            self.queue_list.addItem(list_item)
-        editing_index = self._editing_queue_index()
-        if editing_index is not None and 0 <= editing_index < self.queue_list.count():
-            self.queue_list.setCurrentRow(int(editing_index))
-        self._refresh_queue_panel_state()
-        self._restore_list_scroll_value(self.queue_list, queue_list_scroll)
 
     def _update_controls_state(self) -> None:
         url_present = bool(self.url_edit.text().strip())

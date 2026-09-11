@@ -3208,6 +3208,50 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
 
+    def test_queue_progress_does_not_rebuild_or_touch_rows(self) -> None:
+        window = self.window
+        window.queue_items = [{"url": f"https://example.test/{i}", "title": f"Video {i}"} for i in range(500)]
+        window.queue_active = True
+        window.queue_index = 0
+        window._refresh_queue_panel()
+        first = window.queue_list.item(0)
+        window.queue_list.setCurrentRow(4)
+        with patch("gui.qt.app.queue_presentation.build_queue_list_entry") as build:
+            for percent in range(20):
+                window._on_progress_update({"status": "downloading", "percent": percent})
+            build.assert_not_called()
+        self.assertIs(window.queue_list.item(0), first)
+        self.assertEqual(window.queue_list.currentRow(), 4)
+
+    def test_queue_title_update_changes_only_active_row(self) -> None:
+        from gui.core import queue_presentation
+        window = self.window
+        window.queue_items = [{"url": f"https://example.test/{i}", "title": f"Video {i}"} for i in range(10)]
+        window.queue_active = True
+        window.queue_index = 2
+        window._show_progress_item = True
+        window._refresh_queue_panel()
+        rows = [window.queue_list.item(i) for i in range(10)]
+        with patch("gui.qt.app.queue_presentation.build_queue_list_entry", wraps=queue_presentation.build_queue_list_entry) as build:
+            window._on_progress_update({"status": "item", "item": "3/10 Updated title"})
+            build.assert_called_once()
+        self.assertEqual(rows[2].data(QUEUE_TITLE_ROLE), "Updated title")
+        self.assertEqual(rows[1].data(QUEUE_TITLE_ROLE), "Video 1")
+        self.assertTrue(all(window.queue_list.item(i) is rows[i] for i in range(10)))
+
+    def test_queue_refresh_reuses_rows_and_updates_changed_content(self) -> None:
+        window = self.window
+        window.queue_items = [{"url": "https://example.test/a", "title": "Before"}]
+        window._refresh_queue_panel()
+        row = window.queue_list.item(0)
+        window.queue_items[0]["title"] = "After"
+        window._refresh_queue_panel()
+        self.assertIs(window.queue_list.item(0), row)
+        self.assertEqual(row.text(), "After")
+        window.queue_items.clear()
+        window._refresh_queue_panel()
+        self.assertEqual(window.queue_list.count(), 0)
+
     def test_constructor_does_not_probe_tools_and_show_dispatches_once(self) -> None:
         self._resolve_yt_dlp.reset_mock()
         self._available_ffmpeg_encoders.reset_mock()

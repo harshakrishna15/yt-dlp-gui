@@ -289,5 +289,5 @@ class WindowFeedbackMixin:
             self._set_metric_label_text(self.eta_label, "ETA: Finalizing")
         elif status == "cancelled":
             self._reset_progress_summary()
-        if self.queue_active:
-            self._refresh_queue_panel()
+        if self.queue_active and self.queue_index is not None and status == "item":
+            self._update_queue_row(self.queue_index)
