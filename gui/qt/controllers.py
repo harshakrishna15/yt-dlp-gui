@@ -89,6 +89,8 @@ class RunQueueState:
     queue_failed_items: int = 0
     queue_started_ts: float | None = None
     editing_queue_index: int | None = None
+    retry_failed_only: bool = False
+    last_output_path: Path | None = None
 
 
 class SourceController:
@@ -464,6 +466,7 @@ class RunQueueController:
             )
             return
         s.run_state = RunState.SINGLE
+        s.last_output_path = None
         s.is_downloading = True
         s.cancel_requested = False
         s.cancel_event = self._ports.cancel_events.new_event()
@@ -502,6 +505,7 @@ class RunQueueController:
                 update_progress=lambda payload: _emit_window_signal(
                     self.window, "progress", dict(payload)
                 ),
+                record_output=self._record_output,
             )
         except (yt_dlp_cli.MetadataCancelled, download.DownloadCancelled):
             result = download.DOWNLOAD_CANCELLED
@@ -516,10 +520,22 @@ class RunQueueController:
         except Exception as exc:
             self.window._append_log(f"[error] Could not start download worker: {exc}")
             if self.state.queue_active:
+                if self.state.queue_index is not None:
+                    self.state.queue_items[self.state.queue_index]["status"] = "failed"
                 self.state.queue_failed_items += 1
                 self.finish_queue()
             else:
                 self.on_download_done(download.DOWNLOAD_ERROR)
+
+    def _record_output(self, path: Path) -> None:
+        _emit_window_signal(self.window, "progress", {"status": "output", "path": str(path)})
+
+    def on_output_ready(self, path: str) -> None:
+        if not self.state.is_downloading:
+            return
+        self.state.last_output_path = Path(path)
+        if self.state.queue_active and self.state.queue_index is not None:
+            self.state.queue_items[self.state.queue_index]["output_path"] = path
 
     def on_download_done(self, result: str) -> None:
         self._refresh_run_state()
@@ -538,7 +554,7 @@ class RunQueueController:
             w._set_source_feedback(
                 "Download complete.",
                 tone="success",
-                action="folder",
+                action="file" if s.last_output_path else "folder",
             )
             w._maybe_open_output_folder()
         elif result == download.DOWNLOAD_CANCELLED:
@@ -739,13 +755,15 @@ class RunQueueController:
         )
         w._update_controls_state()
 
-    def start_queue_download(self) -> None:
+    def start_queue_download(self, *, retry_failed_only: bool = False) -> None:
         self._refresh_run_state()
         w = self.window
         s = self.state
         if getattr(w, "_tool_checks_pending", False):
             return
         if bool(getattr(w, "_yt_dlp_update_in_progress", False)) or bool(getattr(w, "_is_fetching", False)):
+            return
+        if retry_failed_only and not any(item.get("status") == "failed" for item in s.queue_items):
             return
         queue_check = core_workflow.validate_queue_start(
             is_downloading=s.is_downloading,
@@ -766,6 +784,11 @@ class RunQueueController:
             return
 
         s.run_state = RunState.QUEUE
+        s.retry_failed_only = retry_failed_only
+        if not retry_failed_only:
+            for item in s.queue_items:
+                item["status"] = "queued"
+                item.pop("output_path", None)
         s.queue_active = True
         s.queue_index = 0
         s.queue_failed_items = 0
@@ -794,11 +817,17 @@ class RunQueueController:
         s = self.state
         if not s.queue_active or s.queue_index is None:
             return
+        if s.retry_failed_only:
+            while s.queue_index < len(s.queue_items) and s.queue_items[s.queue_index].get("status") != "failed":
+                s.queue_index += 1
         next_item = core_workflow.next_queue_run_item(s.queue_items, s.queue_index)
         if next_item is None:
             self.finish_queue()
             return
         s.queue_index = next_item.index
+        s.last_output_path = None
+        s.queue_items[next_item.index]["status"] = "running"
+        s.queue_items[next_item.index].pop("output_path", None)
         w._append_log(
             f"[queue] item {next_item.display_index}/{next_item.total} {next_item.url}"
         )
@@ -890,6 +919,7 @@ class RunQueueController:
                     self.window, "progress", dict(payload)
                 ),
                 ensure_output_dir=True,
+                record_output=self._record_output,
             )
             had_error = result == download.DOWNLOAD_ERROR
             cancelled = result == download.DOWNLOAD_CANCELLED
@@ -907,6 +937,9 @@ class RunQueueController:
         s = self.state
         if not s.queue_active or s.queue_index is None:
             return
+        s.queue_items[s.queue_index]["status"] = (
+            "cancelled" if cancelled else "failed" if had_error else "completed"
+        )
         progress = core_workflow.advance_queue_progress(
             queue_length=len(s.queue_items),
             current_index=s.queue_index,
@@ -940,6 +973,7 @@ class RunQueueController:
         queue_length = len(s.queue_items)
         s.run_state = RunState.IDLE
         s.queue_active = False
+        s.retry_failed_only = False
         s.queue_index = None
         s.queue_failed_items = 0
         s.queue_started_ts = None

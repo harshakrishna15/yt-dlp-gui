@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QProcess, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -49,6 +50,17 @@ class QtFolderDialogPort:
 
 
 class QtDesktopPort:
+    def reveal_path(self, path: Path) -> None:
+        path = path.absolute()
+        if sys.platform == "darwin":
+            started, _ = QProcess.startDetached("/usr/bin/open", ["-R", str(path)])
+        elif sys.platform == "win32":
+            started, _ = QProcess.startDetached("explorer.exe", ["/select,", str(path)])
+        else:
+            started = False
+        if not started:
+            self.open_path(path.parent)
+
     def open_path(self, path: Path) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 

@@ -686,6 +686,50 @@ class TestSourceController(unittest.TestCase):
 
 
 class TestRunQueueController(unittest.TestCase):
+    def test_retry_failed_skips_completed_and_cancelled_rows(self) -> None:
+        settings = {"mode": "audio", "format_filter": "mp3", "format_label": "High"}
+        state = RunQueueState(queue_items=[
+            {"url": "done", "settings": settings, "status": "completed", "output_path": "/tmp/done.mp3"},
+            {"url": "failed-one", "settings": settings, "status": "failed"},
+            {"url": "cancelled", "settings": settings, "status": "cancelled"},
+            {"url": "failed-two", "settings": settings, "status": "failed"},
+        ])
+        window = FakeWindow()
+        executor = FakeExecutor()
+        ports, *_ = build_ports(executor=executor)
+        controller = RunQueueController(window, state=state, ports=ports)
+        controller.start_queue_download(retry_failed_only=True)
+        self.assertEqual(state.queue_index, 1)
+        controller.on_output_ready("/tmp/retried.mp3")
+        controller.on_queue_item_done(False, False)
+        self.assertEqual(state.queue_index, 3)
+        controller.on_queue_item_done(True, False)
+        self.assertFalse(state.queue_active)
+        self.assertEqual([c[2]["url"] for c in executor.calls], ["failed-one", "failed-two"])
+        self.assertEqual([item["status"] for item in state.queue_items],
+                         ["completed", "completed", "cancelled", "failed"])
+        self.assertEqual(state.queue_items[0]["output_path"], "/tmp/done.mp3")
+        self.assertEqual(state.queue_items[1]["output_path"], "/tmp/retried.mp3")
+
+    def test_retry_with_no_failed_items_does_nothing(self) -> None:
+        window = FakeWindow()
+        executor = FakeExecutor()
+        ports, *_ = build_ports(executor=executor)
+        controller = RunQueueController(window, state=RunQueueState(), ports=ports)
+        controller.start_queue_download(retry_failed_only=True)
+        self.assertEqual(executor.calls, [])
+
+    def test_output_callback_is_marshaled_through_progress_signal(self) -> None:
+        window = FakeWindow()
+        ports, *_ = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=RunQueueState(), ports=ports)
+        def run(**kwargs):
+            kwargs["record_output"](Path("/tmp/final.mp4"))
+            return "success"
+        with patch("gui.qt.controllers.app_service.run_download_request", side_effect=run):
+            controller.run_single_download_worker(request={})
+        self.assertEqual(window._signals.progress.emits, [({"status": "output", "path": "/tmp/final.mp4"},)])
+
     def test_single_worker_always_emits_completion_on_unexpected_error(self) -> None:
         window = FakeWindow()
         ports, *_ = build_ports(executor=FakeExecutor())

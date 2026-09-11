@@ -1563,6 +1563,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self.queue_list.set_queue_editable(editable)
         self.queue_clear_button.setEnabled(has_items and editable)
+        self.queue_retry_button.setEnabled(
+            editable and not self._is_downloading and not self._is_fetching
+            and not self._tool_checks_pending and not self._yt_dlp_update_in_progress
+            and any(item.get("status") == "failed" for item in self.queue_items)
+        )
 
     def _refresh_logs_panel_state(self) -> None:
         has_logs = bool(self._log_lines)
@@ -1620,6 +1625,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         else:
             self._analysis_timer.stop()
             self.feedback_action_button.setText(
+                self._reveal_action_label() if self._feedback_action == "file" else
                 "Open folder" if self._feedback_action == "folder" else "View details"
             )
             self.feedback_action_button.setVisible(
@@ -1649,6 +1655,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._source_controller.cancel_fetch_formats()
         elif self._feedback_action == "details":
             self._open_panel("logs")
+        elif self._feedback_action == "file":
+            self._reveal_download(self._run_queue_state.last_output_path)
         elif self._feedback_action == "folder" and self._feedback_output_dir is not None:
             folder = self._feedback_output_dir
             if folder.is_dir():

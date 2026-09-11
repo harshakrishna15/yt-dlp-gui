@@ -70,6 +70,7 @@ class QueuePanelRefs:
     queue_empty_state: QueueEmptyStateWidget
     queue_list: QueueListWidget
     clear_queue_button: QPushButton
+    retry_failed_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -537,6 +538,7 @@ def build_queue_panel(
     *,
     parent: QWidget,
     on_clear_queue: Callable[[], None],
+    on_retry_failed: Callable[[], None] = lambda: None,
 ) -> QueuePanelRefs:
     shell = _build_panel_shell(
         parent=parent,
@@ -578,10 +580,13 @@ def build_queue_panel(
         ),
         buttons_layout_config=LayoutConfig(
             margins=(0, 0, 0, 0),
-            horizontal_spacing=0,
+            horizontal_spacing=12,
             vertical_spacing=0,
         ),
         button_specs=(
+            ButtonSpec(text="Retry failed", object_name="ghostButton",
+                       size_policy=(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed),
+                       on_click=on_retry_failed),
             ButtonSpec(
                 text="Clear all",
                 object_name="ghostButton",
@@ -593,7 +598,7 @@ def build_queue_panel(
             ),
         ),
     )
-    clear_queue_button = clear_panel.buttons[0]
+    clear_queue_button = clear_panel.buttons[1]
     shell.body_layout.addWidget(clear_panel.card, alignment=Qt.AlignmentFlag.AlignRight)
 
     return QueuePanelRefs(
@@ -604,6 +609,7 @@ def build_queue_panel(
         queue_empty_state=empty,
         queue_list=queue_list,
         clear_queue_button=clear_queue_button,
+        retry_failed_button=clear_panel.buttons[0],
     )
 
 

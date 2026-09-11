@@ -135,6 +135,8 @@ def build_queue_list_entry(
     meta_parts: list[str] = []
     if active:
         meta_parts.append("Downloading")
+    elif item.get("status") in {"completed", "failed", "cancelled"}:
+        meta_parts.append(str(item["status"]).capitalize())
     if settings_text:
         meta_parts.append(settings_text)
     meta = " · ".join(meta_parts) or f"Queue item {idx}"
@@ -256,7 +258,7 @@ def build_queue_summary_entry(
         tone = "active"
     else:
         meta = _queue_summary_meta(item, idx=idx)
-        status_text = "Queued"
+        status_text = str(item.get("status") or "queued").capitalize()
         tone = "default"
     return QueueSummaryEntry(
         list_text=build_queue_list_text(item, idx=idx, active=active),

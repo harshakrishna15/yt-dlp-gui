@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
+import sys
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMenu, QWidget
 
 from ..common import diagnostics, settings_store, tooling, yt_dlp_binary, yt_dlp_release
 from ..common.yt_dlp_helpers import humanize_bytes
@@ -114,6 +116,7 @@ class WindowSettingsMixin:
         refs = qt_panels.build_queue_panel(
             parent=self,
             on_clear_queue=self._run_queue_controller.on_queue_clear,
+            on_retry_failed=lambda: self._run_queue_controller.start_queue_download(retry_failed_only=True),
         )
         self.queue_stack = refs.queue_stack
         self._queue_empty_index = refs.queue_empty_index
@@ -121,11 +124,34 @@ class WindowSettingsMixin:
         self.queue_empty_state = refs.queue_empty_state
         self.queue_list = refs.queue_list
         self.queue_clear_button = refs.clear_queue_button
+        self.queue_retry_button = refs.retry_failed_button
+        self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.queue_list.customContextMenuRequested.connect(self._queue_context_menu)
         self.queue_list.itemSelectionChanged.connect(self._refresh_queue_panel_state)
         self.queue_list.edit_requested.connect(self._queue_edit_row)
         self.queue_list.remove_requested.connect(self._queue_remove_row)
         self.queue_list.items_reordered.connect(self._queue_reorder_items)
         return refs.panel
+
+    def _reveal_action_label(self) -> str:
+        return "Show in Finder" if sys.platform == "darwin" else "Show in folder"
+
+    def _reveal_download(self, path: Path | None) -> None:
+        if path is None or not path.is_file():
+            self._set_source_feedback("Downloaded file is no longer available.", tone="error", action="")
+            return
+        self._effects.desktop.reveal_path(path)
+
+    def _queue_context_menu(self, position) -> None:
+        row = self.queue_list.indexAt(position).row()
+        if not 0 <= row < len(self.queue_items):
+            return
+        item = self.queue_items[row]
+        if item.get("status") != "completed" or not item.get("output_path"):
+            return
+        menu = QMenu(self.queue_list)
+        menu.addAction(self._reveal_action_label(), lambda: self._reveal_download(Path(item["output_path"])))
+        menu.exec(self.queue_list.viewport().mapToGlobal(position))
 
     def _build_logs_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_logs_panel(

@@ -68,6 +68,33 @@ except ModuleNotFoundError:
 
 @unittest.skipUnless(HAS_QT, "PySide6 is required for Qt app tests")
 class TestQtApp(unittest.TestCase):
+    def test_queue_retry_control_and_completed_row_status(self) -> None:
+        self.window.queue_items = [
+            {"url": "done", "title": "Finished video", "status": "completed"},
+            {"url": "failed", "status": "failed"},
+        ]
+        self.window._refresh_queue_panel()
+        self.assertTrue(self.window.queue_retry_button.isEnabled())
+        self.assertIn("Completed", self.window.queue_list.item(0).data(QUEUE_META_ROLE))
+        self.window.queue_items[1]["status"] = "completed"
+        self.window._refresh_queue_panel()
+        self.assertFalse(self.window.queue_retry_button.isEnabled())
+
+    def test_completion_action_reveals_actual_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "finished.mp4"
+            output.touch()
+            self.window._run_queue_state.last_output_path = output
+            self.window._on_download_done("success")
+            self.assertEqual(self.window._feedback_action, "file")
+            with patch.object(self.window._effects.desktop, "reveal_path") as reveal:
+                self.window._activate_feedback_action()
+            reveal.assert_called_once_with(output)
+            output.unlink()
+            with patch.object(self.window._effects.desktop, "reveal_path") as reveal:
+                self.window._activate_feedback_action()
+            reveal.assert_not_called()
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])

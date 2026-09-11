@@ -294,6 +294,9 @@ class WindowFeedbackMixin:
         if not isinstance(payload, dict):
             return
         status = payload.get("status")
+        if status == "output":
+            self._run_queue_controller.on_output_ready(str(payload["path"]))
+            return
         if status == "preparing":
             if not self._cancel_requested:
                 self._set_status(str(payload.get("message") or "Preparing..."), log=False)

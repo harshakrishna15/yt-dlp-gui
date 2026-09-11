@@ -67,6 +67,9 @@ class FilesystemPort(Protocol):
 
 
 class DesktopPort(Protocol):
+    def reveal_path(self, path: Path) -> None:
+        ...
+
     def open_path(self, path: Path) -> None:
         ...
 

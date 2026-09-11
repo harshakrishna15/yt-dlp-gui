@@ -29,6 +29,7 @@ class SourceSummary(TypedDict):
 class ProgressUpdate(TypedDict, total=False):
     status: str
     message: str
+    path: str
     percent: float | None
     speed: str
     speed_bps: float | None
@@ -77,6 +78,8 @@ class QueueItem(TypedDict, total=False):
     url: str
     title: str
     settings: QueueSettings
+    status: str
+    output_path: str
 
 
 class ResolvedFormat(TypedDict, total=False):
