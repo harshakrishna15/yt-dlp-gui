@@ -222,6 +222,34 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: transparent;
             border: none;
         }
+        QWidget#advancedOptions {
+            background: transparent;
+            border: none;
+        }
+        QToolButton#advancedToggle {
+            background: transparent;
+            color: __text_secondary__;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-weight: 600;
+        }
+        QToolButton#advancedToggle:hover {
+            background: __surface__;
+        }
+        QToolButton#advancedToggle:focus {
+            border-color: __accent_text__;
+        }
+        QLabel#advancedSummary {
+            color: __text_muted__;
+            font-size: 12px;
+        }
+        QLabel#outputFolderName {
+            color: __text_secondary__;
+        }
+        QPushButton#folderButton {
+            padding: 4px;
+        }
         QWidget#outputCardBlock {
             background: transparent;
             border: none;

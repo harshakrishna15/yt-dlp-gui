@@ -107,7 +107,15 @@ class WindowSettingsMixin:
         self.output_dir_edit.setText(display)
         self.output_dir_edit.setToolTip(str(Path(raw).expanduser()))
         self.output_dir_edit.setCursorPosition(0)
+        self._refresh_output_folder_display()
         self._refresh_queue_preview_card()
+
+    def _refresh_output_folder_display(self: "QtYtDlpGui") -> None:
+        path = Path(self.output_dir_edit.text().strip() or self._default_output_dir()).expanduser()
+        self.output_dir_label.setText(path.name or str(path))
+        self.output_dir_label.setToolTip(str(path))
+        self.output_dir_label.setAccessibleName(f"Download folder: {path}")
+        self.browse_button.setToolTip(f"Choose download folder\n{path}")
 
     def _set_edit_friendly_encoder_preference(
         self: "QtYtDlpGui", value: object

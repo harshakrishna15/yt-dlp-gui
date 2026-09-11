@@ -4,6 +4,9 @@ from __future__ import annotations
 VIDEO_CONTAINERS = ("mp4", "webm")
 AUDIO_CONTAINERS = ("m4a", "mp3", "opus", "wav", "flac")
 CODECS = ("avc1", "av01")
+DEFAULT_VIDEO_CONTAINER = "mp4"
+DEFAULT_VIDEO_CODEC = "avc1"
+DEFAULT_AUDIO_CONTAINER = "m4a"
 
 FETCH_DEBOUNCE_MS = 600
 TOOLTIP_WAKE_UP_DELAY_MS = 1500

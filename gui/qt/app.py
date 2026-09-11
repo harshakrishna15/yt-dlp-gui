@@ -10,6 +10,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QObject,
     QPropertyAnimation,
+    QSignalBlocker,
     QRect,
     QSize,
     Qt,
@@ -67,6 +68,9 @@ from . import style as qt_style
 from .constants import (
     AUDIO_CONTAINERS,
     CODECS,
+    DEFAULT_AUDIO_CONTAINER,
+    DEFAULT_VIDEO_CONTAINER,
+    DEFAULT_VIDEO_CODEC,
     DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH,
     FETCH_DEBOUNCE_MS,
@@ -170,6 +174,8 @@ class _TooltipDelayProxyStyle(QProxyStyle):
 class _TooltipBlocker(QObject):
     def eventFilter(self, watched: QObject | None, event: QEvent | None) -> bool:
         if event is not None and event.type() == QEvent.Type.ToolTip:
+            if watched is not None and watched.property("allowToolTip"):
+                return False
             QToolTip.hideText()
             event.accept()
             return True
@@ -472,6 +478,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             on_codec_change=self._on_codec_change,
             on_update_controls_state=self._update_controls_state,
             on_pick_folder=self._pick_folder,
+            on_advanced_toggled=self._set_advanced_expanded,
             on_use_single_video_url=lambda: self._apply_mixed_url_choice(
                 use_playlist=False
             ),
@@ -614,6 +621,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.file_name_label = downloads.file_name_label
         self.folder_row_layout = downloads.folder_row_layout
         self.output_dir_edit = downloads.output_dir_edit
+        self.output_dir_label = downloads.output_dir_label
+        self.advanced_toggle = downloads.advanced_toggle
+        self.advanced_panel = downloads.advanced_panel
+        self.advanced_summary = downloads.advanced_summary
         self.browse_button = downloads.browse_button
         self.output_folder_label = downloads.output_folder_label
         self.progress_bar = downloads.progress_bar
@@ -639,6 +650,54 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             lambda _text: self._sync_playlist_length_from_items()
         )
         self.playlist_length_edit.textChanged.connect(self._on_playlist_length_changed)
+        self.output_dir_edit.textChanged.connect(self._refresh_output_folder_display)
+        self.filename_edit.textChanged.connect(self._refresh_advanced_summary)
+        tab_order = (
+            self.url_edit, self.paste_button, self.analyze_button,
+            self.video_radio, self.audio_radio, self.format_combo,
+            self.browse_button, self.advanced_toggle, self.container_combo,
+            self.codec_combo, self.convert_check, self.filename_edit,
+            self.start_button, self.add_queue_button, self.cancel_button,
+        )
+        for previous, following in zip(tab_order, tab_order[1:]):
+            QWidget.setTabOrder(previous, following)
+
+    def _set_advanced_expanded(self, expanded: bool) -> None:
+        focused = self.focusWidget()
+        if not expanded and focused is not None and self.advanced_panel.isAncestorOf(focused):
+            self.advanced_toggle.setFocus()
+        self.advanced_panel.setVisible(expanded)
+        self.advanced_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        self._sync_output_form_row_heights()
+        self._refresh_downloads_page_geometry()
+
+    def _refresh_advanced_summary(self) -> None:
+        mode = self._current_mode()
+        container = self._current_container()
+        codec = self._current_codec()
+        default_container = DEFAULT_AUDIO_CONTAINER if mode == "audio" else DEFAULT_VIDEO_CONTAINER
+        custom = bool(
+            (container and container != default_container)
+            or (mode == "video" and codec and codec != DEFAULT_VIDEO_CODEC)
+            or self.filename_edit.text().strip()
+            or self.convert_check.isChecked()
+        )
+        details = []
+        if custom:
+            if container:
+                details.append(container.upper())
+            if mode == "video" and codec:
+                details.append({"avc1": "H.264", "av01": "AV1"}.get(codec, codec))
+            if self.convert_check.isChecked():
+                details.append("Convert to MP4")
+            if self.filename_edit.text().strip():
+                details.append(f"Filename: {self.filename_edit.text().strip()}")
+        summary = " | ".join(details)
+        self.advanced_summary.setText(summary)
+        self.advanced_summary.setToolTip(summary)
+        self.advanced_summary.setVisible(bool(summary))
 
     def _register_native_combo(self, combo: _NativeComboBox) -> None:
         combo.setMinimumHeight(27)
@@ -2749,7 +2808,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         keep_current: bool = True,
     ) -> None:
         current = combo.currentData() if keep_current else None
-        combo.blockSignals(True)
+        was_blocked = combo.blockSignals(True)
         combo.clear()
         for label, value in items:
             combo.addItem(label, value)
@@ -2757,30 +2816,44 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             idx = combo.findData(current)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
-        combo.blockSignals(False)
+        combo.blockSignals(was_blocked)
 
     def _on_mode_change(self) -> None:
         mode = self._current_mode()
-        if mode == "audio":
-            items = [
-                ("Select container", ""),
-                *[(c.upper(), c) for c in AUDIO_CONTAINERS],
-            ]
-            self._set_combo_items(self.container_combo, items)
-            self.codec_combo.setCurrentIndex(0)
-        elif mode == "video":
-            items = [
-                ("Select container", ""),
-                *[(c.upper(), c) for c in VIDEO_CONTAINERS],
-            ]
-            self._set_combo_items(self.container_combo, items)
-        else:
-            self._set_combo_items(
-                self.container_combo, [("Select container", "")], keep_current=False
-            )
-            self.codec_combo.setCurrentIndex(0)
+        with QSignalBlocker(self.container_combo), QSignalBlocker(self.codec_combo):
+            if mode == "audio":
+                items = [
+                    ("Select container", ""),
+                    *[(c.upper(), c) for c in AUDIO_CONTAINERS],
+                ]
+                self._set_combo_items(self.container_combo, items)
+                if not self._current_container():
+                    self._set_combo_current_data(self.container_combo, DEFAULT_AUDIO_CONTAINER)
+                self.codec_combo.setCurrentIndex(0)
+            elif mode == "video":
+                items = [
+                    ("Select container", ""),
+                    *[(c.upper(), c) for c in VIDEO_CONTAINERS],
+                ]
+                self._set_combo_items(self.container_combo, items)
+                if not self._current_container():
+                    self._set_combo_current_data(self.container_combo, DEFAULT_VIDEO_CONTAINER)
+                if not self._current_codec():
+                    self._set_combo_current_data(self.codec_combo, DEFAULT_VIDEO_CODEC)
+            else:
+                self._set_combo_items(
+                    self.container_combo, [("Select container", "")], keep_current=False
+                )
+                self.codec_combo.setCurrentIndex(0)
         self._apply_mode_formats()
         self._update_controls_state()
+
+    def _apply_output_defaults(self) -> None:
+        if not self._current_mode():
+            if self._video_labels:
+                self.video_radio.setChecked(True)
+            elif self._audio_labels:
+                self.audio_radio.setChecked(True)
 
     def _on_container_change(self) -> None:
         self._apply_mode_formats()
@@ -2819,6 +2892,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 self.format_combo.addItem(label)
             if current and current in self._filtered_labels:
                 self.format_combo.setCurrentText(current)
+            elif self._filtered_labels:
+                self.format_combo.setCurrentIndex(0)
         self.format_combo.blockSignals(False)
         self._sync_format_combo_visibility()
 
@@ -3107,6 +3182,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             self._sync_yt_dlp_update_button()
 
         self._refresh_ready_summary()
+        self._refresh_advanced_summary()
         self._sync_current_panel_geometry()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]

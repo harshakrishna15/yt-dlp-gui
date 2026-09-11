@@ -251,6 +251,29 @@ class StableSizeHintButton(QPushButton):
         return hint
 
 
+class ElidedLabel(QLabel):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(0)
+
+    def setText(self, text: str) -> None:
+        self._full_text = str(text)
+        self.setAccessibleName(self._full_text)
+        self._refresh_text()
+
+    def _refresh_text(self) -> None:
+        super().setText(self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideRight, max(0, self.contentsRect().width())
+        ))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_text()
+
+
 class AnimatedSegmentedRail(QWidget):
     _ANIMATION_MS = 220
 

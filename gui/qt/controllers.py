@@ -298,6 +298,9 @@ class SourceController:
                 "No formats found for this URL. Try a different link.",
                 tone="warning",
             )
+        apply_defaults = getattr(w, "_apply_output_defaults", None)
+        if callable(apply_defaults):
+            apply_defaults()
         w._apply_mode_formats()
         apply_pending = getattr(w, "_apply_pending_queue_edit_settings", None)
         if callable(apply_pending):

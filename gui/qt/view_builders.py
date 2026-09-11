@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +34,7 @@ from .platform_paths import system_downloads_path
 from .widgets import (
     ButtonSpec,
     CheckBoxSpec,
+    ElidedLabel,
     LabelSpec,
     LayoutConfig,
     LabeledFieldSpec,
@@ -135,6 +138,10 @@ class DownloadsViewRefs:
     file_name_label: QLabel
     folder_row_layout: QVBoxLayout
     output_dir_edit: QLineEdit
+    output_dir_label: ElidedLabel
+    advanced_toggle: QToolButton
+    advanced_panel: QWidget
+    advanced_summary: ElidedLabel
     browse_button: QPushButton
     output_folder_label: QLabel
     progress_bar: QProgressBar
@@ -175,6 +182,7 @@ class DownloadsViewCallbacks:
     on_codec_change: Callable[[], None]
     on_update_controls_state: Callable[[], None]
     on_pick_folder: Callable[[], None]
+    on_advanced_toggled: Callable[[bool], None]
     on_use_single_video_url: Callable[[], None]
     on_use_playlist_url: Callable[[], None]
     run: RunSectionCallbacks
@@ -223,6 +231,10 @@ class _OutputSectionRefs:
     file_name_label: QLabel
     folder_row_layout: QVBoxLayout
     output_dir_edit: QLineEdit
+    output_dir_label: ElidedLabel
+    advanced_toggle: QToolButton
+    advanced_panel: QWidget
+    advanced_summary: ElidedLabel
     browse_button: QPushButton
     output_folder_label: QLabel
     progress_bar: QProgressBar
@@ -665,6 +677,10 @@ class DownloadsViewBuilder:
             file_name_label=output.file_name_label,
             folder_row_layout=output.folder_row_layout,
             output_dir_edit=output.output_dir_edit,
+            output_dir_label=output.output_dir_label,
+            advanced_toggle=output.advanced_toggle,
+            advanced_panel=output.advanced_panel,
+            advanced_summary=output.advanced_summary,
             browse_button=output.browse_button,
             output_folder_label=output.output_folder_label,
             progress_bar=output.progress_bar,
@@ -986,15 +1002,18 @@ class DownloadsViewBuilder:
             folder_row,
             spec=LineEditSpec(
                 text=str(system_downloads_path()),
-                widget_config=WidgetConfig(minimum_width=0),
+                widget_config=WidgetConfig(minimum_width=0, visible=False),
                 read_only=True,
             ),
         )
         browse_button = build_button(
             folder_row,
             spec=ButtonSpec(
-                text="Browse...",
-                object_name="compactButton",
+                text="",
+                object_name="folderButton",
+                fixed_width=38,
+                minimum_height=34,
+                tooltip="Choose download folder",
                 size_policy=(
                     QSizePolicy.Policy.Fixed,
                     QSizePolicy.Policy.Fixed,
@@ -1002,7 +1021,15 @@ class DownloadsViewBuilder:
                 on_click=callbacks.on_pick_folder,
             ),
         )
-        folder_row_layout.addWidget(output_dir_edit)
+        # Preserve the full path for download/queue settings without displaying it as a field.
+        output_dir_label = ElidedLabel(folder_row)
+        output_dir_label.setObjectName("outputFolderName")
+        output_dir_label.setProperty("allowToolTip", True)
+        browse_button.setIcon(browse_button.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        browse_button.setIconSize(QSize(18, 18))
+        browse_button.setAccessibleName("Choose download folder")
+        browse_button.setProperty("allowToolTip", True)
+        folder_row_layout.addWidget(output_dir_label, stretch=1)
         folder_row_layout.addWidget(browse_button)
 
         save_row_specs = (
@@ -1014,7 +1041,7 @@ class DownloadsViewBuilder:
             ),
             LabeledFieldSpec(
                 key="output_folder",
-                label_text="Folder",
+                label_text="Save to",
                 field=folder_row,
                 label_config=label_config,
             ),
@@ -1032,6 +1059,40 @@ class DownloadsViewBuilder:
         output_form_rows.extend(save_row_refs[spec.key].row for spec in save_row_specs)
 
         format_layout.addWidget(save_card)
+
+        advanced_header = build_hbox(
+            format_card, layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+        )
+        advanced_toggle = QToolButton(advanced_header.widget)
+        advanced_toggle.setObjectName("advancedToggle")
+        advanced_toggle.setText("Advanced")
+        advanced_toggle.setCheckable(True)
+        advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        advanced_toggle.toggled.connect(callbacks.on_advanced_toggled)
+        advanced_summary = ElidedLabel(advanced_header.widget)
+        advanced_summary.setObjectName("advancedSummary")
+        advanced_summary.setProperty("allowToolTip", True)
+        advanced_header.layout.addWidget(advanced_toggle)
+        advanced_header.layout.addWidget(advanced_summary, stretch=1)
+        format_layout.addWidget(advanced_header.widget)
+
+        advanced_shell = build_vbox(
+            format_card,
+            widget_config=WidgetConfig(object_name="advancedOptions", visible=False),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
+        )
+        advanced_panel = advanced_shell.widget
+        for key in ("container", "codec", "post_process"):
+            row = output_row_refs[key].row
+            format_layout.removeWidget(row)
+            advanced_shell.layout.addWidget(row)
+            row.setVisible(key != "post_process")
+        filename_row = save_row_refs["file_name"].row
+        save_layout.removeWidget(filename_row)
+        advanced_shell.layout.addWidget(filename_row)
+        filename_row.show()
+        format_layout.addWidget(advanced_panel)
 
         metrics_card_shell = build_vbox(
             output_content,
@@ -1156,6 +1217,10 @@ class DownloadsViewBuilder:
             file_name_label=file_name_label,
             folder_row_layout=folder_row_layout,
             output_dir_edit=output_dir_edit,
+            output_dir_label=output_dir_label,
+            advanced_toggle=advanced_toggle,
+            advanced_panel=advanced_panel,
+            advanced_summary=advanced_summary,
             browse_button=browse_button,
             output_folder_label=output_folder_label,
             progress_bar=progress_bar,

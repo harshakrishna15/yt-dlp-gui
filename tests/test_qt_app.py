@@ -392,6 +392,7 @@ class TestQtApp(unittest.TestCase):
                 )
 
     def test_output_bars_keep_uniform_vertical_gaps(self) -> None:
+        self.window.advanced_toggle.setChecked(True)
         self.window.show()
         self.window.video_radio.setChecked(True)
         QApplication.processEvents()
@@ -400,34 +401,21 @@ class TestQtApp(unittest.TestCase):
             with self.subTest(height=height):
                 self.window.resize(MIN_WINDOW_WIDTH, height)
                 QApplication.processEvents()
-
-                bars = (
-                    self.window.video_radio.parentWidget(),
-                    self.window.container_combo,
-                    self.window.codec_combo,
-                    self.window.format_combo,
-                    self.window.filename_edit,
-                    self.window.output_dir_edit,
-                )
-                positions = []
-                for widget in bars:
-                    self.assertIsNotNone(widget)
-                    assert widget is not None
-                    top = widget.mapTo(
-                        self.window.format_card,
-                        widget.rect().topLeft(),
-                    ).y()
-                    positions.append((top, widget.height()))
-
-                gaps = [
-                    next_top - (top + height_px)
-                    for (top, height_px), (next_top, _next_height) in zip(
-                        positions,
-                        positions[1:],
-                    )
-                ]
-                self.assertTrue(gaps)
-                self.assertLessEqual(max(gaps) - min(gaps), 1)
+                for bars in (
+                    (self.window.video_radio.parentWidget(), self.window.format_combo,
+                     self.window.output_dir_label),
+                    (self.window.container_combo, self.window.codec_combo, self.window.filename_edit),
+                ):
+                    positions = [
+                        (widget.mapTo(self.window.format_card, widget.rect().topLeft()).y(), widget.height())
+                        for widget in bars
+                    ]
+                    gaps = [
+                        next_top - (top + height_px)
+                        for (top, height_px), (next_top, _) in zip(positions, positions[1:])
+                    ]
+                    self.assertGreaterEqual(min(gaps), 4)
+                    self.assertLessEqual(max(gaps) - min(gaps), 4)
 
     def test_url_input_is_visible_in_source_row(self) -> None:
         self.window.show()
@@ -474,6 +462,103 @@ class TestQtApp(unittest.TestCase):
             self.window.source_row.layout().itemAt(2).widget(),
             self.window.analyze_button,
         )
+
+    def test_basic_form_hides_advanced_fields_and_full_folder_path(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.assertFalse(self.window.advanced_toggle.isChecked())
+        for widget in (self.window.container_combo, self.window.codec_combo, self.window.filename_edit):
+            self.assertFalse(widget.isVisible())
+        self.assertTrue(self.window.format_combo.isVisible())
+        self.assertTrue(self.window.output_dir_label.isVisible())
+        self.assertTrue(self.window.output_dir_edit.isHidden())
+        self.assertEqual(self.window.output_dir_label.toolTip(), self.window._default_output_dir())
+        self.assertFalse(self.window.browse_button.icon().isNull())
+        self.assertEqual(self.window.browse_button.text(), "")
+
+    def test_advanced_disclosure_preserves_custom_settings_and_summary(self) -> None:
+        self._load_ready_preview_with_formats()
+        self.window.show()
+        self.assertTrue(self.window.advanced_summary.isHidden())
+        QTest.mouseClick(self.window.advanced_toggle, Qt.MouseButton.LeftButton)
+        self.window.container_combo.setCurrentIndex(self.window.container_combo.findData("webm"))
+        self.window.codec_combo.setCurrentIndex(self.window.codec_combo.findData("av01"))
+        self.window.filename_edit.setText("custom-name")
+        QApplication.processEvents()
+        expected = self.window._capture_queue_settings()
+        QTest.mouseClick(self.window.advanced_toggle, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
+        self.assertFalse(self.window.container_combo.isVisible())
+        self.assertEqual(self.window._capture_queue_settings(), expected)
+        self.assertIn("WEBM", self.window.advanced_summary.toolTip())
+        self.assertIn("AV1", self.window.advanced_summary.toolTip())
+        self.assertIn("custom-name", self.window.advanced_summary.toolTip())
+        self.assertTrue(self.window.advanced_summary.isVisible())
+
+    def test_analysis_selects_defaults_without_opening_advanced(self) -> None:
+        for mode in ("video", "audio"):
+            with self.subTest(mode=mode):
+                url = f"https://example.com/{mode}"
+                self.window.url_edit.setText(url)
+                self.window._active_fetch_request_id = 20
+                collections = {
+                    "audio_labels": ["Best audio only"],
+                    "audio_lookup": {"Best audio only": {"custom_format": "bestaudio/best"}},
+                }
+                if mode == "video":
+                    collections.update({
+                        "video_labels": ["1080p mp4 (avc1)"],
+                        "video_lookup": {"1080p mp4 (avc1)": {"format_id": "137", "ext": "mp4", "vcodec": "avc1"}},
+                    })
+                self.window._on_formats_loaded(20, url, {"collections": collections}, False, False)
+                self.assertEqual(self.window._current_mode(), mode)
+                self.assertEqual(self.window._current_container(), "mp4" if mode == "video" else "m4a")
+                self.assertEqual(self.window._current_codec(), "avc1" if mode == "video" else "")
+                self.assertTrue(self.window.start_button.isEnabled())
+                self.assertFalse(self.window.advanced_toggle.isChecked())
+
+    def test_folder_picker_keeps_full_path_in_download_settings(self) -> None:
+        folder = "/tmp/exports/Final edits"
+        self.window.show()
+        with patch.object(self.window._effects.file_dialogs, "pick_directory", return_value=folder):
+            self.window.browse_button.click()
+        QApplication.processEvents()
+        self.assertEqual(self.window.output_dir_label.text(), "Final edits")
+        self.assertEqual(self.window.output_dir_label.toolTip(), folder)
+        self.assertEqual(self.window._capture_queue_settings()["output_dir"], folder)
+        self.assertNotIn("output_dir", self.window._capture_user_settings())
+        blocker = QApplication.instance().findChild(_TooltipBlocker, "_tooltipBlocker")
+        event = QHelpEvent(QEvent.Type.ToolTip, QPoint(), QPoint())
+        self.assertFalse(blocker.eventFilter(self.window.output_dir_label, event))
+
+    def test_expanded_form_fits_at_minimum_size_and_collapses_without_residue(self) -> None:
+        self._load_ready_preview_with_formats()
+        self.window.show()
+        self.window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        QApplication.processEvents()
+        baseline = self.window.format_card.height()
+        self.window.advanced_toggle.setChecked(True)
+        QApplication.processEvents()
+        self.assertGreater(self.window.format_card.height(), baseline)
+        for control in (self.window.container_combo, self.window.codec_combo, self.window.filename_edit):
+            self.assertTrue(control.isVisible())
+            self.assertGreaterEqual(control.width(), control.minimumSizeHint().width())
+            self.assertTrue(self.window.rect().contains(QRect(control.mapTo(self.window, QPoint()), control.size())))
+        self.window.advanced_toggle.setChecked(False)
+        QApplication.processEvents()
+        self.assertEqual(self.window.format_card.height(), baseline)
+
+    def test_long_custom_filename_does_not_expand_collapsed_form(self) -> None:
+        self._load_ready_preview_with_formats()
+        self.window.show()
+        self.window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        QApplication.processEvents()
+        size = self.window.size()
+        self.window.filename_edit.setText("Long filename " * 80)
+        QApplication.processEvents()
+        self.assertEqual(self.window.size(), size)
+        summary = self.window.advanced_summary
+        self.assertLessEqual(summary.fontMetrics().horizontalAdvance(summary.text()), summary.width())
 
     def test_url_input_is_visible_at_idle(self) -> None:
         self._assert_url_input_visible_in_source_row(mode="idle")
@@ -1680,6 +1765,7 @@ class TestQtApp(unittest.TestCase):
     def test_output_form_labels_clear_controls_in_default_and_loaded_states(
         self,
     ) -> None:
+        self.window.advanced_toggle.setChecked(True)
         self.window.show()
         QApplication.processEvents()
 
@@ -1756,6 +1842,7 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(option.currentText, "Select container")
 
     def test_output_form_split_layout_uses_right_aligned_label_column(self) -> None:
+        self.window.advanced_toggle.setChecked(True)
         self.window.show()
         QApplication.processEvents()
         self.window.resize(1220, 820)
@@ -1781,6 +1868,7 @@ class TestQtApp(unittest.TestCase):
             self.assertFalse(bool(label.alignment() & Qt.AlignmentFlag.AlignLeft))
 
     def test_output_form_fields_share_aligned_split_column_edges(self) -> None:
+        self.window.advanced_toggle.setChecked(True)
         self.window.show()
         QApplication.processEvents()
         self.window.resize(1220, 820)
@@ -1799,7 +1887,7 @@ class TestQtApp(unittest.TestCase):
             self.window.codec_combo,
             self.window.format_combo,
             self.window.filename_edit,
-            self.window.output_dir_edit,
+            self.window.output_dir_label,
         )
         left_edges = [map_rect_to_format(widget).left() for widget in left_edge_widgets]
         self.assertLessEqual(max(left_edges) - min(left_edges), 2)
@@ -1822,6 +1910,7 @@ class TestQtApp(unittest.TestCase):
         self.assertLessEqual(max(right_edges) - min(right_edges), 2)
 
     def test_output_form_fields_fill_their_split_hosts(self) -> None:
+        self.window.advanced_toggle.setChecked(True)
         self.window.show()
         QApplication.processEvents()
         self.window.resize(1220, 820)
@@ -2569,12 +2658,12 @@ class TestQtApp(unittest.TestCase):
 
         card_rect = self.window.format_card.rect().adjusted(0, 0, -1, -1)
         output_rect = QRect(
-            self.window.output_dir_edit.mapTo(
-                self.window.format_card, self.window.output_dir_edit.rect().topLeft()
+            self.window.output_dir_label.mapTo(
+                self.window.format_card, self.window.output_dir_label.rect().topLeft()
             ),
-            self.window.output_dir_edit.mapTo(
+            self.window.output_dir_label.mapTo(
                 self.window.format_card,
-                self.window.output_dir_edit.rect().bottomRight(),
+                self.window.output_dir_label.rect().bottomRight(),
             ),
         ).normalized()
         browse_rect = QRect(
@@ -2604,7 +2693,7 @@ class TestQtApp(unittest.TestCase):
             "Browse button should sit to the right of the output folder field in the combined output card",
         )
         self.assertGreaterEqual(
-            self.window.output_dir_edit.width(),
+            self.window.output_dir_label.width(),
             220,
             "Output folder field should keep enough visible width in the combined output card",
         )
@@ -3514,6 +3603,7 @@ class TestQtApp(unittest.TestCase):
         )
 
     def test_settings_encoder_combo_matches_dropdown_box_height(self) -> None:
+        self.window.advanced_toggle.setChecked(True)
         self.window.show()
         QApplication.processEvents()
 
