@@ -68,6 +68,34 @@ except ModuleNotFoundError:
 
 @unittest.skipUnless(HAS_QT, "PySide6 is required for Qt app tests")
 class TestQtApp(unittest.TestCase):
+    def test_cleanup_requires_confirmation_and_suppresses_save_on_exit(self) -> None:
+        from gui.common import app_data
+        with patch.object(self.window._effects.dialogs, "question", return_value=False), patch.object(
+            self.window._effects.worker_executor, "submit"
+        ) as submit:
+            self.window._remove_app_data()
+        submit.assert_not_called()
+        with patch.object(self.window._effects.dialogs, "question", return_value=True), patch.object(
+            self.window._effects.worker_executor, "submit"
+        ) as submit:
+            self.window._remove_app_data()
+        submit.assert_called_once()
+        self.assertTrue(self.window._app_data_cleanup_in_progress)
+        event = QCloseEvent()
+        self.window.closeEvent(event)
+        self.assertFalse(event.isAccepted())
+        with patch("gui.qt.window_settings.settings_store.save_settings") as save:
+            self.window._on_app_data_cleanup_done(app_data.CleanupResult())
+            self.window._save_user_settings()
+        save.assert_not_called()
+
+    def test_cleanup_blocked_during_active_work(self) -> None:
+        self.window._is_downloading = True
+        with patch.object(self.window._effects.dialogs, "question") as question:
+            self.window._remove_app_data()
+        question.assert_not_called()
+        self.window._is_downloading = False
+
     def test_queue_retry_control_and_completed_row_status(self) -> None:
         self.window.queue_items = [
             {"url": "done", "title": "Finished video", "status": "completed"},

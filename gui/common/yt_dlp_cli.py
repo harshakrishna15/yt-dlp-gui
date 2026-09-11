@@ -40,7 +40,7 @@ def fetch_info(
     if cancel_event is not None and cancel_event.is_set():
         raise MetadataCancelled()
     command = [
-        str(binary), *prefix_args, "--ignore-config", "--color", "never",
+        str(binary), *prefix_args, "--ignore-config", "--no-cache-dir", "--color", "never",
         "--dump-single-json", "--skip-download", "--no-quiet", "--no-progress",
         "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1",
         "--playlist-items", "1", "--", str(url),
@@ -127,6 +127,7 @@ def build_download_args(
     args = [
         str(binary),
         "--ignore-config",
+        "--no-cache-dir",
         "--color",
         "never",
         "--newline",

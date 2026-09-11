@@ -235,6 +235,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._signals.queue_item_done.connect(self._on_queue_item_done)
         self._signals.yt_dlp_update_done.connect(self._on_yt_dlp_update_done)
         self._signals.yt_dlp_update_progress.connect(self._on_yt_dlp_update_progress)
+        self._signals.app_data_cleanup_done.connect(self._on_app_data_cleanup_done)
 
         self._fetch_timer = QTimer(self)
         self._fetch_timer.setInterval(FETCH_DEBOUNCE_MS)
@@ -2884,6 +2885,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         if hasattr(self, "yt_dlp_update_button"):
             self._sync_yt_dlp_update_button()
+        self.remove_app_data_button.setEnabled(self._app_data_cleanup_allowed())
 
         self._refresh_ready_summary()
         self._refresh_advanced_summary()
@@ -2906,6 +2908,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._queue_deferred_resize_sync()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if getattr(self, "_app_data_cleanup_in_progress", False):
+            event.ignore()
+            return
         self._save_user_settings()
         if self._tool_checks_pending and self._tool_checks_started:
             self._close_after_tool_checks = True

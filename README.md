@@ -118,15 +118,37 @@ are not cached. `Refresh formats` bypasses the cache, and engine updates or
 closing the app clear it. Downloads still resolve fresh media through yt-dlp.
 The preview cache is never written to disk and does not retain folder choices.
 
+New queue items save a yt-dlp format selector (not media URLs), avoiding a second
+analysis request when downloading. Older queue settings still use cancellable
+metadata resolution. Queue rows retain session-only Completed, Failed, or
+Cancelled results; `Retry failed` leaves successful items alone. Right-click a
+completed row to reveal its output file.
+
+Destination creation, write checks, media-tool checks, and estimated disk-space
+checks run in download workers. Known sizes include processing headroom; unknown
+sizes do not block downloads. These are estimates, not space reservations.
+MP4 files are inspected before edit-friendly processing. Compatible H.264/AAC
+streams with verified constant packet timing are kept without re-encoding;
+unsupported or uncertain files still use the existing encoder fallback.
+
 Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can
 override that path with `YT_DLP_GUI_SETTINGS_PATH`. The output folder is
 session-only and resets to the computer's Downloads folder each time the app starts.
+
+Before deleting the app, use `Preferences` > `Remove app data and quit...`.
+The confirmation lists the settings file and managed engine support paths. The
+cleanup runs only while idle, preserves unrelated files and downloaded media,
+and quits without recreating settings. Opening the app again recreates its engine.
+Deleting the `.app` alone does not remove these external support files.
+yt-dlp disk caching is disabled for analysis and downloads. Pre-existing shared
+yt-dlp caches, system-installed tools, and exported logs/diagnostics are not
+deleted because they may belong to other programs or were explicitly saved.
 
 ### Appearance
 
 The interface uses flat controls and the system font. Download progress and
 Cancel appear only during a download; update progress remains in Preferences.
-Results use a single dismissible status row, with Open folder after a successful
+Results use a single dismissible status row, with Show in Finder (or Show in folder) after a successful
 download and View details for errors. Update results stay in Preferences without
 an extra popup; progress and estimated download time remain visible while updating.
 The main form shows media type, quality, and destination. Container, codec, and

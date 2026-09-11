@@ -228,6 +228,7 @@ def build_ydl_opts(
     fragments = max(1, min(YDL_MAX_CONCURRENT_FRAGMENTS, requested_fragments))
 
     opts: dict[str, Any] = {
+        "cachedir": False,
         "outtmpl": outtmpl,
         "format": fmt,
         "progress_hooks": [

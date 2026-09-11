@@ -47,6 +47,7 @@ class TestYtDlpMetadataCli(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertEqual(command[0], "/opt/yt-dlp")
         self.assertIn("--ignore-config", command)
+        self.assertIn("--no-cache-dir", command)
         self.assertIn("--dump-single-json", command)
         self.assertIn("--skip-download", command)
         self.assertIn("--no-quiet", command)

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu, QWidget
 
-from ..common import diagnostics, settings_store, tooling, yt_dlp_binary, yt_dlp_release
+from ..common import app_data, diagnostics, settings_store, tooling, yt_dlp_binary, yt_dlp_release
 from ..common.yt_dlp_helpers import humanize_bytes
 from . import panels as qt_panels
 from .constants import LOG_MAX_LINES
@@ -55,6 +55,7 @@ class WindowSettingsMixin:
             on_update_yt_dlp=self._update_yt_dlp,
             on_export_diagnostics=self._export_diagnostics,
             on_view_logs=lambda: self._open_panel("logs"),
+            on_remove_app_data=self._remove_app_data,
         )
         self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
         self.open_folder_after_download_check = refs.open_folder_after_download_check
@@ -67,6 +68,7 @@ class WindowSettingsMixin:
         self.yt_dlp_update_details_button = refs.yt_dlp_update_details_button
         self.export_diagnostics_button = refs.export_diagnostics_button
         self.logs_button = refs.view_logs_button
+        self.remove_app_data_button = refs.remove_app_data_button
         self.yt_dlp_version_label.setText("Checking yt-dlp...")
         self.yt_dlp_update_button.setEnabled(False)
         return refs.panel
@@ -243,9 +245,57 @@ class WindowSettingsMixin:
         }
 
     def _save_user_settings(self: "QtYtDlpGui") -> None:
-        if self._applying_user_settings:
+        if self._applying_user_settings or getattr(self, "_suppress_settings_save", False):
             return
         settings_store.save_settings(self._capture_user_settings())
+
+    def _app_data_cleanup_allowed(self) -> bool:
+        return not (self._is_downloading or self._is_fetching or self._tool_checks_pending
+                    or self._yt_dlp_update_in_progress or self._source_state.pending_fetches
+                    or getattr(self, "_app_data_cleanup_in_progress", False))
+
+    def _remove_app_data(self) -> None:
+        if not self._app_data_cleanup_allowed():
+            return
+        paths = app_data.cleanup_paths()
+        confirmed = self._effects.dialogs.question(
+            self, "Remove app data and quit?",
+            "Remove saved preferences and the managed download engine, then quit?\n"
+            "Downloaded media and shared system tools will not be removed. "
+            "Opening the app again will recreate its engine.\n\nSupport paths:\n"
+            + "\n".join(str(path) for path in paths), default_yes=False,
+        )
+        if not confirmed:
+            return
+        self._suppress_settings_save = True
+        self._app_data_cleanup_in_progress = True
+        self.centralWidget().setEnabled(False)
+        self._set_status("Removing app data...")
+        try:
+            self._effects.worker_executor.submit(self._remove_app_data_worker, paths)
+        except Exception as exc:
+            self._app_data_cleanup_in_progress = False
+            self._suppress_settings_save = False
+            self.centralWidget().setEnabled(True)
+            self._effects.dialogs.critical(self, "Cleanup unavailable", str(exc))
+
+    def _remove_app_data_worker(self, paths) -> None:
+        try:
+            result = app_data.remove_app_data(paths)
+        except Exception as exc:
+            result = app_data.CleanupResult((str(exc),))
+        self._signals.app_data_cleanup_done.emit(result)
+
+    def _on_app_data_cleanup_done(self, result) -> None:
+        self._app_data_cleanup_in_progress = False
+        if result.errors:
+            self._effects.dialogs.critical(
+                self, "Some app data could not be removed",
+                "The app will quit without saving settings. These paths need attention:\n\n"
+                + "\n".join(result.errors),
+            )
+        self._source_controller.clear_metadata_cache()
+        self.close()
 
     def _connect_settings_autosave(self: "QtYtDlpGui") -> None:
         for binding in self._settings_bindings():
@@ -302,6 +352,7 @@ class WindowSettingsMixin:
             or self._is_fetching
             or self._source_state.pending_fetches
             or self._tool_checks_pending
+            or getattr(self, "_app_data_cleanup_in_progress", False)
         ):
             return
         resolved = yt_dlp_binary.resolve_yt_dlp_binary()

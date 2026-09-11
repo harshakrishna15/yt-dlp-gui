@@ -63,6 +63,7 @@ class _QtSignals(QObject):
     queue_item_done = Signal(bool, bool)
     yt_dlp_update_done = Signal(object)
     yt_dlp_update_progress = Signal(object)
+    app_data_cleanup_done = Signal(object)
 
 
 QUEUE_SOURCE_INDEX_ROLE = Qt.ItemDataRole.UserRole

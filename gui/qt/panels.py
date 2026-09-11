@@ -59,6 +59,7 @@ class SettingsPanelRefs:
     yt_dlp_update_details_button: QPushButton
     export_diagnostics_button: QPushButton
     view_logs_button: QPushButton
+    remove_app_data_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -340,6 +341,7 @@ def build_settings_panel(
     on_update_yt_dlp: Callable[[], None],
     on_export_diagnostics: Callable[[], None],
     on_view_logs: Callable[[], None],
+    on_remove_app_data: Callable[[], None] = lambda: None,
 ) -> SettingsPanelRefs:
     shell = _build_panel_shell(
         parent=parent,
@@ -464,6 +466,12 @@ def build_settings_panel(
     post_download_card.layout.addWidget(open_folder_after_download_check)
     settings_stack_layout.addWidget(post_download_card.card)
 
+    remove_app_data_button = build_button(settings_stack, spec=ButtonSpec(
+        text="Remove app data and quit...", object_name="ghostButton",
+        on_click=on_remove_app_data,
+    ))
+    settings_stack_layout.addWidget(remove_app_data_button, alignment=Qt.AlignmentFlag.AlignLeft)
+
     app_card = _build_settings_card(
         settings_stack,
         object_name="settingsAppCard",
@@ -531,6 +539,7 @@ def build_settings_panel(
         yt_dlp_update_details_button=update_details_button,
         export_diagnostics_button=export_diagnostics_button,
         view_logs_button=view_logs_button,
+        remove_app_data_button=remove_app_data_button,
     )
 
 
