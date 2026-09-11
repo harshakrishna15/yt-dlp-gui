@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..core import options as core_options
-from . import tooling, yt_dlp_binary, yt_dlp_cli
+from . import media_probe, tooling, yt_dlp_binary, yt_dlp_cli
 from .types import FormatInfo, ProgressUpdate
 from .tooling import available_ffmpeg_encoders, resolve_binary
 
@@ -729,19 +729,32 @@ def _postprocess_edit_friendly_mp4(
     if ffmpeg_path is None:
         log("[export] media tools missing; skipped edit-friendly MP4 re-encode.")
         return
+    ffprobe_path, _ffprobe_source = resolve_binary("ffprobe")
+    duration_by_path: dict[str, float | None] = {}
+    if ffprobe_path is not None:
+        pending_outputs = []
+        for output_path in mp4_outputs:
+            update_progress({"status": "preparing", "message": "Checking MP4 compatibility..."})
+            try:
+                info = media_probe.probe_media(output_path, ffprobe_path, cancel_event)
+                compatible = media_probe.is_edit_compatible(output_path, ffprobe_path, info, cancel_event)
+            except yt_dlp_cli.MetadataCancelled:
+                raise DownloadCancelled()
+            if compatible:
+                log(f"[export] Already edit-compatible; keeping original streams: {output_path.name}")
+                continue
+            duration_by_path[str(output_path)] = media_probe.media_duration(info)
+            pending_outputs.append(output_path)
+        mp4_outputs = pending_outputs
+    if not mp4_outputs:
+        return
+    if cancel_event is not None and cancel_event.is_set():
+        raise DownloadCancelled()
     selected_video_codec = _select_edit_friendly_video_codec(
         ffmpeg_path=ffmpeg_path,
         preferred=edit_friendly_encoder,
         log=log,
     )
-
-    ffprobe_path, _ffprobe_source = resolve_binary("ffprobe")
-    duration_by_path: dict[str, float | None] = {}
-    if ffprobe_path is not None:
-        for output_path in mp4_outputs:
-            duration_by_path[str(output_path)] = _probe_media_duration_seconds(
-                output_path, ffprobe_path
-            )
     known_durations = [
         duration
         for duration in duration_by_path.values()
