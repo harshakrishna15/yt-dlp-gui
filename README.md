@@ -106,6 +106,18 @@ closing the window waits for active lookups to stop. Metadata requests use a
 15-second socket timeout, one retry, and a 90-second overall limit. Network and
 site response times still affect how long analysis takes.
 
+The window opens before background tool checks finish. Progress rendering is
+limited to ten updates per second, while cancellation, errors, and completion
+remain immediate. Logs are buffered while their panel is hidden, and queue rows
+are updated without rebuilding the list on every progress tick.
+
+Revisiting a video can reuse its format preview for up to two minutes during the
+same session. This cache holds at most 12 previews and 4 MiB of serialized data;
+it does not store stream URLs, headers, or fragments. Live videos and playlists
+are not cached. `Refresh formats` bypasses the cache, and engine updates or
+closing the app clear it. Downloads still resolve fresh media through yt-dlp.
+The preview cache is never written to disk and does not retain folder choices.
+
 Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can
 override that path with `YT_DLP_GUI_SETTINGS_PATH`. The output folder is
 session-only and resets to the computer's Downloads folder each time the app starts.

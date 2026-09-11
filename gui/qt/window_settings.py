@@ -94,6 +94,7 @@ class WindowSettingsMixin:
             pass
 
     def _on_tool_checks_done(self: "QtYtDlpGui", result: object) -> None:
+        self._source_controller.clear_metadata_cache()
         self._tool_checks_pending = False
         result = result if isinstance(result, dict) else {}
         engine = result.get("engine")
@@ -359,6 +360,7 @@ class WindowSettingsMixin:
         self: "QtYtDlpGui", result: object
     ) -> None:
         self._yt_dlp_update_in_progress = False
+        self._source_controller.clear_metadata_cache()
         self.yt_dlp_update_button.setText("Update yt-dlp")
         if not isinstance(result, yt_dlp_binary.YtDlpUpdateResult):
             result = yt_dlp_binary.YtDlpUpdateResult(

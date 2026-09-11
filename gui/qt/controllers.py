@@ -16,6 +16,7 @@ from ..common import (
     yt_dlp_helpers as helpers,
 )
 from ..common.types import DownloadRequest, QueueItem, QueueSettings
+from ..common.metadata_cache import MetadataPreviewCache
 from ..core import error_feedback as core_error_feedback
 from ..core import queue_logic as core_queue_logic
 from ..core import urls as core_urls
@@ -101,6 +102,10 @@ class SourceController:
         self.window = window
         self.state = state
         self._ports = ports
+        self._metadata_cache = MetadataPreviewCache()
+
+    def clear_metadata_cache(self) -> None:
+        self._metadata_cache.clear()
 
     def on_url_changed(self) -> None:
         w = self.window
@@ -170,7 +175,7 @@ class SourceController:
 
         w._update_controls_state()
 
-    def start_fetch_formats(self) -> None:
+    def start_fetch_formats(self, *, force_refresh: bool = False) -> None:
         w = self.window
         s = self.state
         if (getattr(w, "_tool_checks_pending", False)
@@ -184,6 +189,14 @@ class SourceController:
         s.fetch_request_seq += 1
         request_id = s.fetch_request_seq
         s.active_fetch_request_id = request_id
+        # The existing Refresh formats action must always ask the site again.
+        if force_refresh or s.video_labels or s.audio_labels:
+            self._metadata_cache.discard(url)
+        else:
+            cached = self._metadata_cache.get(url)
+            if cached is not None:
+                self.on_formats_loaded(request_id, url, cached, False, False)
+                return
         s.is_fetching = True
         s.cancel_requested = False
         s.started_at = time.monotonic()
@@ -241,6 +254,10 @@ class SourceController:
             }
             is_playlist = bool(
                 info.get("_type") == "playlist" or info.get("entries") is not None
+            )
+            payload["cacheable"] = bool(
+                formats and not is_playlist and not info.get("is_live")
+                and info.get("live_status") not in {"is_live", "is_upcoming", "post_live"}
             )
             _emit_window_signal(
                 self.window,
@@ -330,6 +347,8 @@ class SourceController:
             return
 
         collections = payload.get("collections") or {}
+        if payload.get("cacheable") and not is_playlist:
+            self._metadata_cache.put(url, payload)
         s.video_labels = list(collections.get("video_labels", []))
         s.video_lookup = dict(collections.get("video_lookup", {}))
         s.audio_labels = list(collections.get("audio_labels", []))

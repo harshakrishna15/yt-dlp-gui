@@ -484,6 +484,64 @@ class TestSourceController(unittest.TestCase):
         )
         self.assertEqual(window.status_value.text(), "Formats loaded")
 
+    def test_revisit_uses_preview_cache_but_refresh_starts_worker(self) -> None:
+        from tests.test_metadata_cache import preview
+        window = FakeWindow()
+        window.url_edit.setText("https://example.test/video")
+        executor = FakeExecutor()
+        ports, *_ = build_ports(executor=executor)
+        state = SourceState(active_fetch_request_id=1, fetch_request_seq=1)
+        controller = SourceController(window, state=state, ports=ports)
+        controller.on_formats_loaded(1, window.url_edit.text(), preview(), False, False)
+        window.url_edit.setText("https://example.test/other")
+        controller.on_url_changed()
+        window.url_edit.setText("https://example.test/video")
+        controller.on_url_changed()
+        controller.start_fetch_formats()
+        self.assertEqual(executor.calls, [])
+        self.assertEqual(window.preview_title, "Example")
+        self.assertFalse(state.is_fetching)
+        self.assertEqual(state.pending_fetches, {})
+        controller.start_fetch_formats()
+        self.assertEqual(len(executor.calls), 1)
+        self.assertTrue(state.is_fetching)
+        self.assertIsNone(controller._metadata_cache.get(window.url_edit.text()))
+
+    def test_force_refresh_bypasses_cache_without_loaded_formats(self) -> None:
+        from tests.test_metadata_cache import preview
+        window = FakeWindow()
+        window.url_edit.setText("test-url")
+        executor = FakeExecutor()
+        ports, *_ = build_ports(executor=executor)
+        controller = SourceController(window, state=SourceState(), ports=ports)
+        controller._metadata_cache.put("test-url", preview())
+        controller.start_fetch_formats(force_refresh=True)
+        self.assertEqual(len(executor.calls), 1)
+
+    def test_worker_does_not_mark_live_or_playlist_metadata_cacheable(self) -> None:
+        window = FakeWindow()
+        ports, *_ = build_ports(executor=FakeExecutor())
+        controller = SourceController(window, state=SourceState(), ports=ports)
+        for extra in ({"is_live": True}, {"live_status": "is_upcoming"}, {"live_status": "post_live"}, {"_type": "playlist", "entries": []}):
+            with self.subTest(extra=extra), patch("gui.qt.controllers.helpers.fetch_info", return_value={
+                "title": "Live", "formats": [{"format_id": "1", "ext": "mp4"}], **extra,
+            }):
+                controller.fetch_formats_worker(1, "url")
+                payload = window._signals.formats_loaded.emits[-1][2]
+                self.assertFalse(payload["cacheable"])
+
+    def test_cancelled_and_stale_results_never_enter_preview_cache(self) -> None:
+        from tests.test_metadata_cache import preview
+        window = FakeWindow()
+        window.url_edit.setText("url")
+        ports, *_ = build_ports(executor=FakeExecutor())
+        state = SourceState(active_fetch_request_id=2, cancel_requested=True)
+        controller = SourceController(window, state=state, ports=ports)
+        controller.on_formats_loaded(1, "url", preview(), False, False)
+        self.assertIsNone(controller._metadata_cache.get("url"))
+        controller.on_formats_loaded(2, "url", preview(), False, False)
+        self.assertIsNone(controller._metadata_cache.get("url"))
+
     def test_analysis_cancellation_ignores_late_progress_and_success(self) -> None:
         window = FakeWindow()
         window.url_edit.setText("https://example.test/video")

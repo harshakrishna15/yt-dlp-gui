@@ -2911,6 +2911,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return
         self._analysis_timer.stop()
         if not self._is_downloading:
+            self._source_controller.clear_metadata_cache()
             self._discard_pending_progress()
             self._log_update_timer.stop()
             event.accept()
@@ -2923,6 +2924,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 default_yes=False,
             )
             if force_quit:
+                self._source_controller.clear_metadata_cache()
                 self._discard_pending_progress()
                 self._log_update_timer.stop()
                 event.accept()

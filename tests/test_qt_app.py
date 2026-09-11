@@ -3208,6 +3208,18 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
 
+    def test_engine_update_and_window_close_clear_preview_cache(self) -> None:
+        from tests.test_metadata_cache import preview
+        cache = self.window._source_controller._metadata_cache
+        cache.put("url", preview())
+        self.window._on_yt_dlp_update_done(yt_dlp_binary.YtDlpUpdateResult(True, True, "2026.08.19", "Updated"))
+        self.assertIsNone(cache.get("url"))
+        cache.put("url", preview())
+        event = QCloseEvent()
+        self.window.closeEvent(event)
+        self.assertTrue(event.isAccepted())
+        self.assertIsNone(cache.get("url"))
+
     def test_resize_burst_coalesces_and_skips_unchanged_control_sizing(self) -> None:
         window = self.window
         window.show()
