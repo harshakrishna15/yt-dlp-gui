@@ -1,4 +1,7 @@
-from typing import Any
+import sys
+import threading
+from pathlib import Path
+from typing import Any, Callable
 
 from . import yt_dlp_binary, yt_dlp_cli
 from .types import FormatInfo
@@ -18,21 +21,27 @@ def _import_yt_dlp():
     return yt_dlp
 
 
-def fetch_info(url: str) -> dict:
+def fetch_info(
+    url: str, *, cancel_event: threading.Event | None = None,
+    on_status: Callable[[str], None] | None = None,
+) -> dict:
     """Fetch info dict without downloading."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise yt_dlp_cli.MetadataCancelled()
     binary = yt_dlp_binary.resolve_yt_dlp_binary()
     if binary is not None:
-        return yt_dlp_cli.fetch_info(binary.path, url)
-
-    yt_dlp = _import_yt_dlp()
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "playlist_items": "1",
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=False, process=True)
+        return yt_dlp_cli.fetch_info(
+            binary.path, url, cancel_event=cancel_event, on_status=on_status,
+        )
+    if getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "The external yt-dlp engine is unavailable. Reinstall the app to restore it."
+        )
+    _import_yt_dlp()
+    return yt_dlp_cli.fetch_info(
+        Path(sys.executable), url, prefix_args=("-m", "yt_dlp"),
+        cancel_event=cancel_event, on_status=on_status,
+    )
 
 
 def detect_toolchain() -> dict[str, str]:

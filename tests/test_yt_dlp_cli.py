@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
+import sys
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -32,13 +35,12 @@ class _FakeProcess:
 class TestYtDlpMetadataCli(unittest.TestCase):
     def test_fetch_info_uses_deterministic_json_command(self) -> None:
         payload = {"id": "abc123", "title": "Example"}
-        completed = subprocess.CompletedProcess(
-            args=[],
+        completed = _FakeProcess(
             returncode=0,
             stdout=f"{json.dumps(payload)}\n",
             stderr="",
         )
-        with patch.object(yt_dlp_cli.subprocess, "run", return_value=completed) as run:
+        with patch.object(yt_dlp_cli.subprocess, "Popen", return_value=completed) as run:
             result = yt_dlp_cli.fetch_info(Path("/opt/yt-dlp"), "https://example.test/v")
 
         self.assertEqual(result, payload)
@@ -47,18 +49,77 @@ class TestYtDlpMetadataCli(unittest.TestCase):
         self.assertIn("--ignore-config", command)
         self.assertIn("--dump-single-json", command)
         self.assertIn("--skip-download", command)
+        self.assertIn("--no-quiet", command)
+        self.assertEqual(command[command.index("--socket-timeout") + 1], "15")
+        self.assertEqual(command[command.index("--extractor-retries") + 1], "1")
+        self.assertEqual(command[command.index("--playlist-items") + 1], "1")
         self.assertEqual(command[-2:], ["--", "https://example.test/v"])
 
     def test_fetch_info_surfaces_last_error_line(self) -> None:
-        completed = subprocess.CompletedProcess(
-            args=[],
+        completed = _FakeProcess(
             returncode=1,
             stdout="",
             stderr="warning\nERROR: unsupported URL\n",
         )
-        with patch.object(yt_dlp_cli.subprocess, "run", return_value=completed):
+        with patch.object(yt_dlp_cli.subprocess, "Popen", return_value=completed):
             with self.assertRaisesRegex(RuntimeError, "unsupported URL"):
                 yt_dlp_cli.fetch_info(Path("/opt/yt-dlp"), "bad-url")
+
+    def test_status_is_streamed_before_metadata_is_ready(self) -> None:
+        received = []
+        started = time.monotonic()
+        result = yt_dlp_cli.fetch_info(
+            Path(sys.executable), "test-url",
+            prefix_args=("-u", "-c", 'import time; print("Downloading player"); time.sleep(0.4); print(\'{"id":"test"}\')'),
+            on_status=lambda line: received.append((line, time.monotonic())),
+        )
+        self.assertEqual(result, {"id": "test"})
+        self.assertEqual(received[0][0], "Downloading player")
+        self.assertLess(received[0][1] - started, 1)
+        self.assertGreater(time.monotonic() - received[0][1], 0.3)
+
+    def test_cancel_terminates_and_reaps_live_process(self) -> None:
+        cancelled = threading.Event()
+        pids = []
+
+        def cancel(line):
+            pids.append(int(line))
+            cancelled.set()
+
+        started = time.monotonic()
+        with self.assertRaises(yt_dlp_cli.MetadataCancelled):
+            yt_dlp_cli.fetch_info(
+                Path(sys.executable), "test-url", cancel_event=cancelled,
+                prefix_args=("-u", "-c", 'import os,time; print(os.getpid()); time.sleep(30)'),
+                on_status=cancel,
+            )
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(len(pids), 1)
+        if sys.platform != "win32":
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pids[0], 0)
+
+    def test_timeout_even_if_child_closes_output_pipes(self) -> None:
+        started = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "timed out"):
+            yt_dlp_cli.fetch_info(
+                Path(sys.executable), "test-url", timeout=0.25,
+                prefix_args=("-u", "-c", 'import os,time; os.close(1); os.close(2); time.sleep(30)'),
+            )
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_pre_cancelled_lookup_never_starts_process(self) -> None:
+        cancelled = threading.Event()
+        cancelled.set()
+        with patch.object(yt_dlp_cli.subprocess, "Popen") as popen:
+            with self.assertRaises(yt_dlp_cli.MetadataCancelled):
+                yt_dlp_cli.fetch_info(Path("yt-dlp"), "test-url", cancel_event=cancelled)
+        popen.assert_not_called()
+
+    def test_invalid_metadata_is_reported(self) -> None:
+        with patch.object(yt_dlp_cli.subprocess, "Popen", return_value=_FakeProcess(stdout="{invalid}\n")):
+            with self.assertRaisesRegex(RuntimeError, "invalid metadata"):
+                yt_dlp_cli.fetch_info(Path("yt-dlp"), "test-url")
 
 
 class TestYtDlpDownloadArguments(unittest.TestCase):

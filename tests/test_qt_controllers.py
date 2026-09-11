@@ -99,6 +99,7 @@ class RaisingRuntimeSignal(FakeSignal):
 class FakeSignals:
     def __init__(self) -> None:
         self.formats_loaded = FakeSignal()
+        self.analysis_progress = FakeSignal()
         self.progress = FakeSignal()
         self.log = FakeSignal()
         self.download_done = FakeSignal()
@@ -427,7 +428,9 @@ class TestSourceController(unittest.TestCase):
         self.assertEqual(len(executor.calls), 1)
         target, args, kwargs = executor.calls[0]
         self.assertEqual(target, controller.fetch_formats_worker)
-        self.assertEqual(args, (1, "https://example.com/watch?v=abc"))
+        self.assertEqual(args[:2], (1, "https://example.com/watch?v=abc"))
+        self.assertIs(args[2], state.pending_fetches[1])
+        self.assertIsNotNone(state.started_at)
         self.assertEqual(kwargs, {})
 
     def test_on_formats_loaded_updates_source_state(self) -> None:
@@ -480,6 +483,73 @@ class TestSourceController(unittest.TestCase):
             },
         )
         self.assertEqual(window.status_value.text(), "Formats loaded")
+
+    def test_analysis_cancellation_ignores_late_progress_and_success(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.test/video")
+        executor = FakeExecutor()
+        ports, *_ = build_ports(executor=executor)
+        state = SourceState()
+        controller = SourceController(window, state=state, ports=ports)
+        controller.start_fetch_formats()
+        controller.start_fetch_formats()
+        self.assertEqual(len(executor.calls), 1)
+        controller.on_analysis_progress(1, window.url_edit.text(), "Downloading player")
+        self.assertEqual(window.feedback_updates[-1], ("Downloading player", "loading"))
+        controller.cancel_fetch_formats()
+        self.assertTrue(state.pending_fetches[1].is_set())
+        self.assertTrue(state.is_fetching)
+        controller.on_analysis_progress(1, window.url_edit.text(), "Too late")
+        self.assertEqual(window.feedback_updates[-1], ("Cancelling analysis...", "loading"))
+        controller.on_formats_loaded(1, window.url_edit.text(), {"preview_title": "Late result"}, False, False)
+        self.assertFalse(state.is_fetching)
+        self.assertEqual(state.pending_fetches, {})
+        self.assertEqual(window.status_value.text(), "Analysis cancelled")
+        self.assertEqual(window.preview_title, "")
+
+    def test_url_change_cancels_old_worker_and_discards_its_error(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.test/old")
+        ports, *_ = build_ports(executor=FakeExecutor())
+        state = SourceState()
+        controller = SourceController(window, state=state, ports=ports)
+        controller.start_fetch_formats()
+        old_event = state.pending_fetches[1]
+        window.url_edit.setText("https://example.test/new")
+        controller.on_url_changed()
+        self.assertTrue(old_event.is_set())
+        controller.start_fetch_formats()
+        controller.on_analysis_progress(1, "https://example.test/old", "Stale status")
+        controller.on_formats_loaded(1, "https://example.test/old", {"error": "Stale error"}, True, False)
+        self.assertTrue(state.is_fetching)
+        self.assertNotIn(1, state.pending_fetches)
+        self.assertEqual(window.logs, [])
+        self.assertNotIn(("Stale status", "loading"), window.feedback_updates)
+
+    def test_submit_failure_restores_controls(self) -> None:
+        window = FakeWindow()
+        window.url_edit.setText("https://example.test/video")
+        executor = FakeExecutor()
+        ports, *_ = build_ports(executor=executor)
+        state = SourceState()
+        controller = SourceController(window, state=state, ports=ports)
+        with patch.object(executor, "submit", side_effect=RuntimeError("worker unavailable")):
+            controller.start_fetch_formats()
+        self.assertFalse(state.is_fetching)
+        self.assertEqual(state.pending_fetches, {})
+        self.assertIn("worker unavailable", window.logs[-1])
+
+    def test_worker_cancellation_reports_completion_without_error(self) -> None:
+        from gui.common.yt_dlp_cli import MetadataCancelled
+        window = FakeWindow()
+        ports, *_ = build_ports(executor=FakeExecutor())
+        controller = SourceController(window, state=SourceState(), ports=ports)
+        event = threading.Event()
+        with patch("gui.qt.controllers.helpers.fetch_info", side_effect=MetadataCancelled) as fetch:
+            controller.fetch_formats_worker(7, "test-url", event)
+        self.assertIs(fetch.call_args.kwargs["cancel_event"], event)
+        self.assertEqual(window._signals.formats_loaded.emits, [(7, "test-url", {"cancelled": True}, False, False)])
+        self.assertEqual(window._signals.log.emits, [])
 
     def test_fetch_formats_worker_ignores_deleted_signal_source(self) -> None:
         window = FakeWindow()

@@ -72,7 +72,7 @@ def compute_control_state(
         and (not mixed_prompt_active)
     )
     can_add_queue = can_start_single and (not is_playlist_url) and (not queue_active)
-    can_start_queue = queue_ready and (not is_downloading) and (not mixed_prompt_active)
+    can_start_queue = queue_ready and (not is_downloading) and (not is_fetching) and (not mixed_prompt_active)
     can_cancel = is_downloading and (not cancel_requested)
     can_fetch_formats = url_present and (not is_fetching) and (not is_downloading) and (not mixed_prompt_active)
     mode_enabled = url_present and formats_ready and (not is_downloading)

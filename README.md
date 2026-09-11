@@ -100,6 +100,12 @@ Output:
 4. Click `Download` to start immediately, or `Add to Queue` to send it to the queue panel.
 5. Use `Queue` to manage pending downloads. Activity logs are available under `Preferences` > `View logs`.
 
+Analysis shows live yt-dlp status, an activity indicator, elapsed time, and
+`Cancel analysis` in the status row. Changing the URL cancels the previous lookup;
+closing the window waits for active lookups to stop. Metadata requests use a
+15-second socket timeout, one retry, and a 90-second overall limit. Network and
+site response times still affect how long analysis takes.
+
 Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can
 override that path with `YT_DLP_GUI_SETTINGS_PATH`. The output folder is
 session-only and resets to the computer's Downloads folder each time the app starts.

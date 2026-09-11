@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -11,6 +12,7 @@ from ..common import (
     format_pipeline,
     formats as formats_mod,
     settings_store,
+    yt_dlp_cli,
     yt_dlp_helpers as helpers,
 )
 from ..common.types import DownloadRequest, QueueItem, QueueSettings
@@ -51,6 +53,10 @@ class SourceState:
     fetch_request_seq: int = 0
     active_fetch_request_id: int = 0
     is_fetching: bool = False
+    pending_fetches: dict[int, threading.Event] = field(default_factory=dict)
+    cancel_requested: bool = False
+    close_after_fetch: bool = False
+    started_at: float | None = None
     pending_mixed_url: str = ""
     playlist_mode: bool = False
     video_labels: list[str] = field(default_factory=list)
@@ -122,9 +128,13 @@ class SourceController:
             s.pending_mixed_url = ""
 
         w._fetch_timer.stop()
+        for event in s.pending_fetches.values():
+            event.set()
         s.fetch_request_seq += 1
         s.active_fetch_request_id = s.fetch_request_seq
         s.is_fetching = False
+        s.cancel_requested = False
+        s.started_at = None
         s.playlist_mode = core_urls.is_playlist_url(normalized)
 
         w._set_mode_unselected()
@@ -163,7 +173,7 @@ class SourceController:
     def start_fetch_formats(self) -> None:
         w = self.window
         s = self.state
-        if w._is_downloading or bool(
+        if s.is_fetching or s.close_after_fetch or w._is_downloading or bool(
             getattr(w, "_yt_dlp_update_in_progress", False)
         ):
             return
@@ -174,14 +184,49 @@ class SourceController:
         request_id = s.fetch_request_seq
         s.active_fetch_request_id = request_id
         s.is_fetching = True
+        s.cancel_requested = False
+        s.started_at = time.monotonic()
+        cancel_event = self._ports.cancel_events.new_event()
+        s.pending_fetches[request_id] = cancel_event
         w._set_status("Fetching formats...", log=False)
         w._set_source_feedback("Loading available formats...", tone="loading")
         w._update_controls_state()
-        self._ports.worker_executor.submit(self.fetch_formats_worker, request_id, url)
-
-    def fetch_formats_worker(self, request_id: int, url: str) -> None:
         try:
-            info = helpers.fetch_info(url)
+            self._ports.worker_executor.submit(
+                self.fetch_formats_worker, request_id, url, cancel_event
+            )
+        except Exception as exc:
+            self.on_formats_loaded(request_id, url, {"error": str(exc)}, True, False)
+
+    def cancel_fetch_formats(self) -> None:
+        s = self.state
+        for event in s.pending_fetches.values():
+            event.set()
+        if s.is_fetching:
+            s.cancel_requested = True
+            self.window._set_source_feedback("Cancelling analysis...", tone="loading")
+            self.window._update_controls_state()
+
+    def on_analysis_progress(self, request_id: int, url: str, text: str) -> None:
+        s = self.state
+        w = self.window
+        if (request_id != s.active_fetch_request_id or not s.is_fetching
+                or s.cancel_requested or url != w.url_edit.text().strip()):
+            return
+        w._set_source_feedback(text, tone="loading")
+
+    def fetch_formats_worker(
+        self, request_id: int, url: str, cancel_event: threading.Event | None = None,
+    ) -> None:
+        try:
+            info = helpers.fetch_info(
+                url, cancel_event=cancel_event,
+                on_status=lambda text: _emit_window_signal(
+                    self.window, "analysis_progress", request_id, url, text
+                ),
+            )
+            if cancel_event is not None and cancel_event.is_set():
+                raise yt_dlp_cli.MetadataCancelled()
             formats = formats_mod.formats_from_info(info)
             collections = format_pipeline.build_format_collections(formats)
             payload = {
@@ -201,18 +246,18 @@ class SourceController:
                 "formats_loaded",
                 request_id, url, payload, False, is_playlist
             )
-        except Exception as exc:
+        except yt_dlp_cli.MetadataCancelled:
             _emit_window_signal(
-                self.window,
-                "log",
-                f"[error] Could not fetch formats: {exc}",
+                self.window, "formats_loaded", request_id, url,
+                {"cancelled": True}, False, False,
             )
+        except Exception as exc:
             _emit_window_signal(
                 self.window,
                 "formats_loaded",
                 request_id,
                 url,
-                {},
+                {"error": str(exc)},
                 True,
                 False,
             )
@@ -228,8 +273,19 @@ class SourceController:
         w = self.window
         s = self.state
 
-        if request_id != s.active_fetch_request_id:
+        s.pending_fetches.pop(request_id, None)
+        if s.close_after_fetch and not s.pending_fetches:
+            s.is_fetching = False
+            w.close()
             return
+        if request_id != s.active_fetch_request_id:
+            w._update_controls_state()
+            return
+        cancelled = s.cancel_requested or (
+            isinstance(payload, dict) and payload.get("cancelled")
+        )
+        s.cancel_requested = False
+        s.started_at = None
         current_url = w.url_edit.text().strip()
         if url != current_url:
             s.is_fetching = False
@@ -238,10 +294,17 @@ class SourceController:
             w._update_controls_state()
             return
         s.is_fetching = False
+        if cancelled:
+            w._set_status("Analysis cancelled", log=False)
+            w._set_source_feedback("Analysis cancelled.", tone="warning", action="")
+            w._update_controls_state()
+            return
         s.playlist_mode = bool(is_playlist)
         w._update_source_details_visibility()
 
         if error or not isinstance(payload, dict):
+            if isinstance(payload, dict) and payload.get("error"):
+                w._append_log(f"[error] Could not fetch formats: {payload['error']}")
             s.video_labels = []
             s.video_lookup = {}
             s.audio_labels = []
@@ -323,7 +386,7 @@ class RunQueueController:
         self._refresh_run_state()
         w = self.window
         s = self.state
-        if s.is_downloading or bool(
+        if s.is_downloading or bool(getattr(w, "_is_fetching", False)) or bool(
             getattr(w, "_yt_dlp_update_in_progress", False)
         ):
             return
@@ -641,7 +704,7 @@ class RunQueueController:
         self._refresh_run_state()
         w = self.window
         s = self.state
-        if bool(getattr(w, "_yt_dlp_update_in_progress", False)):
+        if bool(getattr(w, "_yt_dlp_update_in_progress", False)) or bool(getattr(w, "_is_fetching", False)):
             return
         queue_check = core_workflow.validate_queue_start(
             is_downloading=s.is_downloading,

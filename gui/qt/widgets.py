@@ -55,6 +55,7 @@ TLayout = TypeVar("TLayout", bound=QLayout)
 
 class _QtSignals(QObject):
     formats_loaded = Signal(int, str, object, bool, bool)
+    analysis_progress = Signal(int, str, str)
     progress = Signal(object)
     log = Signal(str)
     download_done = Signal(str)
@@ -83,6 +84,8 @@ class FeedbackRefs:
     message_label: QLabel
     action_button: QPushButton
     dismiss_button: QPushButton
+    progress_bar: QProgressBar
+    elapsed_label: QLabel
 
 
 @dataclass(frozen=True)
@@ -1543,6 +1546,18 @@ def build_feedback_row(parent: QWidget) -> FeedbackRefs:
     message_label = ElidedLabel(row)
     message_label.setObjectName("feedbackMessage")
     message_label.setProperty("allowToolTip", True)
+    progress_bar = QProgressBar(row)
+    progress_bar.setObjectName("analysisProgress")
+    progress_bar.setAccessibleName("Analysis in progress")
+    progress_bar.setRange(0, 0)
+    progress_bar.setTextVisible(False)
+    progress_bar.setFixedSize(56, 4)
+    progress_bar.hide()
+    elapsed_label = QLabel(row)
+    elapsed_label.setObjectName("analysisElapsed")
+    elapsed_label.setFixedWidth(100)
+    elapsed_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    elapsed_label.hide()
     action_button = build_button(row, spec=ButtonSpec(
         text="View details", object_name="feedbackActionButton",
     ))
@@ -1552,8 +1567,10 @@ def build_feedback_row(parent: QWidget) -> FeedbackRefs:
     ))
     dismiss_button.setAccessibleName("Dismiss status")
     dismiss_button.setProperty("allowToolTip", True)
+    layout.addWidget(progress_bar)
     layout.addWidget(message_label, 1)
+    layout.addWidget(elapsed_label)
     layout.addWidget(action_button)
     layout.addWidget(dismiss_button)
     row.hide()
-    return FeedbackRefs(row, message_label, action_button, dismiss_button)
+    return FeedbackRefs(row, message_label, action_button, dismiss_button, progress_bar, elapsed_label)

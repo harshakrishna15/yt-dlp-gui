@@ -221,6 +221,7 @@ class WindowSettingsMixin:
             and not self._yt_dlp_update_in_progress
             and not self._is_downloading
             and not self._is_fetching
+            and not self._source_state.pending_fetches
         )
 
     def _update_yt_dlp(self: "QtYtDlpGui") -> None:
@@ -228,6 +229,7 @@ class WindowSettingsMixin:
             self._yt_dlp_update_in_progress
             or self._is_downloading
             or self._is_fetching
+            or self._source_state.pending_fetches
         ):
             return
         resolved = yt_dlp_binary.resolve_yt_dlp_binary()

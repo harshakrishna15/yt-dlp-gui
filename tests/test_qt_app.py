@@ -103,6 +103,10 @@ class TestQtApp(unittest.TestCase):
         self.window = QtYtDlpGui()
 
     def tearDown(self) -> None:
+        for event in self.window._source_state.pending_fetches.values():
+            event.set()
+        self.window._source_state.pending_fetches.clear()
+        self.window._is_fetching = False
         self.window._is_downloading = False
         self.window._yt_dlp_update_in_progress = False
         self.window._close_after_cancel = False
@@ -1333,6 +1337,90 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.feedback_message.text(), "Latest message")
         self.assertEqual(len(self.window.findChildren(QWidget, "feedbackRow")), 1)
         self.assertEqual(self.window.findChildren(QFrame, "sourceToastCard"), [])
+
+    def test_analysis_feedback_fits_and_cancels_at_minimum_size(self) -> None:
+        window = self.window
+        window.url_edit.setText("https://example.test/video")
+        with patch.object(window._effects.worker_executor, "submit"):
+            window._start_fetch_formats()
+        state = window._source_state
+        state.started_at = time.monotonic() - 12
+        window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        window.show()
+        request_id = state.active_fetch_request_id
+        window._source_controller.on_analysis_progress(request_id, window.url_edit.text(), "Downloading player " + "long-token" * 100)
+        window._update_analysis_elapsed()
+        QApplication.processEvents()
+        self.assertTrue(window.feedback_row.isVisible())
+        self.assertTrue(window.analysis_progress_bar.isVisible())
+        self.assertEqual(window.analysis_progress_bar.maximum(), 0)
+        self.assertEqual(window.analysis_elapsed_label.text(), "Elapsed 12s")
+        self.assertTrue(window._analysis_timer.isActive())
+        self.assertFalse(window.analyze_button.isEnabled())
+        self.assertTrue(window.feedback_dismiss_button.isHidden())
+        self.assertEqual(window.size().width(), MIN_WINDOW_WIDTH)
+        self.assertEqual(window.size().height(), MIN_WINDOW_HEIGHT)
+        self.assertGreater(window.feedback_row.geometry().top(), window.panel_stack.geometry().bottom())
+        self._assert_visible_text_widgets_fit(window.feedback_row, label="Analysis footer")
+        window._open_panel("logs")
+        self.assertTrue(window.feedback_row.isVisible())
+        window.feedback_action_button.click()
+        self.assertTrue(state.pending_fetches[request_id].is_set())
+        self.assertFalse(window.feedback_action_button.isEnabled())
+        window._on_formats_loaded(request_id, window.url_edit.text(), {"cancelled": True}, False, False)
+        self.assertFalse(window._is_fetching)
+        self.assertFalse(window._analysis_timer.isActive())
+        self.assertTrue(window.analyze_button.isEnabled())
+        self.assertTrue(window.analysis_progress_bar.isHidden())
+
+    def test_close_waits_for_all_analysis_workers_including_stale_url(self) -> None:
+        window = self.window
+        window.show()
+        window.url_edit.setText("https://example.test/old")
+        with patch.object(window._effects.worker_executor, "submit"):
+            window._start_fetch_formats()
+            old_id = window._source_state.active_fetch_request_id
+            window.url_edit.setText("https://example.test/new")
+            window._start_fetch_formats()
+        state = window._source_state
+        new_id = state.active_fetch_request_id
+        event = QCloseEvent()
+        window.closeEvent(event)
+        self.assertFalse(event.isAccepted())
+        self.assertTrue(state.close_after_fetch)
+        self.assertTrue(all(item.is_set() for item in state.pending_fetches.values()))
+        with patch.object(window, "close") as close:
+            window._on_formats_loaded(new_id, window.url_edit.text(), {"cancelled": True}, False, False)
+            close.assert_not_called()
+            window._on_formats_loaded(old_id, "https://example.test/old", {"cancelled": True}, False, False)
+            close.assert_called_once()
+        window.closeEvent(event)
+        self.assertTrue(event.isAccepted())
+
+    def test_update_waits_for_cancelled_metadata_worker_to_exit(self) -> None:
+        window = self.window
+        window.url_edit.setText("https://example.test/old")
+        with patch.object(window._effects.worker_executor, "submit"):
+            window._start_fetch_formats()
+        old_id = window._source_state.active_fetch_request_id
+        window.url_edit.setText("https://example.test/new")
+        self.assertFalse(window._is_fetching)
+        self.assertFalse(window.yt_dlp_update_button.isEnabled())
+        with patch.object(window._effects.worker_executor, "submit") as submit:
+            window._update_yt_dlp()
+            submit.assert_not_called()
+        window._on_formats_loaded(old_id, "https://example.test/old", {"cancelled": True}, False, False)
+        self.assertTrue(window.yt_dlp_update_button.isEnabled())
+
+    def test_mixed_url_change_restores_details_action_after_analysis(self) -> None:
+        window = self.window
+        window.url_edit.setText("https://example.test/video")
+        with patch.object(window._effects.worker_executor, "submit"):
+            window._start_fetch_formats()
+        window.url_edit.setText("https://www.youtube.com/watch?v=abc&list=PL123")
+        self.assertFalse(window._is_fetching)
+        self.assertEqual(window.feedback_action_button.text(), "View details")
+        self.assertTrue(window.analysis_progress_bar.isHidden())
 
     def test_feedback_fits_minimum_window_without_overlaying_controls(self) -> None:
         self._load_ready_preview_with_formats()

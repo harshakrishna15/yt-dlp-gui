@@ -459,7 +459,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: transparent;
             border-top: 1px solid __border_soft__;
         }
-        QLabel#feedbackMessage {
+        QLabel#feedbackMessage, QLabel#analysisElapsed {
             color: __text_secondary__;
             font-size: 13px;
         }

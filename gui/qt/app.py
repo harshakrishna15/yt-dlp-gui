@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import signal
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -219,6 +220,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         self._signals = _QtSignals()
         self._signals.formats_loaded.connect(self._on_formats_loaded)
+        self._signals.analysis_progress.connect(
+            lambda request_id, url, text: self._source_controller.on_analysis_progress(
+                request_id, url, text
+            )
+        )
         self._signals.progress.connect(self._on_progress_update)
         self._signals.log.connect(self._append_log)
         self._signals.download_done.connect(self._on_download_done)
@@ -230,6 +236,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._fetch_timer.setInterval(FETCH_DEBOUNCE_MS)
         self._fetch_timer.setSingleShot(True)
         self._fetch_timer.timeout.connect(self._start_fetch_formats)
+        self._analysis_timer = QTimer(self)
+        self._analysis_timer.setInterval(500)
+        self._analysis_timer.timeout.connect(self._update_analysis_elapsed)
         self._resize_sync_timer = QTimer(self)
         self._resize_sync_timer.setSingleShot(True)
         self._resize_sync_timer.timeout.connect(self._run_deferred_resize_sync)
@@ -543,6 +552,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.feedback_message = feedback.message_label
         self.feedback_action_button = feedback.action_button
         self.feedback_dismiss_button = feedback.dismiss_button
+        self.analysis_progress_bar = feedback.progress_bar
+        self.analysis_elapsed_label = feedback.elapsed_label
         self.feedback_action_button.clicked.connect(self._activate_feedback_action)
         self.feedback_dismiss_button.clicked.connect(self._dismiss_feedback)
 
@@ -1566,18 +1577,31 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
         self.feedback_message.setText(message)
         self.feedback_message.setToolTip(message)
-        self.feedback_action_button.setText(
-            "Open folder" if action == "folder" else "View details"
-        )
-        self.feedback_action_button.setVisible(
-            bool(self._feedback_action)
-            and (action != "folder" or self._feedback_output_dir is not None)
-        )
         self._set_widget_property(self.feedback_row, "tone", tone_value)
         self._refresh_widget_style(self.feedback_message)
         self._sync_source_feedback_visibility()
 
     def _sync_source_feedback_visibility(self) -> None:
+        fetching = self._is_fetching
+        self.analysis_progress_bar.setVisible(fetching)
+        self.analysis_elapsed_label.setVisible(fetching)
+        self.feedback_dismiss_button.setVisible(not fetching)
+        self.feedback_action_button.setEnabled(not (fetching and self._source_state.cancel_requested))
+        if fetching:
+            self.feedback_action_button.setText("Cancel analysis")
+            self.feedback_action_button.show()
+            self._update_analysis_elapsed()
+            if not self._analysis_timer.isActive():
+                self._analysis_timer.start()
+        else:
+            self._analysis_timer.stop()
+            self.feedback_action_button.setText(
+                "Open folder" if self._feedback_action == "folder" else "View details"
+            )
+            self.feedback_action_button.setVisible(
+                bool(self._feedback_action)
+                and (self._feedback_action != "folder" or self._feedback_output_dir is not None)
+            )
         visible = (
             bool(self._current_source_feedback_message)
             and self._current_source_feedback_tone in {"success", "warning", "error"}
@@ -1585,14 +1609,21 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             and self._active_panel_name != "logs"
             and not self._is_downloading
         )
-        self.feedback_row.setVisible(visible)
+        self.feedback_row.setVisible(fetching or visible)
+
+    def _update_analysis_elapsed(self) -> None:
+        started_at = self._source_state.started_at
+        seconds = max(0, int(time.monotonic() - started_at)) if started_at is not None else 0
+        self.analysis_elapsed_label.setText(f"Elapsed {seconds}s")
 
     def _dismiss_feedback(self) -> None:
         self._feedback_dismissed = True
         self._sync_source_feedback_visibility()
 
     def _activate_feedback_action(self) -> None:
-        if self._feedback_action == "details":
+        if self._is_fetching:
+            self._source_controller.cancel_fetch_formats()
+        elif self._feedback_action == "details":
             self._open_panel("logs")
         elif self._feedback_action == "folder" and self._feedback_output_dir is not None:
             folder = self._feedback_output_dir
@@ -2849,6 +2880,12 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             )
             event.ignore()
             return
+        if self._source_state.pending_fetches:
+            self._source_state.close_after_fetch = True
+            self._source_controller.cancel_fetch_formats()
+            event.ignore()
+            return
+        self._analysis_timer.stop()
         if not self._is_downloading:
             event.accept()
             return
@@ -2896,15 +2933,15 @@ def main() -> int:
         app.setDesktopFileName(APP_BUNDLE_IDENTIFIER)
     sigint_pump: QTimer | None = None
 
-    # Ensure Ctrl+C from a terminal cleanly exits the Qt event loop.
+    window = QtYtDlpGui()
+    # Let normal window shutdown cancel and reap any analysis worker.
     if hasattr(signal, "SIGINT"):
-        signal.signal(signal.SIGINT, lambda _sig, _frame: app.quit())
+        signal.signal(signal.SIGINT, lambda _sig, _frame: window.close())
         sigint_pump = QTimer()
         sigint_pump.setInterval(100)
         sigint_pump.timeout.connect(lambda: None)
         sigint_pump.start()
 
-    window = QtYtDlpGui()
     setattr(window, "_sigint_pump", sigint_pump)
     window.show()
     window._apply_window_icon()

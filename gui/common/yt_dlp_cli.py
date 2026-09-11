@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -23,45 +24,98 @@ class YtDlpProcessResult:
     cancelled: bool
 
 
-def fetch_info(binary: Path, url: str) -> dict[str, Any]:
+class MetadataCancelled(Exception):
+    """Metadata lookup was intentionally cancelled."""
+
+
+def fetch_info(
+    binary: Path,
+    url: str,
+    *,
+    cancel_event: threading.Event | None = None,
+    on_status: Callable[[str], None] | None = None,
+    timeout: float = 90,
+    prefix_args: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    if cancel_event is not None and cancel_event.is_set():
+        raise MetadataCancelled()
     command = [
-        str(binary),
-        "--ignore-config",
-        "--color",
-        "never",
-        "--dump-single-json",
-        "--skip-download",
-        "--playlist-items",
-        "1",
-        "--",
-        str(url),
+        str(binary), *prefix_args, "--ignore-config", "--color", "never",
+        "--dump-single-json", "--skip-download", "--no-quiet", "--no-progress",
+        "--socket-timeout", "15", "--retries", "1", "--extractor-retries", "1",
+        "--playlist-items", "1", "--", str(url),
     ]
     try:
-        completed = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            timeout=180,
-            creationflags=_creation_flags(),
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+            start_new_session=sys.platform != "win32",
+            creationflags=_process_creation_flags(),
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except OSError as exc:
         raise RuntimeError(f"Could not run yt-dlp: {exc}") from exc
-    if completed.returncode != 0:
-        detail = _last_nonempty_line(completed.stderr) or "yt-dlp metadata lookup failed"
-        raise RuntimeError(detail)
+    events: queue.Queue[tuple[str, str | None]] = queue.Queue()
 
-    for line in reversed(completed.stdout.splitlines()):
+    def read_stream(kind, stream):
         try:
-            payload = json.loads(line)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict):
-            return payload
-    raise RuntimeError("yt-dlp returned invalid metadata.")
+            for line in stream:
+                events.put((kind, line.rstrip("\r\n")))
+        finally:
+            events.put((kind, None))
+
+    readers = [
+        threading.Thread(target=read_stream, args=(kind, stream), daemon=True)
+        for kind, stream in (("stdout", process.stdout), ("stderr", process.stderr))
+    ]
+    for reader in readers:
+        reader.start()
+    deadline = time.monotonic() + max(0, timeout)
+    streams = len(readers)
+    payload = None
+    last_error = ""
+    completed = False
+    try:
+        while streams or process.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise MetadataCancelled()
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Analysis timed out after {timeout:g} seconds.")
+            try:
+                kind, line = events.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if line is None:
+                streams -= 1
+                continue
+            if not line:
+                continue
+            if len(line) > 64 * 1024 * 1024:
+                raise RuntimeError("yt-dlp metadata exceeded the size limit.")
+            if kind == "stdout" and line.startswith("{"):
+                parsed = _parse_json(line)
+                if isinstance(parsed, dict):
+                    payload = parsed
+                    continue
+            if kind == "stderr":
+                last_error = line
+            if on_status:
+                on_status(line[:4000])
+        if cancel_event is not None and cancel_event.is_set():
+            raise MetadataCancelled()
+        if process.wait() != 0:
+            raise RuntimeError(last_error or "yt-dlp metadata lookup failed")
+        if payload is None:
+            raise RuntimeError("yt-dlp returned invalid metadata.")
+        completed = True
+        return payload
+    finally:
+        if not completed and (process.poll() is None or streams):
+            _terminate_process_tree(process)
+        for reader in readers:
+            reader.join(timeout=2)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
 
 
 def build_download_args(
@@ -245,31 +299,41 @@ def run_download_process(
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
     if sys.platform == "win32":
+        if process.poll() is not None:
+            return
         try:
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=5,
                 creationflags=_creation_flags(),
             )
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
             try:
                 process.kill()
             except OSError:
                 pass
+            process.wait()
         return
     try:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=3)
     except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        # The leader may exit before descendants holding its pipes open.
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except (OSError, ProcessLookupError):
             pass
+        process.wait()
 
 
 def _emit_progress(
