@@ -49,7 +49,7 @@ def build_queue_settings(
     estimated_size = helpers.humanize_bytes(
         helpers.estimate_filesize_bytes(dict(format_info))
     )
-    return core_options.build_queue_settings(
+    settings = core_options.build_queue_settings(
         mode=mode,
         format_filter=format_filter,
         codec_filter=codec_filter,
@@ -60,6 +60,12 @@ def build_queue_settings(
         playlist_items=playlist_items,
         options=options,
     )
+    selector = core_format_selection.queue_format_selector(
+        mode=mode, container=format_filter, codec=codec_filter, info=dict(format_info),
+    )
+    if selector:
+        settings["format_selector"] = selector
+    return settings
 
 
 def resolve_format_for_url(
@@ -70,6 +76,19 @@ def resolve_format_for_url(
     cancel_event: threading.Event | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> ResolvedFormat:
+    if cancel_event is not None and cancel_event.is_set():
+        raise helpers.yt_dlp_cli.MetadataCancelled()
+    selector = settings.get("format_selector")
+    if selector:
+        audio_only = settings.get("mode") == "audio"
+        return {
+            "fmt_label": str(settings.get("format_label") or "Best available"),
+            "fmt_info": {"custom_format": str(selector), "is_audio_only": audio_only,
+                         "vcodec": "none" if audio_only else "unknown", "acodec": "unknown"},
+            "format_filter": str(settings.get("format_filter") or ""),
+            "is_playlist": False,
+            "title": "",
+        }
     info = helpers.fetch_info(url, cancel_event=cancel_event, on_status=on_status)
     formats = formats_mod.formats_from_info(info)
     return core_format_selection.resolve_format_for_info(

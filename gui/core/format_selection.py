@@ -3,8 +3,43 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+import re
 
 from ..common import format_pipeline
+
+
+def queue_format_selector(*, mode: str, container: str, codec: str, info: dict) -> str | None:
+    """Keep the selected stream ID, with the existing best-format fallbacks."""
+    if mode == "audio":
+        fallback = "bestaudio/best"
+    elif mode == "video" and container in {"mp4", "webm"}:
+        constraint = f"[ext={container}]"
+        codec_constraint = {
+            "avc1": "[vcodec~='^(avc1|h264)']",
+            "av01": "[vcodec~='^(av01|av1)']",
+            "vp9": "[vcodec^=vp9]",
+        }.get(codec, "")
+        if codec not in {"avc1", "av01", "vp9", "any", ""}:
+            return None
+        def choices(filters):
+            return f"bestvideo{filters}+bestaudio/best{filters}"
+        fallback = choices(constraint + codec_constraint)
+        if codec_constraint:
+            fallback += "/" + choices(constraint)
+        fallback += "/bestvideo+bestaudio/best"
+    else:
+        return None
+    custom = info.get("custom_format")
+    if custom:
+        # Only these app-generated choices have known fallback semantics.
+        return str(custom) if custom in {"bestaudio/best", "bestvideo+bestaudio/best", "best"} else None
+    format_id = str(info.get("format_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", format_id):
+        return None
+    selected = format_id
+    if mode == "video" and info.get("acodec") in {None, "none"}:
+        selected += "+bestaudio"
+    return f"{selected}/{fallback}"
 
 
 @dataclass(frozen=True)

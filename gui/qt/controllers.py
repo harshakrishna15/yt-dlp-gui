@@ -804,7 +804,7 @@ class RunQueueController:
         )
         w._set_current_item_display(
             progress=f"{next_item.display_index}/{next_item.total}",
-            title="Resolving title...",
+            title=str(s.queue_items[next_item.index].get("title") or "Resolving title..."),
         )
         next_output_dir = str(
             next_item.settings.get("output_dir") or w.output_dir_edit.text().strip()
@@ -865,8 +865,9 @@ class RunQueueController:
             resolved = self.resolve_format_for_url(url, settings)
             if self.state.cancel_event is not None and self.state.cancel_event.is_set():
                 raise yt_dlp_cli.MetadataCancelled()
-            item_text = f"{index}/{total} {resolved.get('title') or url}"
-            _emit_window_signal(self.window, "progress", {"status": "item", "item": item_text})
+            if resolved.get("title"):
+                item_text = f"{index}/{total} {resolved['title']}"
+                _emit_window_signal(self.window, "progress", {"status": "item", "item": item_text})
 
             request = app_service.build_queue_download_request(
                 url=url,
