@@ -65,9 +65,49 @@ class WindowSettingsMixin:
         self.yt_dlp_update_details_button = refs.yt_dlp_update_details_button
         self.export_diagnostics_button = refs.export_diagnostics_button
         self.logs_button = refs.view_logs_button
-        self._refresh_yt_dlp_version()
-        self._refresh_edit_friendly_encoder_availability()
+        self.yt_dlp_version_label.setText("Checking yt-dlp...")
+        self.yt_dlp_update_button.setEnabled(False)
         return refs.panel
+
+    def _start_tool_checks(self: "QtYtDlpGui") -> None:
+        if not self._tool_checks_pending or self._tool_checks_started:
+            return
+        self._tool_checks_started = True
+        try:
+            self._effects.worker_executor.submit(self._tool_checks_worker)
+        except Exception as exc:
+            self._on_tool_checks_done({"error": str(exc)})
+
+    def _tool_checks_worker(self: "QtYtDlpGui") -> None:
+        result: dict[str, object] = {}
+        try:
+            result["engine"] = yt_dlp_binary.resolve_yt_dlp_binary()
+            ffmpeg, _ = tooling.resolve_binary("ffmpeg")
+            result["encoders"] = tooling.available_ffmpeg_encoders(
+                ffmpeg, candidates=_EDIT_FRIENDLY_ENCODER_CODECS.values(),
+            ) if ffmpeg is not None else set()
+        except Exception as exc:
+            result["error"] = str(exc)
+        try:
+            self._signals.tool_checks_done.emit(result)
+        except RuntimeError:
+            pass
+
+    def _on_tool_checks_done(self: "QtYtDlpGui", result: object) -> None:
+        self._tool_checks_pending = False
+        result = result if isinstance(result, dict) else {}
+        engine = result.get("engine")
+        self._yt_dlp_binary_source = engine.source if engine is not None else "missing"
+        self.yt_dlp_version_label.setText(
+            f"yt-dlp {engine.version}" if engine is not None else "yt-dlp unavailable"
+        )
+        self._apply_encoder_availability(set(result.get("encoders") or ()))
+        self.edit_friendly_encoder_combo.setEnabled(True)
+        if result.get("error"):
+            self._append_log(f"[error] Tool initialization failed: {result['error']}")
+        self._update_controls_state()
+        if self._close_after_tool_checks:
+            self.close()
 
     def _build_queue_panel(self: "QtYtDlpGui") -> QWidget:
         refs = qt_panels.build_queue_panel(
@@ -192,6 +232,9 @@ class WindowSettingsMixin:
                 ffmpeg_path,
                 candidates=_EDIT_FRIENDLY_ENCODER_CODECS.values(),
             )
+        self._apply_encoder_availability(available_codecs)
+
+    def _apply_encoder_availability(self: "QtYtDlpGui", available_codecs: set[str]) -> None:
         for preference, codec in _EDIT_FRIENDLY_ENCODER_CODECS.items():
             self.edit_friendly_encoder_combo.set_item_enabled(
                 preference,
@@ -222,6 +265,7 @@ class WindowSettingsMixin:
             and not self._is_downloading
             and not self._is_fetching
             and not self._source_state.pending_fetches
+            and not self._tool_checks_pending
         )
 
     def _update_yt_dlp(self: "QtYtDlpGui") -> None:
@@ -230,6 +274,7 @@ class WindowSettingsMixin:
             or self._is_downloading
             or self._is_fetching
             or self._source_state.pending_fetches
+            or self._tool_checks_pending
         ):
             return
         resolved = yt_dlp_binary.resolve_yt_dlp_binary()

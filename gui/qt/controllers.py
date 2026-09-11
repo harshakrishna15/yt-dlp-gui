@@ -173,7 +173,8 @@ class SourceController:
     def start_fetch_formats(self) -> None:
         w = self.window
         s = self.state
-        if s.is_fetching or s.close_after_fetch or w._is_downloading or bool(
+        if (getattr(w, "_tool_checks_pending", False)
+                or s.is_fetching or s.close_after_fetch or w._is_downloading) or bool(
             getattr(w, "_yt_dlp_update_in_progress", False)
         ):
             return
@@ -386,7 +387,8 @@ class RunQueueController:
         self._refresh_run_state()
         w = self.window
         s = self.state
-        if s.is_downloading or bool(getattr(w, "_is_fetching", False)) or bool(
+        if (getattr(w, "_tool_checks_pending", False)
+                or s.is_downloading or bool(getattr(w, "_is_fetching", False))) or bool(
             getattr(w, "_yt_dlp_update_in_progress", False)
         ):
             return
@@ -704,6 +706,8 @@ class RunQueueController:
         self._refresh_run_state()
         w = self.window
         s = self.state
+        if getattr(w, "_tool_checks_pending", False):
+            return
         if bool(getattr(w, "_yt_dlp_update_in_progress", False)) or bool(getattr(w, "_is_fetching", False)):
             return
         queue_check = core_workflow.validate_queue_start(

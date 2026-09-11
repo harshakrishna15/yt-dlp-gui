@@ -56,6 +56,7 @@ TLayout = TypeVar("TLayout", bound=QLayout)
 class _QtSignals(QObject):
     formats_loaded = Signal(int, str, object, bool, bool)
     analysis_progress = Signal(int, str, str)
+    tool_checks_done = Signal(object)
     progress = Signal(object)
     log = Signal(str)
     download_done = Signal(str)

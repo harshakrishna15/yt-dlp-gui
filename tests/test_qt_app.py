@@ -101,8 +101,10 @@ class TestQtApp(unittest.TestCase):
         self._available_ffmpeg_encoders = self._available_encoders_patch.start()
         self._resolve_yt_dlp = self._resolve_yt_dlp_patch.start()
         self.window = QtYtDlpGui()
+        self.window._tool_checks_worker()
 
     def tearDown(self) -> None:
+        self.window._tool_checks_pending = False
         for event in self.window._source_state.pending_fetches.values():
             event.set()
         self.window._source_state.pending_fetches.clear()
@@ -3205,6 +3207,78 @@ class TestQtApp(unittest.TestCase):
 
         self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+
+    def test_constructor_does_not_probe_tools_and_show_dispatches_once(self) -> None:
+        self._resolve_yt_dlp.reset_mock()
+        self._available_ffmpeg_encoders.reset_mock()
+        window = QtYtDlpGui()
+        try:
+            self._resolve_yt_dlp.assert_not_called()
+            self._available_ffmpeg_encoders.assert_not_called()
+            window.url_edit.setText("https://example.test/video")
+            self.assertFalse(window.analyze_button.isEnabled())
+            self.assertTrue(window.url_edit.isEnabled())
+            with patch.object(window._effects.worker_executor, "submit") as submit:
+                window.show()
+                QApplication.processEvents()
+                window._start_tool_checks()
+                submit.assert_called_once_with(window._tool_checks_worker)
+            window._tool_checks_worker()
+            self.assertTrue(window.analyze_button.isEnabled())
+        finally:
+            window._tool_checks_pending = False
+            window.close()
+            window.deleteLater()
+
+    def test_startup_probe_does_not_block_ui_and_close_waits_for_worker(self) -> None:
+        window = self.window
+        entered, release = threading.Event(), threading.Event()
+        resolved = self._resolve_yt_dlp.return_value
+
+        def slow_probe():
+            entered.set()
+            release.wait(3)
+            return resolved
+
+        window._tool_checks_pending = True
+        window._tool_checks_started = False
+        with patch("gui.qt.window_settings.yt_dlp_binary.resolve_yt_dlp_binary", side_effect=slow_probe):
+            try:
+                window._start_tool_checks()
+                self.assertTrue(entered.wait(1))
+                window.url_edit.setText("https://example.test/video")
+                window._open_panel("settings")
+                QApplication.processEvents()
+                self.assertEqual(window._active_panel_name, "settings")
+                self.assertFalse(window.analyze_button.isEnabled())
+                self.assertFalse(window.yt_dlp_update_button.isEnabled())
+                event = QCloseEvent()
+                window.closeEvent(event)
+                self.assertFalse(event.isAccepted())
+                self.assertTrue(window._close_after_tool_checks)
+            finally:
+                release.set()
+                deadline = time.monotonic() + 3
+                while window._tool_checks_pending and time.monotonic() < deadline:
+                    QTest.qWait(10)
+        self.assertFalse(window._tool_checks_pending)
+
+    def test_startup_submit_failure_restores_controls_and_reports_error(self) -> None:
+        window = self.window
+        window._tool_checks_pending = True
+        window._tool_checks_started = False
+        with patch.object(window._effects.worker_executor, "submit", side_effect=RuntimeError("worker unavailable")):
+            window._start_tool_checks()
+        self.assertFalse(window._tool_checks_pending)
+        self.assertIn("worker unavailable", window._last_error_log)
+
+    def test_ffmpeg_probe_timeout_is_bounded(self) -> None:
+        import subprocess
+        from gui.common import tooling
+        self._available_encoders_patch.stop()
+        with patch.object(tooling.subprocess, "run", side_effect=subprocess.TimeoutExpired("ffmpeg", 5)) as run:
+            self.assertEqual(tooling.available_ffmpeg_encoders(Path("ffmpeg"), candidates=["libx264"]), set())
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
 
     def test_update_yt_dlp_submits_background_worker_and_locks_controls(self) -> None:
         with patch.object(self.window._effects.worker_executor, "submit") as submit:

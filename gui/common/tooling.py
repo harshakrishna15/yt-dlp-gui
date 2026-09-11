@@ -42,8 +42,9 @@ def available_ffmpeg_encoders(
             stderr=subprocess.PIPE,
             text=True,
             check=False,
+            timeout=5,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return set()
     if result.returncode != 0:
         return set()

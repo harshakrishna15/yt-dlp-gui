@@ -217,9 +217,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._run_queue_state = RunQueueState()
         self._yt_dlp_update_in_progress = False
         self._yt_dlp_binary_source = ""
+        self._tool_checks_pending = True
+        self._tool_checks_started = False
+        self._close_after_tool_checks = False
 
         self._signals = _QtSignals()
         self._signals.formats_loaded.connect(self._on_formats_loaded)
+        self._signals.tool_checks_done.connect(self._on_tool_checks_done)
         self._signals.analysis_progress.connect(
             lambda request_id, url, text: self._source_controller.on_analysis_progress(
                 request_id, url, text
@@ -1975,6 +1979,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._apply_responsive_layout()
         self._refresh_downloads_page_geometry()
         self._apply_window_icon()
+        QTimer.singleShot(0, self._start_tool_checks)
 
     def _set_header_icons_enabled(self, enabled: bool) -> None:
         enabled_flag = bool(enabled)
@@ -2135,8 +2140,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if index is None:
             return
         if name == "settings":
-            self._refresh_edit_friendly_encoder_availability()
-            self._refresh_yt_dlp_version(force=True)
+            self._sync_yt_dlp_update_button()
         self.panel_stack.setCurrentIndex(index)
         self._sync_current_panel_geometry()
         if name == "logs" and self._logs_alert_active:
@@ -2825,6 +2829,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             pending_mixed_url=self._pending_mixed_url,
         )
         self.cancel_button.setVisible(self._is_downloading)
+        if self._tool_checks_pending:
+            self.analyze_button.setEnabled(False)
+            self.start_button.setEnabled(False)
+            self.edit_friendly_encoder_combo.setEnabled(False)
         if self._yt_dlp_update_in_progress:
             for control in (
                 self.analyze_button,
@@ -2872,6 +2880,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_user_settings()
+        if self._tool_checks_pending and self._tool_checks_started:
+            self._close_after_tool_checks = True
+            event.ignore()
+            return
+        self._tool_checks_pending = False
         if self._yt_dlp_update_in_progress:
             self._effects.dialogs.information(
                 self,
