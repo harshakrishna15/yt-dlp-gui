@@ -101,12 +101,10 @@ session-only and resets to the computer's Downloads folder each time the app sta
 
 ### Appearance
 
-Navigation and primary controls use painted glass highlights; input fields and
-logs remain matte. This is a cross-platform visual effect, not native backdrop blur.
-Higher-contrast mode reported by Qt disables the highlights. Set
-`YT_DLP_GUI_OPAQUE=1` to use matte controls, or
-`YT_DLP_GUI_REDUCE_MOTION=1` to disable glass hover and navigation animations.
-These are launch-time environment overrides, not saved preferences.
+The interface uses flat controls and the system font. Download progress and
+Cancel appear only during a download; update progress remains in Preferences.
+Set `YT_DLP_GUI_REDUCE_MOTION=1` to disable navigation selection animations.
+This is a launch-time environment override, not a saved preference.
 
 ## Troubleshooting
 

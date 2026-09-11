@@ -372,7 +372,7 @@ class RunSectionBuilder:
         activity_layout.addWidget(status_value)
 
         action_button_policy = (
-            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
         )
         action_panel = build_button_panel(
@@ -734,7 +734,7 @@ class DownloadsViewBuilder:
         format_card = format_card_shell.widget
         format_layout = format_card_shell.layout
         format_layout.addWidget(
-            _build_section_header(format_card, "OUTPUT", compact=True)
+            _build_section_header(format_card, "Output", compact=True)
         )
 
         def _handle_mode_toggle(checked: bool) -> None:

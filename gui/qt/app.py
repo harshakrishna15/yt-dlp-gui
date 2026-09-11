@@ -148,7 +148,6 @@ class _ResponsiveLayoutProfile:
     metrics_card_margins: tuple[int, int, int, int]
     metrics_card_spacing: int
     metrics_strip_spacing: int
-    run_button_extra_width: int
 
 
 class _TooltipDelayProxyStyle(QProxyStyle):
@@ -883,7 +882,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             output_shell_spacing = 8
             output_outer_spacing = 10
             output_card_spacing = 8
-            output_card_side_margin = 10
+            output_card_side_margin = 2
             output_card_top_margin = 9
             output_card_bottom_margin = 10
             folder_row_spacing = 8
@@ -891,23 +890,23 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             output_shell_spacing = 12
             output_outer_spacing = OUTPUT_CARD_STACK_GAP
             output_card_spacing = 10
-            output_card_side_margin = 14
+            output_card_side_margin = 2
             output_card_top_margin = 14
             output_card_bottom_margin = 14
             folder_row_spacing = 10
 
         if compact_run:
-            run_action_spacing = 4
+            run_action_spacing = 8
             run_activity_margin = 10
             run_activity_spacing = 6
-            metrics_card_margins = (10, 8, 10, 10)
+            metrics_card_margins = (0, 8, 0, 8)
             metrics_card_spacing = 6
             metrics_strip_spacing = 4
         else:
             run_action_spacing = 8
             run_activity_margin = 16
             run_activity_spacing = 12
-            metrics_card_margins = (12, 10, 12, 12)
+            metrics_card_margins = (0, 10, 0, 10)
             metrics_card_spacing = 8
             metrics_strip_spacing = 12
 
@@ -940,15 +939,12 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             metrics_card_margins=metrics_card_margins,
             metrics_card_spacing=metrics_card_spacing,
             metrics_strip_spacing=metrics_strip_spacing,
-            run_button_extra_width=12 if compact_content else 34,
         )
 
     def _use_compact_content_layout(self) -> bool:
         return self._responsive_layout_profile().compact_content
 
     def _use_compact_run_layout(self) -> bool:
-        # The always-visible metrics and result cards currently only fit reliably
-        # with the denser run layout metrics.
         return self._responsive_layout_profile().compact_run
 
     def _source_row_button_width_samples(self) -> dict[QPushButton, tuple[str, ...]]:
@@ -967,6 +963,21 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 "Update Queue Item",
             ),
         }
+
+    def _set_run_action_button_widths(self) -> None:
+        samples_by_button = self._run_action_button_width_samples()
+        for button in (self.add_queue_button, self.cancel_button, self.start_button):
+            samples = samples_by_button.get(button, (button.text(),))
+            # Use consistent padding for every label, including the queue-edit state.
+            text_width = max(self._button_text_width(button, text) for text in samples)
+            width = max(96, text_width + 40)
+            if isinstance(button, StableSizeHintButton):
+                button.set_stable_width(width)
+            button.setFixedWidth(width)
+        primary_width = max(180, self.add_queue_button.minimumWidth() + 24)
+        if isinstance(self.start_button, StableSizeHintButton):
+            self.start_button.set_stable_width(primary_width)
+        self.start_button.setFixedWidth(primary_width)
 
     def _set_source_row_button_widths(self) -> None:
         self._set_uniform_button_width(
@@ -1111,15 +1122,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._set_source_row_button_widths()
         self._source_row_control_height = control_height
         self._lock_source_row_control_heights()
-        self._set_uniform_button_width(
-            [
-                self.start_button,
-                self.add_queue_button,
-                self.cancel_button,
-            ],
-            extra_px=profile.run_button_extra_width,
-            sample_texts_by_button=self._run_action_button_width_samples(),
-        )
+        self._set_run_action_button_widths()
         self._set_uniform_button_width(
             [
                 self.yt_dlp_update_button,
@@ -1346,10 +1349,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         buttons_layout.addWidget(self.start_button, 0, 0)
         buttons_layout.addWidget(self.add_queue_button, 0, 1)
-        buttons_layout.addWidget(self.cancel_button, 0, 2)
-        buttons_layout.setColumnStretch(0, 1)
-        buttons_layout.setColumnStretch(1, 1)
+        buttons_layout.addWidget(self.cancel_button, 0, 3)
+        buttons_layout.setColumnStretch(0, 0)
+        buttons_layout.setColumnStretch(1, 0)
         buttons_layout.setColumnStretch(2, 1)
+        buttons_layout.setColumnStretch(3, 0)
         buttons_layout.setRowStretch(0, 0)
         buttons_layout.setRowStretch(1, 0)
         buttons_layout.setRowStretch(2, 0)
@@ -1471,7 +1475,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         source_state = "ready" if has_formats_data else "idle"
         if is_fetching:
             source_state = "loading"
-        elif url_present:
+        elif url_present and not has_formats_data:
             source_state = "primed"
         self._set_widget_property(self.analyze_button, "mode", source_state)
         if is_fetching:
@@ -1578,12 +1582,11 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._remove_source_feedback_toast(entry, animated=True)
 
     def _set_metrics_visible(self, visible: bool) -> None:
-        progress_visible = True
-        visibility_changed = self.progress_bar.isVisible() != progress_visible
-        self.progress_bar.setVisible(progress_visible)
-        self.metrics_card.setVisible(True)
-        self.metrics_strip.setVisible(True)
-        self.item_label.setVisible(True)
+        visibility_changed = self.metrics_card.isHidden() == visible
+        self.progress_bar.setVisible(visible)
+        self.metrics_card.setVisible(visible)
+        self.metrics_strip.setVisible(visible)
+        self.item_label.setVisible(visible)
         self._set_widget_property(
             self.metrics_card,
             "state",
@@ -2602,15 +2605,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             tooltip = "Add the current URL/settings to queue."
         if self.add_queue_button.text() != button_text:
             self.add_queue_button.setText(button_text)
-            self._set_uniform_button_width(
-                [
-                    self.start_button,
-                    self.add_queue_button,
-                    self.cancel_button,
-                ],
-                extra_px=self._responsive_layout_profile().run_button_extra_width,
-                sample_texts_by_button=self._run_action_button_width_samples(),
-            )
+            self._set_run_action_button_widths()
             self._sync_run_section_split_widths()
         self.add_queue_button.setToolTip(tooltip)
 
@@ -3092,6 +3087,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             state,
             pending_mixed_url=self._pending_mixed_url,
         )
+        self.cancel_button.setVisible(self._is_downloading)
         if self._yt_dlp_update_in_progress:
             for control in (
                 self.analyze_button,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, Sequence, TypeVar
@@ -10,7 +11,6 @@ from PySide6.QtCore import (
     QObject,
     QPoint,
     QPointF,
-    Property,
     QRect,
     QRectF,
     QSize,
@@ -47,7 +47,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .glass import GlassButton, GlassFrame, glass_enabled, motion_enabled, paint_glass
 from .icon_assets import load_icon_asset
 
 
@@ -227,7 +226,7 @@ class StableStackedWidget(QStackedWidget):
         return QSize(width, height)
 
 
-class StableSizeHintButton(GlassButton):
+class StableSizeHintButton(QPushButton):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self._stable_width: int | None = None
@@ -263,14 +262,13 @@ class AnimatedSegmentedRail(QWidget):
         selection_rect_getter: Callable[[QAbstractButton], QRect] | None = None,
     ) -> None:
         super().__init__(parent)
-        self._glass_radius = -1.0
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._buttons: list[QAbstractButton] = []
         self._selected_button: QAbstractButton | None = None
         self._selection_anim: QVariantAnimation | None = None
         self._selection_rect = QRect()
         self._selection_frame_object_name = selection_frame_object_name
-        self._selection_frame = GlassFrame(self)
+        self._selection_frame = QFrame(self)
         self._selection_frame.setObjectName(selection_frame_object_name)
         self._selection_frame.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
@@ -296,7 +294,11 @@ class AnimatedSegmentedRail(QWidget):
         button.raise_()
 
     def sync_selection(self, *, animate: bool = True) -> None:
-        animate = animate and motion_enabled(self)
+        animate = (
+            animate
+            and os.environ.get("YT_DLP_GUI_REDUCE_MOTION") != "1"
+            and bool(self.style().styleHint(QStyle.StyleHint.SH_Widget_Animate, None, self))
+        )
         target = self._visible_checked_button()
         if target is None:
             self._stop_selection_animation()
@@ -386,17 +388,6 @@ class AnimatedSegmentedRail(QWidget):
         option.initFrom(self)
         painter = QPainter(self)
         self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
-        if self._glass_radius >= 0 and self.isEnabled() and glass_enabled():
-            paint_glass(painter, QRectF(self.rect()), self._glass_radius)
-
-    def _get_glass_radius(self) -> float:
-        return self._glass_radius
-
-    def _set_glass_radius(self, value: float) -> None:
-        self._glass_radius = float(value)
-        self.update()
-
-    glassRadius = Property(float, _get_glass_radius, _set_glass_radius)
 
     def _visible_checked_button(self) -> QAbstractButton | None:
         for button in self._buttons:
@@ -1367,7 +1358,7 @@ class QueueEmptyStateWidget(QWidget):
         root_layout.addWidget(self.surface_card, stretch=1)
 
 
-def _style_combo_popup(combo: QComboBox, *, border_color: str = "#353d39") -> None:
+def _style_combo_popup(combo: QComboBox, *, border_color: str = "#383e42") -> None:
     popup = combo.view().window()
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     popup.setAutoFillBackground(False)
@@ -1379,9 +1370,9 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#353d39") -> No
             border: none;
         }}
         QListView#nativeComboView {{
-            background: #1f2422;
+            background: #242729;
             border: 1px solid {border_color};
-            border-radius: 20px;
+            border-radius: 6px;
             padding: 6px;
             outline: 0;
             margin: 0px;
@@ -1390,17 +1381,17 @@ def _style_combo_popup(combo: QComboBox, *, border_color: str = "#353d39") -> No
             background: transparent;
             min-height: 30px;
             padding: 7px 12px;
-            border-radius: 12px;
-            color: #eef3ef;
+            border-radius: 4px;
+            color: #eef0f1;
             font-weight: 600;
         }}
         QListView#nativeComboView::item:hover {{
-            background: #252b28;
-            color: #edf2ef;
+            background: #303437;
+            color: #eef0f1;
         }}
         QListView#nativeComboView::item:selected {{
-            background: #24453b;
-            color: #8bdcbe;
+            background: #393e41;
+            color: #eef0f1;
         }}
         QListView#nativeComboView::item:disabled {{
             background: transparent;

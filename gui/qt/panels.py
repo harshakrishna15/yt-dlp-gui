@@ -450,16 +450,16 @@ def build_settings_panel(
     app_card = _build_settings_card(
         settings_stack,
         object_name="settingsAppCard",
-        spacing=14,
+        spacing=0,
     )
     app_card.card.setSizePolicy(
         QSizePolicy.Policy.Preferred,
         QSizePolicy.Policy.Fixed,
     )
 
-    app_copy_shell = build_vbox(
+    app_copy_shell = build_hbox(
         app_card.card,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=2),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
     )
     app_copy = app_copy_shell.widget
     app_copy_layout = app_copy_shell.layout
@@ -469,7 +469,6 @@ def build_settings_panel(
         spec=LabelSpec(
             text=APP_DISPLAY_NAME,
             widget_config=WidgetConfig(object_name="settingsAppName"),
-            alignment=Qt.AlignmentFlag.AlignHCenter,
         ),
     )
     version_label = build_label(
@@ -477,39 +476,25 @@ def build_settings_panel(
         spec=LabelSpec(
             text=f"Version {APP_VERSION}",
             widget_config=WidgetConfig(object_name="settingsAppVersion"),
-            alignment=Qt.AlignmentFlag.AlignHCenter,
         ),
     )
     app_copy_layout.addWidget(app_name_label)
     app_copy_layout.addWidget(version_label)
-
-    app_actions_shell = build_hbox(
-        app_card.card,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
-    )
-    app_actions = app_actions_shell.widget
-    app_actions_layout = app_actions_shell.layout
+    app_copy_layout.addStretch(1)
     export_diagnostics_button = build_button(
-        app_actions,
+        app_copy,
         spec=ButtonSpec(
             text="Export diagnostics",
             on_click=on_export_diagnostics,
             object_name="ghostButton",
         ),
     )
-    app_actions_layout.addStretch(1)
-    app_actions_layout.addWidget(export_diagnostics_button)
-    app_actions_layout.addStretch(1)
+    app_copy_layout.addWidget(export_diagnostics_button)
     app_card.layout.addWidget(app_copy)
-    app_card.layout.addWidget(app_actions)
 
     form_card_layout.addWidget(settings_stack)
     form_card_layout.addStretch(1)
-    form_card_layout.addWidget(
-        app_card.card,
-        0,
-        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-    )
+    form_card_layout.addWidget(app_card.card)
     shell.body_layout.addWidget(form_card, stretch=1)
     return SettingsPanelRefs(
         panel=shell.panel,
@@ -576,9 +561,9 @@ def build_queue_panel(
         button_specs=(
             ButtonSpec(
                 text="Clear all",
-                object_name="secondaryActionButton",
+                object_name="ghostButton",
                 size_policy=(
-                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
                     QSizePolicy.Policy.Fixed,
                 ),
                 on_click=on_clear_queue,
@@ -586,7 +571,7 @@ def build_queue_panel(
         ),
     )
     clear_queue_button = clear_panel.buttons[0]
-    shell.body_layout.addWidget(clear_panel.card)
+    shell.body_layout.addWidget(clear_panel.card, alignment=Qt.AlignmentFlag.AlignRight)
 
     return QueuePanelRefs(
         panel=shell.panel,
@@ -671,7 +656,7 @@ def build_logs_panel(
                 on_click=on_export_logs,
                 object_name="secondaryActionButton",
                 size_policy=(
-                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
                     QSizePolicy.Policy.Fixed,
                 ),
             ),
@@ -680,7 +665,7 @@ def build_logs_panel(
                 on_click=on_clear_logs,
                 object_name="dangerActionButton",
                 size_policy=(
-                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Fixed,
                     QSizePolicy.Policy.Fixed,
                 ),
             ),
@@ -688,8 +673,7 @@ def build_logs_panel(
     )
     actions = action_panel.card
     export_logs_button, logs_clear_button = action_panel.buttons
-    logs_clear_button.setProperty("pill", True)
-    shell.body_layout.addWidget(actions)
+    shell.body_layout.addWidget(actions, alignment=Qt.AlignmentFlag.AlignRight)
     return LogsPanelRefs(
         panel=shell.panel,
         logs_stack=logs_stack,
