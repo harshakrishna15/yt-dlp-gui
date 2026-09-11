@@ -28,6 +28,7 @@ class SourceSummary(TypedDict):
 
 class ProgressUpdate(TypedDict, total=False):
     status: str
+    message: str
     percent: float | None
     speed: str
     speed_bps: float | None

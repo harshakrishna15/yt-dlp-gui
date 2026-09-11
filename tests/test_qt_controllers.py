@@ -686,6 +686,60 @@ class TestSourceController(unittest.TestCase):
 
 
 class TestRunQueueController(unittest.TestCase):
+    def test_single_worker_always_emits_completion_on_unexpected_error(self) -> None:
+        window = FakeWindow()
+        ports, *_ = build_ports(executor=FakeExecutor())
+        controller = RunQueueController(window, state=RunQueueState(), ports=ports)
+        with patch("gui.qt.controllers.app_service.run_download_request", side_effect=OSError("disk failed")):
+            controller.run_single_download_worker(request={})
+        self.assertEqual(window._signals.download_done.emits, [("error",)])
+        self.assertIn("disk failed", window._signals.log.emits[-1][0])
+
+    def test_download_dispatch_failure_restores_idle_state(self) -> None:
+        for queued in (False, True):
+            window = FakeWindow()
+            executor = FakeExecutor()
+            ports, *_ = build_ports(executor=executor)
+            state = RunQueueState(is_downloading=True, queue_active=queued)
+            controller = RunQueueController(window, state=state, ports=ports)
+            with patch.object(executor, "submit", side_effect=RuntimeError("unavailable")):
+                controller._submit_download_worker(lambda: None)
+            self.assertFalse(state.is_downloading)
+            self.assertFalse(state.queue_active)
+            self.assertIsNone(state.cancel_event)
+
+    def test_queue_preparation_receives_cancellation_and_status(self) -> None:
+        from gui.common.yt_dlp_cli import MetadataCancelled
+
+        window = FakeWindow()
+        ports, *_ = build_ports(executor=FakeExecutor())
+        event = threading.Event()
+        controller = RunQueueController(window, state=RunQueueState(cancel_event=event), ports=ports)
+
+        def resolve(**kwargs):
+            self.assertIs(kwargs["cancel_event"], event)
+            kwargs["on_status"]("Connecting...")
+            raise MetadataCancelled()
+
+        with patch("gui.qt.controllers.app_service.resolve_format_for_url", side_effect=resolve), patch(
+            "gui.qt.controllers.app_service.run_download_request"
+        ) as run:
+            controller.run_queue_download_worker(url="https://example.com", settings={}, index=1, total=1, default_output_dir="/tmp")
+        run.assert_not_called()
+        self.assertEqual(window._signals.queue_item_done.emits, [(False, True)])
+        self.assertEqual(window._signals.progress.emits[-1][0]["message"], "Connecting...")
+
+    def test_cancelled_queue_does_not_start_metadata_lookup(self) -> None:
+        window = FakeWindow()
+        ports, *_ = build_ports(executor=FakeExecutor())
+        event = threading.Event()
+        event.set()
+        controller = RunQueueController(window, state=RunQueueState(cancel_event=event), ports=ports)
+        with patch("gui.qt.controllers.app_service.resolve_format_for_url") as resolve:
+            controller.run_queue_download_worker(url="https://example.com", settings={}, index=1, total=1, default_output_dir="/tmp")
+        resolve.assert_not_called()
+        self.assertEqual(window._signals.queue_item_done.emits, [(False, True)])
+
     def test_on_start_sets_single_run_state_and_submits_worker(self) -> None:
         window = FakeWindow()
         window.url_edit.setText("https://example.com/watch?v=abc")

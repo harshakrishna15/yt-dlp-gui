@@ -67,8 +67,10 @@ def resolve_format_for_url(
     url: str,
     settings: QueueSettings | Mapping[str, Any],
     log: Callable[[str], None],
+    cancel_event: threading.Event | None = None,
+    on_status: Callable[[str], None] | None = None,
 ) -> ResolvedFormat:
-    info = helpers.fetch_info(url)
+    info = helpers.fetch_info(url, cancel_event=cancel_event, on_status=on_status)
     formats = formats_mod.formats_from_info(info)
     return core_format_selection.resolve_format_for_info(
         info=info,

@@ -294,6 +294,10 @@ class WindowFeedbackMixin:
         if not isinstance(payload, dict):
             return
         status = payload.get("status")
+        if status == "preparing":
+            if not self._cancel_requested:
+                self._set_status(str(payload.get("message") or "Preparing..."), log=False)
+            return
         if status == "downloading":
             self._set_metrics_visible(True)
             percent = payload.get("percent")

@@ -483,7 +483,7 @@ class RunQueueController:
                 f"[playlist] enabled=1 items={request['playlist_items'] or 'none'}"
             )
         w._set_post_download_output_dir(Path(request["output_dir"]))
-        self._ports.worker_executor.submit(
+        self._submit_download_worker(
             self.run_single_download_worker,
             request=request,
         )
@@ -493,15 +493,33 @@ class RunQueueController:
         *,
         request: DownloadRequest,
     ) -> None:
-        result = app_service.run_download_request(
-            request=request,
-            cancel_event=self.state.cancel_event,
-            log=lambda msg: _emit_window_signal(self.window, "log", str(msg)),
-            update_progress=lambda payload: _emit_window_signal(
-                self.window, "progress", dict(payload)
-            ),
-        )
-        _emit_window_signal(self.window, "download_done", str(result))
+        result = download.DOWNLOAD_ERROR
+        try:
+            result = app_service.run_download_request(
+                request=request,
+                cancel_event=self.state.cancel_event,
+                log=lambda msg: _emit_window_signal(self.window, "log", str(msg)),
+                update_progress=lambda payload: _emit_window_signal(
+                    self.window, "progress", dict(payload)
+                ),
+            )
+        except (yt_dlp_cli.MetadataCancelled, download.DownloadCancelled):
+            result = download.DOWNLOAD_CANCELLED
+        except Exception as exc:
+            _emit_window_signal(self.window, "log", f"[error] {exc}")
+        finally:
+            _emit_window_signal(self.window, "download_done", str(result))
+
+    def _submit_download_worker(self, target, **kwargs) -> None:
+        try:
+            self._ports.worker_executor.submit(target, **kwargs)
+        except Exception as exc:
+            self.window._append_log(f"[error] Could not start download worker: {exc}")
+            if self.state.queue_active:
+                self.state.queue_failed_items += 1
+                self.finish_queue()
+            else:
+                self.on_download_done(download.DOWNLOAD_ERROR)
 
     def on_download_done(self, result: str) -> None:
         self._refresh_run_state()
@@ -797,7 +815,7 @@ class RunQueueController:
             w._clear_post_download_output_dir()
         w._refresh_queue_panel()
 
-        self._ports.worker_executor.submit(
+        self._submit_download_worker(
             self.run_queue_download_worker,
             url=next_item.url,
             settings=next_item.settings,
@@ -824,6 +842,10 @@ class RunQueueController:
             url=url,
             settings=settings,
             log=lambda msg: _emit_window_signal(self.window, "log", msg),
+            cancel_event=self.state.cancel_event,
+            on_status=lambda message: _emit_window_signal(
+                self.window, "progress", {"status": "preparing", "message": message}
+            ),
         )
 
     def run_queue_download_worker(
@@ -838,7 +860,11 @@ class RunQueueController:
         had_error = False
         cancelled = False
         try:
+            if self.state.cancel_event is not None and self.state.cancel_event.is_set():
+                raise yt_dlp_cli.MetadataCancelled()
             resolved = self.resolve_format_for_url(url, settings)
+            if self.state.cancel_event is not None and self.state.cancel_event.is_set():
+                raise yt_dlp_cli.MetadataCancelled()
             item_text = f"{index}/{total} {resolved.get('title') or url}"
             _emit_window_signal(self.window, "progress", {"status": "item", "item": item_text})
 
@@ -866,6 +892,8 @@ class RunQueueController:
             )
             had_error = result == download.DOWNLOAD_ERROR
             cancelled = result == download.DOWNLOAD_CANCELLED
+        except (yt_dlp_cli.MetadataCancelled, download.DownloadCancelled):
+            cancelled = True
         except Exception as exc:
             had_error = True
             _emit_window_signal(self.window, "log", f"[queue] failed: {exc}")
