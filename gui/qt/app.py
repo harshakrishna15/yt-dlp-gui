@@ -233,6 +233,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._signals.download_done.connect(self._on_download_done)
         self._signals.queue_item_done.connect(self._on_queue_item_done)
         self._signals.yt_dlp_update_done.connect(self._on_yt_dlp_update_done)
+        self._signals.yt_dlp_update_progress.connect(self._on_yt_dlp_update_progress)
 
         self._fetch_timer = QTimer(self)
         self._fetch_timer.setInterval(FETCH_DEBOUNCE_MS)

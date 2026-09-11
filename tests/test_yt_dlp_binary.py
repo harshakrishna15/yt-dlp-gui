@@ -206,6 +206,7 @@ class TestYtDlpUpdater(unittest.TestCase):
         yt_dlp_binary._reset_bootstrap_cache()
 
     def test_update_replaces_managed_binary_and_verifies_version(self) -> None:
+        progress = []
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / yt_dlp_binary.executable_name()
             license_path = Path(tmp) / "THIRD_PARTY_LICENSES.txt"
@@ -245,9 +246,10 @@ class TestYtDlpUpdater(unittest.TestCase):
                             "_read_version",
                             return_value="2026.08.19",
                         ):
-                            result = yt_dlp_binary.update_managed_yt_dlp()
+                            result = yt_dlp_binary.update_managed_yt_dlp(on_progress=progress.append)
 
             self.assertTrue(result.success)
+            self.assertEqual([event.stage for event in progress], ["verifying", "licenses", "installing"])
             self.assertTrue(result.changed)
             self.assertEqual(result.version, "2026.08.19")
             self.assertEqual(path.read_bytes(), b"new")

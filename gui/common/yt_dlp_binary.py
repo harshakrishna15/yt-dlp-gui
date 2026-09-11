@@ -149,7 +149,9 @@ def current_yt_dlp_version() -> str:
     return resolved.version if resolved is not None else "unavailable"
 
 
-def update_managed_yt_dlp() -> YtDlpUpdateResult:
+def update_managed_yt_dlp(
+    *, on_progress: yt_dlp_release.ProgressCallback | None = None
+) -> YtDlpUpdateResult:
     with _UPDATE_LOCK:
         resolved = resolve_yt_dlp_binary()
         if resolved is None:
@@ -182,8 +184,10 @@ def update_managed_yt_dlp() -> YtDlpUpdateResult:
         )
         try:
             release = yt_dlp_release.fetch_latest_release_asset(
-                platform=_release_platform()
+                platform=_release_platform(), on_progress=on_progress
             )
+            if on_progress:
+                on_progress(yt_dlp_release.YtDlpUpdateProgress("verifying"))
             _write_payload(staged_binary, release.payload, executable=True)
             new_version = _read_version(staged_binary)
             if not new_version:
@@ -201,6 +205,8 @@ def update_managed_yt_dlp() -> YtDlpUpdateResult:
                         f"stable release {new_version}."
                     ),
                 )
+            if on_progress:
+                on_progress(yt_dlp_release.YtDlpUpdateProgress("licenses"))
             license_payload = yt_dlp_release.fetch_third_party_licenses(new_version)
             _write_payload(staged_license, license_payload, executable=False)
             _write_payload(
@@ -217,6 +223,8 @@ def update_managed_yt_dlp() -> YtDlpUpdateResult:
                 message=f"Could not download the yt-dlp update: {exc}",
             )
 
+        if on_progress:
+            on_progress(yt_dlp_release.YtDlpUpdateProgress("installing"))
         backup = path.with_name(f"{path.name}.backup")
         license_backup = license_path.with_name(f"{license_path.name}.backup")
         version_backup = version_path.with_name(f"{version_path.name}.backup")

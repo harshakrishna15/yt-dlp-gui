@@ -10,6 +10,7 @@ from PySide6.QtCore import (
     QObject,
     QPoint,
     QPointF,
+    Property,
     QRect,
     QRectF,
     QSize,
@@ -46,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .glass import GlassButton, GlassFrame, glass_enabled, motion_enabled, paint_glass
 from .icon_assets import load_icon_asset
 
 
@@ -60,6 +62,7 @@ class _QtSignals(QObject):
     download_done = Signal(str)
     queue_item_done = Signal(bool, bool)
     yt_dlp_update_done = Signal(object)
+    yt_dlp_update_progress = Signal(object)
 
 
 QUEUE_SOURCE_INDEX_ROLE = Qt.ItemDataRole.UserRole
@@ -224,7 +227,7 @@ class StableStackedWidget(QStackedWidget):
         return QSize(width, height)
 
 
-class StableSizeHintButton(QPushButton):
+class StableSizeHintButton(GlassButton):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self._stable_width: int | None = None
@@ -260,13 +263,14 @@ class AnimatedSegmentedRail(QWidget):
         selection_rect_getter: Callable[[QAbstractButton], QRect] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._glass_radius = -1.0
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._buttons: list[QAbstractButton] = []
         self._selected_button: QAbstractButton | None = None
         self._selection_anim: QVariantAnimation | None = None
         self._selection_rect = QRect()
         self._selection_frame_object_name = selection_frame_object_name
-        self._selection_frame = QFrame(self)
+        self._selection_frame = GlassFrame(self)
         self._selection_frame.setObjectName(selection_frame_object_name)
         self._selection_frame.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
@@ -292,6 +296,7 @@ class AnimatedSegmentedRail(QWidget):
         button.raise_()
 
     def sync_selection(self, *, animate: bool = True) -> None:
+        animate = animate and motion_enabled(self)
         target = self._visible_checked_button()
         if target is None:
             self._stop_selection_animation()
@@ -381,6 +386,17 @@ class AnimatedSegmentedRail(QWidget):
         option.initFrom(self)
         painter = QPainter(self)
         self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+        if self._glass_radius >= 0 and self.isEnabled() and glass_enabled():
+            paint_glass(painter, QRectF(self.rect()), self._glass_radius)
+
+    def _get_glass_radius(self) -> float:
+        return self._glass_radius
+
+    def _set_glass_radius(self, value: float) -> None:
+        self._glass_radius = float(value)
+        self.update()
+
+    glassRadius = Property(float, _get_glass_radius, _set_glass_radius)
 
     def _visible_checked_button(self) -> QAbstractButton | None:
         for button in self._buttons:

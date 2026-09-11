@@ -30,6 +30,9 @@ _PALETTE = {
     "accent": "#2d8f70",
     "accent_hover": "#38a27f",
     "accent_pressed": "#226d55",
+    "action": "#23755b",
+    "action_hover": "#267d62",
+    "action_pressed": "#1d604b",
     "accent_soft": "#18342d",
     "accent_soft_hover": "#1f443a",
     "accent_border": "#418e75",
@@ -290,7 +293,8 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __accent_border__;
         }
         QWidget#commandBar QPushButton#analyzeUrlButton {
-            background: __accent__;
+            qproperty-glassRadius: 18;
+            background: __action__;
             color: __text_inverse__;
             border: 1px solid __accent__;
             font-weight: 700;
@@ -299,11 +303,11 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border-radius: 18px;
         }
         QWidget#commandBar QPushButton#analyzeUrlButton:hover {
-            background: __accent_hover__;
+            background: __action_hover__;
             border: 1px solid __accent_hover__;
         }
         QWidget#commandBar QPushButton#analyzeUrlButton:pressed {
-            background: __accent_pressed__;
+            background: __action_pressed__;
             border: 1px solid __accent_pressed__;
         }
         QWidget#commandBar QPushButton#analyzeUrlButton[mode="ready"] {
@@ -340,6 +344,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
         }
         QWidget#topNavRail {
+            qproperty-glassRadius: 22;
             background: __surface_soft_glass__;
             border: 1px solid __border_soft__;
             border-radius: 22px;
@@ -350,6 +355,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border-radius: 0px;
         }
         QFrame#topNavSelection {
+            qproperty-glassRadius: 18;
             background: __surface_selected_strong__;
             border: 1px solid __accent_border__;
             border-radius: 18px;
@@ -685,6 +691,23 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             margin: 0px;
             background: __accent__;
         }
+        QLabel#updateStatusLabel {
+            color: __text_secondary__;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QLabel#updateDetailLabel {
+            color: __text_muted__;
+            font-size: 12px;
+        }
+        QProgressBar#updateProgressBar {
+            min-height: 6px;
+            max-height: 6px;
+            border-radius: 3px;
+        }
+        QProgressBar#updateProgressBar::chunk {
+            border-radius: 3px;
+        }
         QProgressBar#workspaceSummaryProgress {
             background: __surface_soft_alt__;
             border: none;
@@ -959,6 +982,8 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             color: __accent_text__;
         }
         QPushButton#topNavButton {
+            qproperty-glassRadius: 18;
+            qproperty-glassHoverOnly: true;
             background: transparent;
             color: __nav_text__;
             border: none;
@@ -985,6 +1010,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: none;
         }
         QPushButton#topIconButton {
+            qproperty-glassRadius: 18;
             background: __surface_soft_glass__;
             color: __nav_text__;
             border: 1px solid __border_soft__;
@@ -1010,7 +1036,8 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QPushButton#primaryActionButton,
         QPushButton#analyzeUrlButton {
-            background: __accent__;
+            qproperty-glassRadius: 16;
+            background: __action__;
             border: 1px solid __accent__;
             color: __text_inverse__;
             font-family: "Arial Rounded MT Bold", "Avenir Next";
@@ -1026,12 +1053,12 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         }
         QPushButton#primaryActionButton:hover,
         QPushButton#analyzeUrlButton:hover {
-            background: __accent_hover__;
+            background: __action_hover__;
             border: 1px solid __accent_hover__;
         }
         QPushButton#primaryActionButton:pressed,
         QPushButton#analyzeUrlButton:pressed {
-            background: __accent_pressed__;
+            background: __action_pressed__;
             border: 1px solid __accent_pressed__;
         }
         QPushButton#primaryActionButton:disabled {
@@ -1086,6 +1113,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             border: 1px solid __field_disabled_border__;
         }
         QPushButton#secondaryActionButton {
+            qproperty-glassRadius: 16;
             background: __surface_glass_strong__;
             border: 1px solid __border_soft__;
             color: __text_secondary__;
@@ -1152,14 +1180,20 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-weight: 600;
         }
         QWidget#contentModeSegment {
+            qproperty-glassRadius: 14;
             background: __surface_soft_glass__;
             border: 1px solid __border_soft__;
             border-radius: 14px;
         }
         QFrame#contentModeSelection {
-            background: __accent__;
+            qproperty-glassRadius: 10;
+            background: __action__;
             border: 1px solid __accent_border__;
             border-radius: 10px;
+        }
+        QPushButton#contentModeButton {
+            qproperty-glassRadius: 10;
+            qproperty-glassHoverOnly: true;
         }
         QRadioButton#contentModeButton, QPushButton#contentModeButton {
             background: transparent;

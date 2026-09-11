@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtWidgets import QWidget
 
-from ..common import diagnostics, settings_store, tooling, yt_dlp_binary
+from ..common import diagnostics, settings_store, tooling, yt_dlp_binary, yt_dlp_release
+from ..common.yt_dlp_helpers import humanize_bytes
 from . import panels as qt_panels
 from .constants import LOG_MAX_LINES
 from .platform_paths import system_downloads_path
@@ -55,6 +57,10 @@ class WindowSettingsMixin:
         self.open_folder_after_download_check = refs.open_folder_after_download_check
         self.yt_dlp_version_label = refs.yt_dlp_version_label
         self.yt_dlp_update_button = refs.yt_dlp_update_button
+        self.yt_dlp_update_status = refs.yt_dlp_update_status
+        self.yt_dlp_update_progress_bar = refs.yt_dlp_update_progress_bar
+        self.yt_dlp_update_status_label = refs.yt_dlp_update_status_label
+        self.yt_dlp_update_detail_label = refs.yt_dlp_update_detail_label
         self.export_diagnostics_button = refs.export_diagnostics_button
         self._refresh_yt_dlp_version()
         self._refresh_edit_friendly_encoder_availability()
@@ -220,15 +226,24 @@ class WindowSettingsMixin:
             )
             return
         self._yt_dlp_update_in_progress = True
-        self.yt_dlp_version_label.setText("Checking for yt-dlp updates...")
+        self.yt_dlp_update_button.setText("Updating...")
         self.yt_dlp_update_button.setEnabled(False)
+        self._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress("checking"))
         self._set_status("Updating yt-dlp...")
         self._update_controls_state()
-        self._effects.worker_executor.submit(self._update_yt_dlp_worker)
+        try:
+            self._effects.worker_executor.submit(self._update_yt_dlp_worker)
+        except Exception as exc:
+            self._on_yt_dlp_update_done(yt_dlp_binary.YtDlpUpdateResult(
+                success=False, changed=False, version=resolved.version,
+                message=f"Could not start the yt-dlp update: {exc}",
+            ))
 
     def _update_yt_dlp_worker(self: "QtYtDlpGui") -> None:
         try:
-            result = yt_dlp_binary.update_managed_yt_dlp()
+            result = yt_dlp_binary.update_managed_yt_dlp(
+                on_progress=self._signals.yt_dlp_update_progress.emit,
+            )
         except Exception as exc:
             result = yt_dlp_binary.YtDlpUpdateResult(
                 success=False,
@@ -238,10 +253,51 @@ class WindowSettingsMixin:
             )
         self._signals.yt_dlp_update_done.emit(result)
 
+    def _on_yt_dlp_update_progress(self: "QtYtDlpGui", progress: object) -> None:
+        if not self._yt_dlp_update_in_progress or not isinstance(
+            progress, yt_dlp_release.YtDlpUpdateProgress
+        ):
+            return
+        titles = {
+            "checking": "Checking for yt-dlp updates...",
+            "downloading": "Downloading yt-dlp...",
+            "verifying": "Verifying checksum and executable...",
+            "licenses": "Fetching release notices...",
+            "installing": "Installing yt-dlp...",
+        }
+        self.yt_dlp_update_status.show()
+        self.yt_dlp_update_status_label.setText(titles[progress.stage])
+        bar = self.yt_dlp_update_progress_bar
+        if progress.stage != "downloading":
+            bar.setRange(0, 0)
+            self.yt_dlp_update_detail_label.setText("Please keep the app open.")
+            return
+        details = []
+        received = humanize_bytes(progress.downloaded_bytes) or "0 B"
+        if progress.total_bytes:
+            percent = min(100, int(progress.downloaded_bytes * 100 / progress.total_bytes))
+            bar.setRange(0, 100)
+            bar.setValue(percent)
+            details.append(f"{percent}% downloaded")
+            details.append(f"{received} of {humanize_bytes(progress.total_bytes)}")
+        else:
+            bar.setRange(0, 0)
+            details.append(f"{received} downloaded")
+        if progress.bytes_per_second is not None:
+            details.append(f"{humanize_bytes(int(progress.bytes_per_second))}/s")
+        if progress.eta_seconds is not None:
+            seconds = max(1, ceil(progress.eta_seconds))
+            estimate = f"{seconds}s" if seconds < 60 else f"{ceil(seconds / 60)} min"
+            details.append(f"About {estimate} left in download")
+        elif progress.downloaded_bytes == 0:
+            details.append("Waiting for data...")
+        self.yt_dlp_update_detail_label.setText(" | ".join(details))
+
     def _on_yt_dlp_update_done(
         self: "QtYtDlpGui", result: object
     ) -> None:
         self._yt_dlp_update_in_progress = False
+        self.yt_dlp_update_button.setText("Update yt-dlp")
         if not isinstance(result, yt_dlp_binary.YtDlpUpdateResult):
             result = yt_dlp_binary.YtDlpUpdateResult(
                 success=False,
@@ -251,6 +307,17 @@ class WindowSettingsMixin:
             )
         self._yt_dlp_binary_source = ""
         self._refresh_yt_dlp_version(force=True)
+        self.yt_dlp_update_status.show()
+        self.yt_dlp_update_progress_bar.setRange(0, 100)
+        self.yt_dlp_update_progress_bar.setValue(100 if result.success else 0)
+        self.yt_dlp_update_status_label.setText(
+            "Update complete" if result.success and result.changed
+            else "Already up to date" if result.success else "Update failed"
+        )
+        self.yt_dlp_update_detail_label.setText(
+            f"yt-dlp {result.version} is ready." if result.success
+            else "You can retry the update. See the error message for details."
+        )
         self._append_log(f"[update] {result.message}")
         self._set_status("yt-dlp updated" if result.success else "yt-dlp update failed")
         self._update_controls_state()

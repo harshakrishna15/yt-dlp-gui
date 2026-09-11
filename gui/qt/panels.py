@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -49,6 +50,10 @@ class SettingsPanelRefs:
     open_folder_after_download_check: QCheckBox
     yt_dlp_version_label: QLabel
     yt_dlp_update_button: QPushButton
+    yt_dlp_update_status: QWidget
+    yt_dlp_update_progress_bar: QProgressBar
+    yt_dlp_update_status_label: QLabel
+    yt_dlp_update_detail_label: QLabel
     export_diagnostics_button: QPushButton
 
 
@@ -405,6 +410,30 @@ def build_settings_panel(
     engine_row_layout.addStretch(1)
     engine_row_layout.addWidget(yt_dlp_update_button)
     engine_card.layout.addWidget(engine_row)
+    update_status_shell = build_vbox(
+        engine_card.card,
+        widget_config=WidgetConfig(object_name="updateStatus", fixed_height=68, visible=False),
+        layout_config=LayoutConfig(margins=(0, 4, 0, 4), spacing=4),
+    )
+    update_status = update_status_shell.widget
+    update_status_label = build_label(
+        update_status,
+        spec=LabelSpec(widget_config=WidgetConfig(object_name="updateStatusLabel")),
+    )
+    update_detail_label = build_label(
+        update_status,
+        spec=LabelSpec(widget_config=WidgetConfig(object_name="updateDetailLabel")),
+    )
+    update_progress_bar = QProgressBar(update_status)
+    update_progress_bar.setObjectName("updateProgressBar")
+    update_progress_bar.setAccessibleName("yt-dlp update progress")
+    update_progress_bar.setTextVisible(False)
+    update_progress_bar.setRange(0, 100)
+    update_progress_bar.setValue(0)
+    update_status_shell.layout.addWidget(update_status_label)
+    update_status_shell.layout.addWidget(update_progress_bar)
+    update_status_shell.layout.addWidget(update_detail_label)
+    engine_card.layout.addWidget(update_status)
     settings_stack_layout.addWidget(engine_card.card)
 
     open_folder_after_download_check = build_checkbox(
@@ -488,6 +517,10 @@ def build_settings_panel(
         open_folder_after_download_check=open_folder_after_download_check,
         yt_dlp_version_label=yt_dlp_version_label,
         yt_dlp_update_button=yt_dlp_update_button,
+        yt_dlp_update_status=update_status,
+        yt_dlp_update_progress_bar=update_progress_bar,
+        yt_dlp_update_status_label=update_status_label,
+        yt_dlp_update_detail_label=update_detail_label,
         export_diagnostics_button=export_diagnostics_button,
     )
 

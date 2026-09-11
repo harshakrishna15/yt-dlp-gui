@@ -33,7 +33,7 @@ try:
         QWidget,
     )
 
-    from gui.common import download, yt_dlp_binary
+    from gui.common import download, yt_dlp_binary, yt_dlp_release
     from gui.app_meta import (
         APP_DESCRIPTION,
         APP_DISPLAY_NAME,
@@ -3128,9 +3128,13 @@ class TestQtApp(unittest.TestCase):
 
         self.assertTrue(self.window._yt_dlp_update_in_progress)
         self.assertEqual(
-            self.window.yt_dlp_version_label.text(),
+            self.window.yt_dlp_update_status_label.text(),
             "Checking for yt-dlp updates...",
         )
+        self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
+        self.assertFalse(self.window.yt_dlp_update_status.isHidden())
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
+        self.assertEqual(self.window.yt_dlp_update_button.text(), "Updating...")
         self.assertFalse(self.window.yt_dlp_update_button.isEnabled())
         self.assertFalse(self.window.url_edit.isEnabled())
         submit.assert_called_once()
@@ -3156,11 +3160,113 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window._yt_dlp_update_in_progress)
         self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.09.01")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+        self.assertEqual(self.window.yt_dlp_update_button.text(), "Update yt-dlp")
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 100)
+        self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update complete")
         information.assert_called_once_with(
             self.window,
             "yt-dlp update",
             "yt-dlp updated to 2026.09.01.",
         )
+
+    def test_update_progress_shows_real_download_percentage_and_eta(self) -> None:
+        self.window._yt_dlp_update_in_progress = True
+        self.window._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress(
+            "downloading", 5 * 1024**2, 10 * 1024**2, 5,
+        ))
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 50)
+        detail = self.window.yt_dlp_update_detail_label.text()
+        self.assertIn("50% downloaded", detail)
+        self.assertIn("5.0 MiB of 10.0 MiB", detail)
+        self.assertIn("1.0 MiB/s", detail)
+        self.assertIn("About 5s left in download", detail)
+
+    def test_update_progress_unknown_length_and_verification_are_indeterminate(self) -> None:
+        self.window._yt_dlp_update_in_progress = True
+        self.window._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress(
+            "downloading", 1024**2, None, 2,
+        ))
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
+        self.assertIn("1.0 MiB downloaded", self.window.yt_dlp_update_detail_label.text())
+        self.assertNotIn("left", self.window.yt_dlp_update_detail_label.text())
+        for stage in ("checking", "verifying", "licenses", "installing"):
+            with self.subTest(stage=stage):
+                self.window._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress(stage))
+                self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
+                self.assertNotIn("MiB", self.window.yt_dlp_update_detail_label.text())
+
+    def test_failed_update_stops_loading_and_retry_resets_progress(self) -> None:
+        result = yt_dlp_binary.YtDlpUpdateResult(False, False, "2026.08.19", "Network unavailable")
+        self.window._yt_dlp_update_in_progress = True
+        with patch.object(self.window._effects.dialogs, "critical"):
+            self.window._on_yt_dlp_update_done(result)
+        self.assertFalse(self.window._yt_dlp_update_in_progress)
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 100)
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 0)
+        self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update failed")
+        self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+        self.window._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress("installing"))
+        self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update failed")
+        with patch.object(self.window._effects.worker_executor, "submit"):
+            self.window._update_yt_dlp()
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
+        self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Checking for yt-dlp updates...")
+
+    def test_update_worker_forwards_progress_and_completion(self) -> None:
+        progress_events = []
+        self.window._signals.yt_dlp_update_progress.connect(progress_events.append)
+        self.window._yt_dlp_update_in_progress = True
+
+        def update(*, on_progress):
+            on_progress(yt_dlp_release.YtDlpUpdateProgress("downloading", 20, 40, 2))
+            return yt_dlp_binary.YtDlpUpdateResult(True, False, "2026.08.19", "Already current")
+
+        with patch.object(yt_dlp_binary, "update_managed_yt_dlp", side_effect=update), patch.object(
+            self.window._effects.dialogs, "information"
+        ):
+            self.window._update_yt_dlp_worker()
+        self.assertEqual(len(progress_events), 1)
+        self.assertEqual(progress_events[0].downloaded_bytes, 20)
+        self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Already up to date")
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 100)
+
+    def test_update_submission_failure_unlocks_controls(self) -> None:
+        with patch.object(self.window._effects.worker_executor, "submit", side_effect=RuntimeError("closed")), patch.object(
+            self.window._effects.dialogs, "critical"
+        ):
+            self.window._update_yt_dlp()
+        self.assertFalse(self.window._yt_dlp_update_in_progress)
+        self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+        self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update failed")
+
+    def test_update_progress_is_delivered_from_background_thread(self) -> None:
+        self.window._yt_dlp_update_in_progress = True
+        finish = threading.Event()
+
+        def update(*, on_progress):
+            on_progress(yt_dlp_release.YtDlpUpdateProgress("downloading", 20, 40, 2))
+            finish.wait(3)
+            return yt_dlp_binary.YtDlpUpdateResult(True, False, "2026.08.19", "Already current")
+
+        with patch.object(yt_dlp_binary, "update_managed_yt_dlp", side_effect=update), patch.object(
+            self.window._effects.dialogs, "information"
+        ):
+            worker = threading.Thread(target=self.window._update_yt_dlp_worker)
+            worker.start()
+            try:
+                for _ in range(100):
+                    QTest.qWait(10)
+                    if self.window.yt_dlp_update_progress_bar.value() == 50:
+                        break
+                self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 50)
+                self.assertTrue(self.window._yt_dlp_update_in_progress)
+            finally:
+                finish.set()
+                worker.join(timeout=3)
+                QApplication.processEvents()
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(self.window._yt_dlp_update_in_progress)
+        self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 100)
 
     def test_settings_app_footer_is_bottom_centered_without_app_heading(self) -> None:
         self.window.show()

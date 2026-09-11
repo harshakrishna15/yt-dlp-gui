@@ -60,6 +60,9 @@ Use the packaging scripts when you want a standalone app instead of running from
 Each build downloads and verifies the latest stable official yt-dlp executable.
 Packaged apps keep an updateable copy in the user's application-data directory;
 use `Update yt-dlp` in Preferences for later yt-dlp releases.
+The updater shows download progress, transfer speed, and an estimated download
+time remaining when the server supplies a file size. Checking, verification,
+and installation use a loading indicator rather than a guessed completion time.
 
 ### macOS
 
@@ -95,6 +98,15 @@ Output:
 Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can
 override that path with `YT_DLP_GUI_SETTINGS_PATH`. The output folder is
 session-only and resets to the computer's Downloads folder each time the app starts.
+
+### Appearance
+
+Navigation and primary controls use painted glass highlights; input fields and
+logs remain matte. This is a cross-platform visual effect, not native backdrop blur.
+Higher-contrast mode reported by Qt disables the highlights. Set
+`YT_DLP_GUI_OPAQUE=1` to use matte controls, or
+`YT_DLP_GUI_REDUCE_MOTION=1` to disable glass hover and navigation animations.
+These are launch-time environment overrides, not saved preferences.
 
 ## Troubleshooting
 
