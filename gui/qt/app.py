@@ -658,15 +658,23 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             QWidget.setTabOrder(previous, following)
 
     def _set_advanced_expanded(self, expanded: bool) -> None:
-        focused = self.focusWidget()
-        if not expanded and focused is not None and self.advanced_panel.isAncestorOf(focused):
-            self.advanced_toggle.setFocus()
-        self.advanced_panel.setVisible(expanded)
-        self.advanced_toggle.setArrowType(
-            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
-        )
-        self._sync_output_form_row_heights()
-        self._refresh_downloads_page_geometry()
+        updates_enabled = self.main_page.updatesEnabled()
+        self.main_page.setUpdatesEnabled(False)
+        try:
+            focused = self.focusWidget()
+            if not expanded and focused is not None and self.advanced_panel.isAncestorOf(focused):
+                self.advanced_toggle.setFocus()
+            self.advanced_panel.setVisible(expanded)
+            self.advanced_toggle.setArrowType(
+                Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+            )
+            self._sync_output_form_row_heights()
+            # Settle the form's size hint before its parent lays out the page,
+            # so collapsing cannot paint the rows at the old expanded height.
+            self.format_layout.activate()
+            self._refresh_downloads_page_geometry()
+        finally:
+            self.main_page.setUpdatesEnabled(updates_enabled)
 
     def _refresh_advanced_summary(self) -> None:
         mode = self._current_mode()
