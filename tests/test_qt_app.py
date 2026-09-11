@@ -3237,10 +3237,11 @@ class TestQtApp(unittest.TestCase):
         QTest.qWait(50)
         with patch.object(window, "_normalize_control_sizing", wraps=window._normalize_control_sizing) as sizing:
             font = window.font()
-            font.setPointSize(font.pointSize() + 1)
-            window.setFont(font)
-            window._queue_deferred_resize_sync()
-            QApplication.processEvents()
+            font.setPixelSize(18)
+            # Test the resolved font; the application stylesheet overrides setFont().
+            with patch.object(window, "font", return_value=font):
+                window._queue_deferred_resize_sync()
+                QTest.qWait(10)
             self.assertGreaterEqual(sizing.call_count, 1)
 
     def test_progress_burst_renders_latest_snapshot_once(self) -> None:
