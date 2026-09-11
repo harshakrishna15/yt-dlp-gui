@@ -40,6 +40,7 @@ from .widgets import (
     LabeledFieldSpec,
     NativeComboBoxConfig,
     QueueEmptyStateWidget,
+    RevealPanel,
     SegmentedRailSpec,
     LineEditSpec,
     FeedbackRefs,
@@ -139,7 +140,7 @@ class DownloadsViewRefs:
     output_dir_edit: QLineEdit
     output_dir_label: ElidedLabel
     advanced_toggle: QToolButton
-    advanced_panel: QWidget
+    advanced_panel: RevealPanel
     advanced_summary: ElidedLabel
     browse_button: QPushButton
     output_folder_label: QLabel
@@ -232,7 +233,7 @@ class _OutputSectionRefs:
     output_dir_edit: QLineEdit
     output_dir_label: ElidedLabel
     advanced_toggle: QToolButton
-    advanced_panel: QWidget
+    advanced_panel: RevealPanel
     advanced_summary: ElidedLabel
     browse_button: QPushButton
     output_folder_label: QLabel
@@ -1050,8 +1051,13 @@ class DownloadsViewBuilder:
 
         format_layout.addWidget(save_card)
 
+        advanced_group = build_vbox(
+            format_card, layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
+        )
+        format_layout.addWidget(advanced_group.widget)
         advanced_header = build_hbox(
-            format_card, layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+            advanced_group.widget,
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
         )
         advanced_toggle = QToolButton(advanced_header.widget)
         advanced_toggle.setObjectName("advancedToggle")
@@ -1068,14 +1074,15 @@ class DownloadsViewBuilder:
         advanced_summary.setSizePolicy(summary_policy)
         advanced_header.layout.addWidget(advanced_toggle)
         advanced_header.layout.addWidget(advanced_summary, stretch=1)
-        format_layout.addWidget(advanced_header.widget)
+        advanced_group.layout.addWidget(advanced_header.widget)
 
+        advanced_panel = RevealPanel(advanced_group.widget)
+        advanced_group.layout.addWidget(advanced_panel)
         advanced_shell = build_vbox(
-            format_card,
-            widget_config=WidgetConfig(object_name="advancedOptions", visible=False),
+            widget=advanced_panel.content,
+            widget_config=WidgetConfig(object_name="advancedOptions"),
             layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
         )
-        advanced_panel = advanced_shell.widget
         for key in ("container", "codec", "post_process"):
             row = output_row_refs[key].row
             format_layout.removeWidget(row)
@@ -1085,7 +1092,6 @@ class DownloadsViewBuilder:
         save_layout.removeWidget(filename_row)
         advanced_shell.layout.addWidget(filename_row)
         filename_row.show()
-        format_layout.addWidget(advanced_panel)
 
         metrics_card_shell = build_vbox(
             output_content,

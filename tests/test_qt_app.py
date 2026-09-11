@@ -610,14 +610,14 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
         baseline = self.window.format_card.height()
         self.window.advanced_toggle.setChecked(True)
-        QApplication.processEvents()
+        QTest.qWait(260)
         self.assertGreater(self.window.format_card.height(), baseline)
         for control in (self.window.container_combo, self.window.codec_combo, self.window.filename_edit):
             self.assertTrue(control.isVisible())
             self.assertGreaterEqual(control.width(), control.minimumSizeHint().width())
             self.assertTrue(self.window.rect().contains(QRect(control.mapTo(self.window, QPoint()), control.size())))
         self.window.advanced_toggle.setChecked(False)
-        QApplication.processEvents()
+        QTest.qWait(260)
         self.assertEqual(self.window.format_card.height(), baseline)
 
     def test_long_custom_filename_does_not_expand_collapsed_form(self) -> None:

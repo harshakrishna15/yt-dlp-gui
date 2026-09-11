@@ -279,6 +279,59 @@ class ElidedLabel(QLabel):
         self._refresh_text()
 
 
+class RevealPanel(QWidget):
+    """Clip content at its natural size while its allocated height changes."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.content = QWidget(self)
+        self.content.hide()
+        self.reveal_progress = 0.0
+        self._top_spacing = 0
+        self._focus_policies: dict[QWidget, Qt.FocusPolicy] = {}
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(0)
+
+    def set_focus_enabled(self, enabled: bool) -> None:
+        if enabled:
+            for widget, policy in self._focus_policies.items():
+                widget.setFocusPolicy(policy)
+            self._focus_policies.clear()
+        elif not self._focus_policies:
+            for widget in self.content.findChildren(QWidget):
+                if widget.focusPolicy() != Qt.FocusPolicy.NoFocus:
+                    self._focus_policies[widget] = widget.focusPolicy()
+                    widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def set_reveal_progress(self, progress: float, *, top_spacing: int) -> None:
+        self.reveal_progress = max(0.0, min(1.0, progress))
+        self._top_spacing = max(0, top_spacing)
+        self.content.setVisible(self.reveal_progress > 0)
+        self.sync_content_geometry()
+
+    def sync_content_geometry(self) -> None:
+        layout = self.content.layout()
+        if layout is not None:
+            layout.activate()
+        content_height = max(
+            0, self.content.minimumSizeHint().height(), self.content.sizeHint().height()
+        )
+        self.content.setGeometry(0, self._top_spacing, self.width(), content_height)
+        self.setFixedHeight(round(
+            (content_height + self._top_spacing) * self.reveal_progress
+        ))
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.content.sizeHint().width(), self.height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.height())
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.sync_content_geometry()
+
+
 class AnimatedSegmentedRail(QWidget):
     _ANIMATION_MS = 220
 

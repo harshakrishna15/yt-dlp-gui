@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import signal
+import os
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QEasingCurve,
     QEvent,
     QObject,
     QPropertyAnimation,
@@ -15,6 +17,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QVariantAnimation,
 )
 from PySide6.QtGui import (
     QCloseEvent,
@@ -203,6 +206,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._active_animations: list[QPropertyAnimation] = []
         self._shortcuts: list[QShortcut] = []
         self._progress_anim: QPropertyAnimation | None = None
+        self._advanced_anim: QVariantAnimation | None = None
         self._feedback_dismissed = False
         self._feedback_action = ""
         self._feedback_output_dir: Path | None = None
@@ -659,21 +663,55 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             QWidget.setTabOrder(previous, following)
 
     def _set_advanced_expanded(self, expanded: bool) -> None:
+        if self._advanced_anim is not None:
+            self._advanced_anim.stop()
+            self._advanced_anim.deleteLater()
+            self._advanced_anim = None
+        focused = self.focusWidget()
+        if not expanded and focused is not None and self.advanced_panel.isAncestorOf(focused):
+            self.advanced_toggle.setFocus()
+        self.advanced_panel.set_focus_enabled(expanded)
+        self.advanced_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        self._sync_output_form_row_heights()
+        target = 1.0 if expanded else 0.0
+        start = self.advanced_panel.reveal_progress
+        animate = (
+            self.main_page.isVisible()
+            and os.environ.get("YT_DLP_GUI_REDUCE_MOTION") != "1"
+            and bool(self.style().styleHint(QStyle.StyleHint.SH_Widget_Animate, None, self))
+        )
+        if not animate or start == target:
+            self._apply_advanced_reveal(target)
+            return
+        anim = QVariantAnimation(self)
+        anim.setDuration(max(80, round(220 * abs(target - start))))
+        anim.setStartValue(start)
+        anim.setEndValue(target)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(self._apply_advanced_reveal)
+        anim.finished.connect(self._finish_advanced_animation)
+        self._advanced_anim = anim
+        anim.start()
+
+    def _finish_advanced_animation(self) -> None:
+        if self._advanced_anim is not None:
+            self._advanced_anim.deleteLater()
+            self._advanced_anim = None
+        self._apply_advanced_reveal(1.0 if self.advanced_toggle.isChecked() else 0.0)
+
+    def _apply_advanced_reveal(self, progress: float) -> None:
         updates_enabled = self.main_page.updatesEnabled()
         self.main_page.setUpdatesEnabled(False)
         try:
-            focused = self.focusWidget()
-            if not expanded and focused is not None and self.advanced_panel.isAncestorOf(focused):
-                self.advanced_toggle.setFocus()
-            self.advanced_panel.setVisible(expanded)
-            self.advanced_toggle.setArrowType(
-                Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+            self.advanced_panel.set_reveal_progress(
+                progress, top_spacing=self.format_layout.spacing()
             )
-            self._sync_output_form_row_heights()
-            # Settle the form's size hint before its parent lays out the page,
-            # so collapsing cannot paint the rows at the old expanded height.
+            # Settle child layouts before their parents on every animation frame.
+            self.advanced_panel.parentWidget().layout().activate()
             self.format_layout.activate()
-            self._refresh_downloads_page_geometry()
+            self.output_layout.activate()
         finally:
             self.main_page.setUpdatesEnabled(updates_enabled)
 
@@ -1856,6 +1894,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             widget.updateGeometry()
 
     def _refresh_downloads_page_geometry(self) -> None:
+        self.advanced_panel.set_reveal_progress(
+            self.advanced_panel.reveal_progress, top_spacing=self.format_layout.spacing()
+        )
         self.workspace_layout.activate()
         self.output_layout.activate()
         self._sync_output_stack_widths()

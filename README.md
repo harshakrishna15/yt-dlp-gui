@@ -155,7 +155,8 @@ The main form shows media type, quality, and destination. Container, codec, and
 custom filename are under Advanced, with a summary of custom settings when
 collapsed. Video defaults to MP4/H.264 and audio to M4A after analysis. The folder
 name is shown inline; hover it for the full path or use the folder button to change it.
-Set `YT_DLP_GUI_REDUCE_MOTION=1` to disable navigation selection animations.
+Advanced settings open and close with a short, smooth reveal.
+Set `YT_DLP_GUI_REDUCE_MOTION=1` to disable navigation and Advanced animations.
 This is a launch-time environment override, not a saved preference.
 
 ## Troubleshooting
