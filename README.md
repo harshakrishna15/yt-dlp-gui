@@ -93,7 +93,7 @@ Output:
 2. Click `Analyze URL`.
 3. Choose audio or video settings.
 4. Click `Download` to start immediately, or `Add to Queue` to send it to the queue panel.
-5. Use `Queue`, `Logs`, and `Preferences` as needed.
+5. Use `Queue` to manage pending downloads. Activity logs are available under `Preferences` > `View logs`.
 
 Preferences are stored locally at `~/.yt-dlp-gui/settings.json` by default. You can
 override that path with `YT_DLP_GUI_SETTINGS_PATH`. The output folder is

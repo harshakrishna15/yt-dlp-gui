@@ -512,7 +512,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             "downloads": self.downloads_button,
             "settings": self.settings_button,
             "queue": self.queue_button,
-            "logs": self.logs_button,
         }
         self._configure_top_action_icons()
 
@@ -552,7 +551,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.classic_actions = top.classic_actions
         self.downloads_button = top.downloads_button
         self.queue_button = top.queue_button
-        self.logs_button = top.logs_button
         self.settings_button = top.settings_button
 
         mixed = ui.mixed_url
@@ -1171,10 +1169,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             [
                 self.downloads_button,
                 self.queue_button,
-                self.logs_button,
             ],
             extra_px=18,
             fixed=True,
+            sample_texts_by_button={self.queue_button: ("Queue (99+)",)},
         )
         settings_button_size = max(40, control_height + 1)
         self.settings_button.setFixedSize(settings_button_size, settings_button_size)
@@ -1549,6 +1547,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._normalize_input_widths()
 
     def _refresh_queue_panel_state(self) -> None:
+        count = len(self.queue_items)
+        self.queue_button.setText(f"Queue ({count if count < 100 else '99+'})")
+        self.queue_button.setAccessibleName(f"Queue, {count} items")
         has_items = self.queue_list.count() > 0
         editable = not self.queue_active
         self._refresh_queue_empty_state()
@@ -1903,6 +1904,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     def _panel_checked(self, name: str) -> bool:
         if self._active_panel_name is None:
             return name == "downloads"
+        if name == "settings":
+            return self._active_panel_name in {"settings", "logs"}
         return self._active_panel_name == name
 
     def _apply_panel_selection(self, active_panel: str | None) -> None:
@@ -2076,10 +2079,10 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             [
                 self.downloads_button,
                 self.queue_button,
-                self.logs_button,
             ],
             extra_px=12,
             fixed=True,
+            sample_texts_by_button={self.queue_button: ("Queue (99+)",)},
         )
         sync_selection = getattr(self.classic_actions, "sync_selection", None)
         if callable(sync_selection):

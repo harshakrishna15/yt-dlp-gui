@@ -66,7 +66,6 @@ class TopBarRefs:
     classic_actions: QWidget
     downloads_button: QPushButton
     queue_button: QPushButton
-    logs_button: QPushButton
     settings_button: QPushButton
 
 
@@ -288,16 +287,7 @@ class TopBarBuilder:
                         ),
                     ),
                     ButtonSpec(
-                        "Queue",
-                        object_name="topNavButton",
-                        checkable=True,
-                        size_policy=(
-                            QSizePolicy.Policy.Fixed,
-                            QSizePolicy.Policy.Fixed,
-                        ),
-                    ),
-                    ButtonSpec(
-                        "Logs",
+                        "Queue (0)",
                         object_name="topNavButton",
                         checkable=True,
                         size_policy=(
@@ -308,7 +298,7 @@ class TopBarBuilder:
                 ),
             ),
         )
-        downloads_button, queue_button, logs_button = classic_buttons
+        downloads_button, queue_button = classic_buttons
 
         settings_button = build_button(
             top_actions,
@@ -322,7 +312,8 @@ class TopBarBuilder:
                 ),
             ),
         )
-        settings_button.setAccessibleName("Settings")
+        settings_button.setAccessibleName("Preferences")
+        settings_button.setProperty("allowToolTip", True)
 
         top_actions_layout.addStretch(1)
         top_actions_layout.addWidget(
@@ -341,7 +332,6 @@ class TopBarBuilder:
             classic_actions=classic_actions,
             downloads_button=downloads_button,
             queue_button=queue_button,
-            logs_button=logs_button,
             settings_button=settings_button,
         )
 

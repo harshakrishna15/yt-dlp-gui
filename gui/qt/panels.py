@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -55,6 +56,7 @@ class SettingsPanelRefs:
     yt_dlp_update_status_label: QLabel
     yt_dlp_update_detail_label: QLabel
     export_diagnostics_button: QPushButton
+    view_logs_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,7 @@ class LogsPanelRefs:
     logs_view: QPlainTextEdit
     export_logs_button: QPushButton
     logs_clear_button: QPushButton
+    back_button: QPushButton
 
 
 @dataclass(frozen=True)
@@ -481,6 +484,11 @@ def build_settings_panel(
     app_copy_layout.addWidget(app_name_label)
     app_copy_layout.addWidget(version_label)
     app_copy_layout.addStretch(1)
+    view_logs_button = build_button(
+        app_copy,
+        spec=ButtonSpec(text="View logs", object_name="ghostButton"),
+    )
+    app_copy_layout.addWidget(view_logs_button)
     export_diagnostics_button = build_button(
         app_copy,
         spec=ButtonSpec(
@@ -507,6 +515,7 @@ def build_settings_panel(
         yt_dlp_update_status_label=update_status_label,
         yt_dlp_update_detail_label=update_detail_label,
         export_diagnostics_button=export_diagnostics_button,
+        view_logs_button=view_logs_button,
     )
 
 
@@ -590,12 +599,22 @@ def build_logs_panel(
     max_lines: int,
     on_export_logs: Callable[[], None],
     on_clear_logs: Callable[[], None],
+    on_back: Callable[[], None],
 ) -> LogsPanelRefs:
     shell = _build_panel_shell(
         parent=parent,
         title="Activity Log",
         framed=False,
     )
+    back_button = build_button(
+        shell.panel,
+        spec=ButtonSpec(
+            text="Preferences", object_name="ghostButton", on_click=on_back,
+        ),
+    )
+    back_button.setIcon(back_button.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+    back_button.setAccessibleName("Back to Preferences")
+    shell.panel.layout().insertWidget(0, back_button, alignment=Qt.AlignmentFlag.AlignLeft)
 
     logs_stack = QStackedWidget(shell.panel)
     empty = _build_empty_state(
@@ -682,4 +701,5 @@ def build_logs_panel(
         logs_view=logs_view,
         export_logs_button=export_logs_button,
         logs_clear_button=logs_clear_button,
+        back_button=back_button,
     )

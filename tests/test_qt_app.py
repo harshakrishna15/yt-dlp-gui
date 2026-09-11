@@ -2803,14 +2803,14 @@ class TestQtApp(unittest.TestCase):
         downloads_center = self.window.downloads_button.geometry().center()
         self.assertLess(abs(initial_center.x() - downloads_center.x()), 4)
 
-        self.window.logs_button.click()
+        self.window.queue_button.click()
         QTest.qWait(260)
         QApplication.processEvents()
 
-        logs_center = self.window.logs_button.geometry().center()
+        queue_center = self.window.queue_button.geometry().center()
         selection_center = selection.geometry().center()
-        self.assertLess(abs(selection_center.x() - logs_center.x()), 4)
-        self.assertTrue(self.window.logs_button.isChecked())
+        self.assertLess(abs(selection_center.x() - queue_center.x()), 4)
+        self.assertTrue(self.window.queue_button.isChecked())
 
         self.window.settings_button.click()
         QTest.qWait(260)
@@ -2828,10 +2828,10 @@ class TestQtApp(unittest.TestCase):
         assert selection is not None
 
         start_x = selection.geometry().center().x()
-        target_x = self.window.logs_button.geometry().center().x()
+        target_x = self.window.queue_button.geometry().center().x()
         self.assertLess(start_x, target_x)
 
-        self.window.logs_button.click()
+        self.window.queue_button.click()
         QTest.qWait(40)
         QApplication.processEvents()
 
@@ -2983,7 +2983,7 @@ class TestQtApp(unittest.TestCase):
 
         self.assertTrue(self.window.downloads_button.isVisible())
         self.assertTrue(self.window.queue_button.isVisible())
-        self.assertTrue(self.window.logs_button.isVisible())
+        self.assertFalse(self.window.logs_button.isVisible())
         self.assertTrue(self.window.settings_button.isVisible())
         self.assertNotIn(
             "Session",
@@ -3010,12 +3010,43 @@ class TestQtApp(unittest.TestCase):
         }
         self.assertEqual(
             sorted(x_positions, key=x_positions.get),
-            ["Downloads", "Queue", "Logs"],
+            ["Downloads", "Queue (0)"],
         )
         settings_x = self.window.settings_button.mapTo(
             self.window.top_actions, self.window.settings_button.rect().topLeft()
         ).x()
-        self.assertGreater(settings_x, x_positions["Logs"])
+        self.assertGreater(settings_x, x_positions["Queue (0)"])
+
+    def test_logs_are_secondary_to_preferences_with_a_return_path(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        self.assertNotIn(self.window.logs_button, self.window.classic_actions.findChildren(QPushButton))
+        self.window.settings_button.click()
+        self.assertTrue(self.window.logs_button.isVisible())
+        self.window._set_logs_alert(True)
+        self.window.logs_button.click()
+        QApplication.processEvents()
+        self.assertEqual(self.window._active_panel_name, "logs")
+        self.assertTrue(self.window.settings_button.isChecked())
+        self.assertFalse(self.window._logs_alert_active)
+        self.assertFalse(self.window.classic_actions.findChild(QWidget, "topNavSelection").isVisible())
+        self.window.logs_back_button.click()
+        self.assertEqual(self.window._active_panel_name, "settings")
+        self.window.downloads_button.click()
+        self.assertIsNone(self.window._active_panel_name)
+
+    def test_queue_count_updates_without_resizing_navigation(self) -> None:
+        self.window.show()
+        QApplication.processEvents()
+        initial_geometry = self.window.queue_button.geometry()
+        for count in (1, 9, 10, 99, 100, 0):
+            with self.subTest(count=count):
+                self.window.queue_items = [{"url": f"https://example.com/{i}", "settings": {}} for i in range(count)]
+                self.window._refresh_queue_panel()
+                QApplication.processEvents()
+                self.assertEqual(self.window.queue_button.text(), f"Queue ({count if count < 100 else '99+'})")
+                self.assertEqual(self.window.queue_button.accessibleName(), f"Queue, {count} items")
+                self.assertEqual(self.window.queue_button.geometry(), initial_geometry)
 
     def test_downloads_button_returns_to_main_view(self) -> None:
         self.window._open_panel("queue")

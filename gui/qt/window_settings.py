@@ -62,6 +62,7 @@ class WindowSettingsMixin:
         self.yt_dlp_update_status_label = refs.yt_dlp_update_status_label
         self.yt_dlp_update_detail_label = refs.yt_dlp_update_detail_label
         self.export_diagnostics_button = refs.export_diagnostics_button
+        self.logs_button = refs.view_logs_button
         self._refresh_yt_dlp_version()
         self._refresh_edit_friendly_encoder_availability()
         return refs.panel
@@ -89,6 +90,7 @@ class WindowSettingsMixin:
             max_lines=LOG_MAX_LINES,
             on_export_logs=self._export_logs,
             on_clear_logs=self._clear_logs,
+            on_back=lambda: self._open_panel("settings"),
         )
         self.logs_stack = refs.logs_stack
         self._logs_empty_index = refs.logs_empty_index
@@ -96,6 +98,7 @@ class WindowSettingsMixin:
         self.logs_view = refs.logs_view
         self.logs_export_button = refs.export_logs_button
         self.logs_clear_button = refs.logs_clear_button
+        self.logs_back_button = refs.back_button
         return refs.panel
 
     def _default_output_dir(self: "QtYtDlpGui") -> str:
