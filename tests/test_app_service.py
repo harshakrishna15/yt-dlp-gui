@@ -8,6 +8,11 @@ from gui.services import app_service
 
 
 class TestAppService(unittest.TestCase):
+    def setUp(self):
+        tools = patch("gui.services.preflight.resolve_binary", return_value=(Path("/tool"), "test"))
+        tools.start()
+        self.addCleanup(tools.stop)
+
     def _build_request(self, output_dir: Path) -> dict[str, object]:
         return {
             "url": "https://example.com/watch?v=abc",
@@ -31,7 +36,7 @@ class TestAppService(unittest.TestCase):
         }
 
     @patch("gui.services.app_service.download.run_download", return_value="success")
-    def test_run_download_request_ensure_output_dir_toggle(self, mock_run_download) -> None:
+    def test_run_download_request_always_prepares_output_dir(self, mock_run_download) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             missing_with_ensure = root / "with-ensure"
@@ -42,7 +47,6 @@ class TestAppService(unittest.TestCase):
                 cancel_event=threading.Event(),
                 log=lambda _line: None,
                 update_progress=lambda _payload: None,
-                ensure_output_dir=True,
             )
             self.assertEqual(result, "success")
             self.assertTrue(missing_with_ensure.exists())
@@ -52,10 +56,9 @@ class TestAppService(unittest.TestCase):
                 cancel_event=threading.Event(),
                 log=lambda _line: None,
                 update_progress=lambda _payload: None,
-                ensure_output_dir=False,
             )
             self.assertEqual(result, "success")
-            self.assertFalse(missing_without_ensure.exists())
+            self.assertTrue(missing_without_ensure.exists())
 
         self.assertEqual(mock_run_download.call_count, 2)
 

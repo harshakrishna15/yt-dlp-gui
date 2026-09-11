@@ -820,7 +820,7 @@ class TestRunQueueController(unittest.TestCase):
             controller.on_start()
 
         self.assertEqual(len(dialogs.critical_calls), 0)
-        self.assertEqual(filesystem.ensure_dir_calls, [Path("/tmp/out")])
+        self.assertEqual(filesystem.ensure_dir_calls, [])
         self.assertTrue(state.is_downloading)
         self.assertFalse(state.cancel_requested)
         self.assertIsNotNone(state.cancel_event)
@@ -875,7 +875,7 @@ class TestRunQueueController(unittest.TestCase):
             controller.on_start()
 
         self.assertEqual(dialogs.critical_calls, [])
-        self.assertEqual(filesystem.ensure_dir_calls, [Path("/tmp/default-downloads")])
+        self.assertEqual(filesystem.ensure_dir_calls, [])
         self.assertEqual(
             mock_build_request.call_args.kwargs["output_dir"],
             Path("/tmp/default-downloads"),
@@ -897,7 +897,7 @@ class TestRunQueueController(unittest.TestCase):
 
         self.assertFalse(state.is_downloading)
         self.assertEqual(len(executor.calls), 0)
-        self.assertEqual(filesystem.ensure_dir_calls, [Path("/tmp/out")])
+        self.assertEqual(filesystem.ensure_dir_calls, [])
         self.assertEqual(len(dialogs.critical_calls), 1)
         self.assertEqual(dialogs.critical_calls[0][0], "Invalid playlist items")
 

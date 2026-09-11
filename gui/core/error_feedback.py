@@ -81,6 +81,8 @@ def _classify_reason(error_text: str) -> str:
     if "permission denied" in text or "read-only file system" in text:
         return "write_permission"
 
+    if "insufficient free disk space" in text:
+        return "insufficient_space"
     if "no space left on device" in text:
         return "disk_full"
 
@@ -103,6 +105,7 @@ def _reason_label(reason: str) -> str:
         "network": "network issue",
         "write_permission": "no write permission",
         "disk_full": "disk is full",
+        "insufficient_space": "not enough free space",
         "unavailable": "video unavailable",
         "unknown": "unknown error",
     }
@@ -125,6 +128,7 @@ def download_failed_feedback(error_text: str) -> FailureFeedback:
         "network": "Network request failed. Check your connection and retry.",
         "write_permission": "Cannot write to the output folder. Choose a writable folder and retry.",
         "disk_full": "Your disk is full. Free up space and retry.",
+        "insufficient_space": "Not enough free space for the estimated download and processing. Free up space or choose another folder.",
         "unavailable": "This video is unavailable or removed. Try a different URL.",
         "unknown": "Download failed. Open Logs for details and retry.",
     }

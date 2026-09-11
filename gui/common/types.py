@@ -54,6 +54,7 @@ class DownloadOptions(TypedDict):
 
 class QueueSettings(TypedDict, total=False):
     format_selector: str
+    estimated_size_bytes: int
     mode: str
     format_filter: str
     codec_filter: str

@@ -435,16 +435,6 @@ class RunQueueController:
             w.output_dir_edit.text(),
             default_output_dir=default_output_dir,
         )
-        try:
-            self._ports.filesystem.ensure_dir(output_dir)
-        except OSError as exc:
-            self._ports.dialogs.critical(
-                w,
-                "Output folder unavailable",
-                f"Could not create/access output folder:\n{output_dir}\n\n{exc}",
-            )
-            return
-
         options = w._snapshot_download_options()
         try:
             request, was_normalized = app_service.build_single_download_request(
@@ -918,7 +908,6 @@ class RunQueueController:
                 update_progress=lambda payload: _emit_window_signal(
                     self.window, "progress", dict(payload)
                 ),
-                ensure_output_dir=True,
                 record_output=self._record_output,
             )
             had_error = result == download.DOWNLOAD_ERROR

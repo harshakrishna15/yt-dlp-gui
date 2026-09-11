@@ -4,6 +4,7 @@ import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from . import preflight
 
 from ..common import download, formats as formats_mod, yt_dlp_helpers as helpers
 from ..core import download_plan as core_download_plan
@@ -65,6 +66,9 @@ def build_queue_settings(
     )
     if selector:
         settings["format_selector"] = selector
+    estimated_bytes = helpers.estimate_filesize_bytes(dict(format_info))
+    if estimated_bytes:
+        settings["estimated_size_bytes"] = estimated_bytes
     return settings
 
 
@@ -84,7 +88,8 @@ def resolve_format_for_url(
         return {
             "fmt_label": str(settings.get("format_label") or "Best available"),
             "fmt_info": {"custom_format": str(selector), "is_audio_only": audio_only,
-                         "vcodec": "none" if audio_only else "unknown", "acodec": "unknown"},
+                         "vcodec": "none" if audio_only else "unknown", "acodec": "unknown",
+                         "filesize_approx": settings.get("estimated_size_bytes")},
             "format_filter": str(settings.get("format_filter") or ""),
             "is_playlist": False,
             "title": "",
@@ -154,11 +159,11 @@ def run_download_request(
     log: Callable[[str], None],
     update_progress: Callable[[ProgressUpdate], None],
     record_output: Callable[[Path], None] | None = None,
-    ensure_output_dir: bool = False,
 ) -> str:
     output_dir = request["output_dir"]
-    if ensure_output_dir:
-        output_dir.mkdir(parents=True, exist_ok=True)
+    update_progress({"status": "preparing", "message": "Checking destination and media tools..."})
+    preflight.check_download(request, cancel_event)
+    update_progress({"status": "preparing", "message": "Downloading..."})
     return download.run_download(
         url=request["url"],
         output_dir=output_dir,
