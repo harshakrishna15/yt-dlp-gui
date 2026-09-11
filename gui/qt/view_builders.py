@@ -42,7 +42,7 @@ from .widgets import (
     QueueEmptyStateWidget,
     SegmentedRailSpec,
     LineEditSpec,
-    SourceToastRefs,
+    FeedbackRefs,
     WidgetConfig,
     _NativeComboBox,
     build_button,
@@ -54,7 +54,7 @@ from .widgets import (
     build_line_edit,
     build_native_combo,
     build_segmented_rail,
-    build_source_feedback_toast,
+    build_feedback_row,
     build_vbox,
 )
 
@@ -159,7 +159,7 @@ class UiRefs:
     panel_stack: QStackedWidget
     top_bar: TopBarRefs
     mixed_url: MixedUrlRefs
-    source_toast: SourceToastRefs
+    feedback: FeedbackRefs
     downloads: DownloadsViewRefs
 
 
@@ -1063,6 +1063,9 @@ class DownloadsViewBuilder:
         advanced_summary = ElidedLabel(advanced_header.widget)
         advanced_summary.setObjectName("advancedSummary")
         advanced_summary.setProperty("allowToolTip", True)
+        summary_policy = advanced_summary.sizePolicy()
+        summary_policy.setRetainSizeWhenHidden(True)
+        advanced_summary.setSizePolicy(summary_policy)
         advanced_header.layout.addWidget(advanced_toggle)
         advanced_header.layout.addWidget(advanced_summary, stretch=1)
         format_layout.addWidget(advanced_header.widget)
@@ -1309,7 +1312,8 @@ class MainUiBuilder:
         mixed_url_overlay_layout.addStretch(1)
         mixed_url_overlay.hide()
 
-        source_toast = build_source_feedback_toast(root)
+        feedback = build_feedback_row(root)
+        root_layout.addWidget(feedback.row)
 
         downloads = DownloadsViewBuilder.build(
             panel_stack=panel_stack,
@@ -1330,6 +1334,6 @@ class MainUiBuilder:
                 use_single_video_url_button=use_single_video_url_button,
                 use_playlist_url_button=use_playlist_url_button,
             ),
-            source_toast=source_toast,
+            feedback=feedback,
             downloads=downloads,
         )

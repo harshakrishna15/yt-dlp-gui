@@ -164,6 +164,7 @@ class FakeWindow:
         *,
         tone: str,
         title: str | None = None,
+        action: str | None = None,
     ) -> None:
         self.feedback_updates.append((str(message), str(tone)))
         self.feedback_titles.append(str(title) if title is not None else None)
@@ -529,7 +530,7 @@ class TestSourceController(unittest.TestCase):
         self.assertEqual(state.audio_labels, ["old-audio"])
         self.assertEqual(window.preview_title, "")
 
-    def test_on_formats_loaded_deduplicates_error_popup_by_reason(self) -> None:
+    def test_on_formats_loaded_reports_errors_without_modal_popups(self) -> None:
         window = FakeWindow()
         window.url_edit.setText("https://example.com/watch?v=abc")
         window._last_error_log = "HTTP Error 403: Forbidden"
@@ -552,8 +553,8 @@ class TestSourceController(unittest.TestCase):
             is_playlist=False,
         )
 
-        self.assertEqual(len(window.popups), 1)
-        self.assertTrue(state.last_formats_error_popup_key.startswith("https://example.com/watch?v=abc|"))
+        self.assertEqual(window.popups, [])
+        self.assertEqual(window.feedback_updates[-1][1], "error")
 
 
 class TestRunQueueController(unittest.TestCase):
@@ -826,7 +827,7 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(
             window.feedback_updates[-1],
             (
-                "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+                "Added to queue as item 2",
                 "success",
             ),
         )
@@ -949,7 +950,7 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(window.open_output_calls, 1)
         self.assertTrue(any("[queue] finished successfully" in line for line in window.logs))
 
-    def test_finish_queue_failed_shows_warning_popup(self) -> None:
+    def test_finish_queue_failed_reports_warning_without_popup(self) -> None:
         window = FakeWindow()
         window._last_error_log = "HTTP Error 429: Too many requests"
         state = RunQueueState(
@@ -975,9 +976,8 @@ class TestRunQueueController(unittest.TestCase):
 
         self.assertEqual(window.status_value.text(), "Queue finished with errors")
         self.assertEqual(window.open_output_calls, 1)
-        self.assertEqual(len(window.popups), 1)
-        self.assertEqual(window.popups[0][0], "Queue finished with errors")
-        self.assertFalse(window.popups[0][2])
+        self.assertEqual(window.popups, [])
+        self.assertEqual(window.feedback_updates[-1][1], "warning")
 
     def test_finish_queue_cancelled_does_not_open_output_folder(self) -> None:
         window = FakeWindow()

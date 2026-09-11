@@ -103,6 +103,9 @@ session-only and resets to the computer's Downloads folder each time the app sta
 
 The interface uses flat controls and the system font. Download progress and
 Cancel appear only during a download; update progress remains in Preferences.
+Results use a single dismissible status row, with Open folder after a successful
+download and View details for errors. Update results stay in Preferences without
+an extra popup; progress and estimated download time remain visible while updating.
 The main form shows media type, quality, and destination. Container, codec, and
 custom filename are under Advanced, with a summary of custom settings when
 collapsed. Video defaults to MP4/H.264 and audio to M4A after analysis. The folder

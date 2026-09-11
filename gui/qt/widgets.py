@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QGridLayout,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -79,10 +78,10 @@ class NativeComboBoxConfig:
 
 
 @dataclass(frozen=True)
-class SourceToastRefs:
-    card: QFrame
-    title_label: QLabel
+class FeedbackRefs:
+    row: QWidget
     message_label: QLabel
+    action_button: QPushButton
     dismiss_button: QPushButton
 
 
@@ -262,6 +261,7 @@ class ElidedLabel(QLabel):
     def setText(self, text: str) -> None:
         self._full_text = str(text)
         self.setAccessibleName(self._full_text)
+        self.setToolTip(self._full_text)
         self._refresh_text()
 
     def _refresh_text(self) -> None:
@@ -1533,58 +1533,27 @@ def build_native_combo(
     return combo
 
 
-def build_source_feedback_toast(parent: QWidget) -> SourceToastRefs:
-    source_toast = QFrame(parent)
-    source_toast.setObjectName("sourceToastCard")
-    source_toast.setProperty("tone", "success")
-    source_toast.setMinimumWidth(260)
-    source_toast.setMaximumWidth(340)
-
-    shadow = QGraphicsDropShadowEffect(source_toast)
-    shadow.setBlurRadius(28)
-    shadow.setOffset(0, 10)
-    shadow.setColor(QColor(15, 33, 45, 48))
-    source_toast.setGraphicsEffect(shadow)
-
-    source_toast_layout = QVBoxLayout(source_toast)
-    source_toast_layout.setContentsMargins(16, 12, 16, 14)
-    source_toast_layout.setSpacing(4)
-
-    header = QWidget(source_toast)
-    header_layout = QHBoxLayout(header)
-    header_layout.setContentsMargins(0, 0, 0, 0)
-    header_layout.setSpacing(8)
-
-    title_label = QLabel("Formats ready", header)
-    title_label.setObjectName("sourceToastTitle")
-
-    dismiss_button = build_button(
-        header,
-        spec=ButtonSpec(
-            text="×",
-            object_name="sourceToastDismissButton",
-            tooltip="Dismiss notification",
-            fixed_width=24,
-            fixed_height=24,
-            focus_policy=Qt.FocusPolicy.NoFocus,
-            cursor=Qt.CursorShape.PointingHandCursor,
-        ),
-    )
-
-    message_label = QLabel("", source_toast)
-    message_label.setObjectName("sourceToastMessage")
-    message_label.setWordWrap(True)
-
-    header_layout.addWidget(title_label)
-    header_layout.addStretch(1)
-    header_layout.addWidget(dismiss_button)
-    source_toast_layout.addWidget(header)
-    source_toast_layout.addWidget(message_label)
-    source_toast.hide()
-
-    return SourceToastRefs(
-        card=source_toast,
-        title_label=title_label,
-        message_label=message_label,
-        dismiss_button=dismiss_button,
-    )
+def build_feedback_row(parent: QWidget) -> FeedbackRefs:
+    row = QWidget(parent)
+    row.setObjectName("feedbackRow")
+    row.setFixedHeight(36)
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    message_label = ElidedLabel(row)
+    message_label.setObjectName("feedbackMessage")
+    message_label.setProperty("allowToolTip", True)
+    action_button = build_button(row, spec=ButtonSpec(
+        text="View details", object_name="feedbackActionButton",
+    ))
+    dismiss_button = build_button(row, spec=ButtonSpec(
+        text="×", object_name="feedbackDismissButton", fixed_width=30, fixed_height=30,
+        tooltip="Dismiss status",
+    ))
+    dismiss_button.setAccessibleName("Dismiss status")
+    dismiss_button.setProperty("allowToolTip", True)
+    layout.addWidget(message_label, 1)
+    layout.addWidget(action_button)
+    layout.addWidget(dismiss_button)
+    row.hide()
+    return FeedbackRefs(row, message_label, action_button, dismiss_button)

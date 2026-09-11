@@ -33,7 +33,6 @@ _PALETTE = {
     "accent_soft_hover": "#1f443a",
     "accent_border": "#418e75",
     "accent_text": "#8bdcbe",
-    "accent_toast_bg": "#183a31",
     "field_text": "#eef0f1",
     "field_readonly_text": "#dce0e2",
     "field_surface": "#242729",
@@ -226,7 +225,7 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             background: transparent;
             border: none;
         }
-        QToolButton#advancedToggle {
+        QToolButton#advancedToggle, QToolButton#panelBackButton {
             background: transparent;
             color: __text_secondary__;
             border: 1px solid transparent;
@@ -234,10 +233,10 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             padding: 4px 6px;
             font-weight: 600;
         }
-        QToolButton#advancedToggle:hover {
+        QToolButton#advancedToggle:hover, QToolButton#panelBackButton:hover {
             background: __surface__;
         }
-        QToolButton#advancedToggle:focus {
+        QToolButton#advancedToggle:focus, QToolButton#panelBackButton:focus {
             border-color: __accent_text__;
         }
         QLabel#advancedSummary {
@@ -456,73 +455,36 @@ def build_stylesheet(combo_arrow_path: str) -> str:
             font-weight: 600;
             background: transparent;
         }
-        QFrame#sourceToastCard {
-            background: __surface__;
-            border: 1px solid __border_soft__;
-            border-radius: 6px;
+        QWidget#feedbackRow {
+            background: transparent;
+            border-top: 1px solid __border_soft__;
         }
-        QFrame#sourceToastCard[tone="success"] {
-            background: __accent_toast_bg__;
-            border: 1px solid __accent_border__;
-        }
-        QFrame#sourceToastCard[tone="warning"] {
-            background: __warning_bg__;
-            border: 1px solid __warning_border__;
-        }
-        QFrame#sourceToastCard[tone="error"] {
-            background: __error_bg__;
-            border: 1px solid __error_border__;
-        }
-        QLabel#sourceToastTitle {
-            color: __text_muted__;
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: 0;
-        }
-        QLabel#sourceToastMessage {
-            color: __text_primary__;
+        QLabel#feedbackMessage {
+            color: __text_secondary__;
             font-size: 13px;
-            font-weight: 600;
         }
-        QPushButton#sourceToastDismissButton {
+        QWidget#feedbackRow[tone="warning"] QLabel#feedbackMessage {
+            color: __warning_text__;
+        }
+        QWidget#feedbackRow[tone="error"] QLabel#feedbackMessage {
+            color: __error_text__;
+        }
+        QPushButton#feedbackActionButton, QPushButton#feedbackDismissButton {
             background: transparent;
             border: 1px solid transparent;
-            border-radius: 6px;
-            color: __text_muted__;
-            font-size: 18px;
-            font-weight: 500;
+            border-radius: 4px;
+            color: __text_secondary__;
+            padding: 2px 6px;
+        }
+        QPushButton#feedbackDismissButton {
             padding: 0px;
+            font-size: 18px;
         }
-        QPushButton#sourceToastDismissButton:hover {
-            background: rgba(255, 255, 255, 40);
-            border: 1px solid rgba(255, 255, 255, 34);
+        QPushButton#feedbackActionButton:hover, QPushButton#feedbackDismissButton:hover {
+            background: __surface__;
         }
-        QPushButton#sourceToastDismissButton:pressed {
-            background: rgba(15, 33, 45, 36);
-            border: 1px solid rgba(15, 33, 45, 30);
-        }
-        QFrame#sourceToastCard[tone="success"] QLabel#sourceToastTitle {
-            color: __accent_text__;
-        }
-        QFrame#sourceToastCard[tone="success"] QLabel#sourceToastMessage {
-            color: __text_inverse__;
-        }
-        QFrame#sourceToastCard[tone="success"] QPushButton#sourceToastDismissButton {
-            color: __accent_text__;
-        }
-        QFrame#sourceToastCard[tone="warning"] QLabel#sourceToastTitle,
-        QFrame#sourceToastCard[tone="warning"] QLabel#sourceToastMessage {
-            color: __warning_text__;
-        }
-        QFrame#sourceToastCard[tone="warning"] QPushButton#sourceToastDismissButton {
-            color: __warning_text__;
-        }
-        QFrame#sourceToastCard[tone="error"] QLabel#sourceToastTitle,
-        QFrame#sourceToastCard[tone="error"] QLabel#sourceToastMessage {
-            color: __error_text__;
-        }
-        QFrame#sourceToastCard[tone="error"] QPushButton#sourceToastDismissButton {
-            color: __error_text__;
+        QPushButton#feedbackActionButton:focus, QPushButton#feedbackDismissButton:focus {
+            border: 1px solid __accent_text__;
         }
         QFrame#panelCard {
             background: __surface__;

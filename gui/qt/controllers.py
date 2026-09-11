@@ -52,7 +52,6 @@ class SourceState:
     active_fetch_request_id: int = 0
     is_fetching: bool = False
     pending_mixed_url: str = ""
-    last_formats_error_popup_key: str = ""
     playlist_mode: bool = False
     video_labels: list[str] = field(default_factory=list)
     video_lookup: dict[str, dict] = field(default_factory=dict)
@@ -103,8 +102,6 @@ class SourceController:
 
         current = w.url_edit.text()
         normalized = core_urls.strip_url_whitespace(current)
-        if normalized != s.pending_mixed_url:
-            s.last_formats_error_popup_key = ""
         if normalized != current:
             w.url_edit.blockSignals(True)
             w.url_edit.setText(normalized)
@@ -177,7 +174,7 @@ class SourceController:
         request_id = s.fetch_request_seq
         s.active_fetch_request_id = request_id
         s.is_fetching = True
-        w._set_status("Fetching formats...")
+        w._set_status("Fetching formats...", log=False)
         w._set_source_feedback("Loading available formats...", tone="loading")
         w._update_controls_state()
         self._ports.worker_executor.submit(self.fetch_formats_worker, request_id, url)
@@ -258,22 +255,13 @@ class SourceController:
                 w._last_error_log
             )
             status_text = fetch_feedback.status if error else "No formats found"
-            w._set_status(status_text)
+            w._set_status(status_text, log=False)
             w._set_source_feedback(
                 fetch_feedback.message
                 if error
                 else "No formats found for this URL. Try a different link.",
                 tone="error" if error else "warning",
             )
-            if error:
-                popup_key = f"{url}|{fetch_feedback.reason}"
-                if popup_key != s.last_formats_error_popup_key:
-                    w._show_feedback_popup(
-                        title="Could not fetch formats",
-                        message=fetch_feedback.message,
-                        critical=False,
-                    )
-                    s.last_formats_error_popup_key = popup_key
             w._update_controls_state()
             return
 
@@ -287,13 +275,13 @@ class SourceController:
         source_summary = payload.get("source_summary")
         w._set_source_summary(source_summary if isinstance(source_summary, dict) else None)
         if s.video_labels or s.audio_labels:
-            w._set_status("Formats loaded")
+            w._set_status("Formats loaded", log=False)
             w._set_source_feedback(
-                "Formats are ready. Choose options and start the download.",
+                "Formats ready.",
                 tone="success",
             )
         else:
-            w._set_status("No formats found")
+            w._set_status("No formats found", log=False)
             w._set_source_feedback(
                 "No formats found for this URL. Try a different link.",
                 tone="warning",
@@ -444,30 +432,27 @@ class RunQueueController:
         s.show_progress_item = False
         w._reset_progress_summary()
         if result == download.DOWNLOAD_SUCCESS:
-            w._set_status("Download complete")
+            w._set_status("Download complete", log=False)
             w._set_source_feedback(
-                "Download complete. You can paste another URL anytime.",
+                "Download complete.",
                 tone="success",
+                action="folder",
             )
             w._maybe_open_output_folder()
         elif result == download.DOWNLOAD_CANCELLED:
-            w._set_status("Cancelled")
+            w._set_status("Cancelled", log=False)
             w._set_source_feedback(
-                "Download cancelled. Update settings or URL and try again.",
+                "Download cancelled.",
                 tone="warning",
+                action="",
             )
             w._clear_post_download_output_dir()
         else:
             failure = core_error_feedback.download_failed_feedback(w._last_error_log)
-            w._set_status(failure.status)
+            w._set_status(failure.status, log=False)
             w._set_source_feedback(
                 failure.message,
                 tone="error",
-            )
-            w._show_feedback_popup(
-                title="Download failed",
-                message=failure.message,
-                critical=True,
             )
             w._clear_post_download_output_dir()
         w._update_controls_state()
@@ -636,22 +621,17 @@ class RunQueueController:
             if callable(clear_edit):
                 clear_edit()
             status_text = "Queue item updated"
-            feedback_text = (
-                f"Saved changes to queue item {editing_index + 1}. "
-                f"Queue still has {len(s.queue_items)} item"
-                f"{'' if len(s.queue_items) == 1 else 's'}."
-            )
             success_title = "Queue item updated"
         else:
             s.queue_items.append(queued_item)
-            status_text, feedback_text = core_queue_logic.queue_add_success_feedback(
+            status_text, _feedback_text = core_queue_logic.queue_add_success_feedback(
                 len(s.queue_items)
             )
             success_title = "Added to queue"
         w._refresh_queue_panel()
-        w._set_status(status_text)
+        w._set_status(status_text, log=False)
         w._set_source_feedback(
-            feedback_text,
+            status_text,
             tone="success",
             title=success_title,
         )
@@ -859,38 +839,32 @@ class RunQueueController:
         )
         if outcome == "cancelled":
             w._append_log("[queue] stopped by cancellation")
-            w._set_status("Queue cancelled")
+            w._set_status("Queue cancelled", log=False)
             w._set_source_feedback(
-                "Queue cancelled. You can adjust items and restart.",
+                "Queue cancelled.",
                 tone="warning",
+                action="",
             )
             w._clear_post_download_output_dir()
         elif outcome == "failed":
             w._append_log(f"[queue] finished with {failed_items} failed item(s)")
             failure = core_error_feedback.download_failed_feedback(w._last_error_log)
             item_label = "item" if failed_items == 1 else "items"
-            w._set_status("Queue finished with errors")
+            w._set_status("Queue finished with errors", log=False)
             w._set_source_feedback(
                 (
                     f"Queue finished with {failed_items} failed {item_label}. "
-                    f"Last issue: {failure.reason}. Check Logs and retry."
+                    f"Last issue: {failure.reason}."
                 ),
                 tone="warning",
             )
-            w._show_feedback_popup(
-                title="Queue finished with errors",
-                message=(
-                    f"Queue finished with {failed_items} failed {item_label}. "
-                    f"Last issue: {failure.reason}."
-                ),
-                critical=False,
-            )
         else:
             w._append_log("[queue] finished successfully")
-            w._set_status("Queue complete")
+            w._set_status("Queue complete", log=False)
             w._set_source_feedback(
-                "Queue complete. Paste another URL anytime.",
+                "Queue complete.",
                 tone="success",
+                action="folder",
             )
 
         if queue_started_ts is not None:

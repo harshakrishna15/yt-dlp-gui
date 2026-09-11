@@ -7,7 +7,6 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QEvent,
-    QEasingCurve,
     QObject,
     QPropertyAnimation,
     QSignalBlocker,
@@ -114,20 +113,8 @@ from .widgets import (
     StableSizeHintButton,
     _NativeComboBox,
     _QtSignals,
-    build_source_feedback_toast,
 )
 from ..common.types import DownloadOptions, DownloadRequest, QueueItem, QueueSettings
-
-
-@dataclass
-class _SourceFeedbackToastEntry:
-    card: QFrame
-    title_label: QLabel
-    message_label: QLabel
-    dismiss_button: QPushButton
-    timer: QTimer | None = None
-    animation: QPropertyAnimation | None = None
-    placeholder: bool = False
 
 
 @dataclass(frozen=True)
@@ -215,10 +202,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._active_animations: list[QPropertyAnimation] = []
         self._shortcuts: list[QShortcut] = []
         self._progress_anim: QPropertyAnimation | None = None
-        self._source_feedback_toasts: list[_SourceFeedbackToastEntry] = []
-        self._source_feedback_toast_placeholder: _SourceFeedbackToastEntry | None = None
-        self._source_feedback_toast_parent: QWidget | None = None
-        self._last_toasted_source_feedback_version: int | None = None
+        self._feedback_dismissed = False
+        self._feedback_action = ""
+        self._feedback_output_dir: Path | None = None
         self._logs_alert_active = False
         self._header_icons_enabled = True
         self._legacy_log_alert_icon = self._build_alert_dot_icon()
@@ -256,8 +242,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._current_source_feedback_message = ""
         self._current_source_feedback_tone = "neutral"
         self._current_source_feedback_title = ""
-        self._source_feedback_version = 0
-        self._dismissed_source_feedback_version: int | None = None
         self._status_presenter = StatusPresenter()
         self._active_panel_name: str | None = None
         self._applying_user_settings = False
@@ -322,14 +306,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
     @_pending_mixed_url.setter
     def _pending_mixed_url(self, value: str) -> None:
         self._source_state.pending_mixed_url = str(value or "")
-
-    @property
-    def _last_formats_error_popup_key(self) -> str:
-        return self._source_state.last_formats_error_popup_key
-
-    @_last_formats_error_popup_key.setter
-    def _last_formats_error_popup_key(self, value: str) -> None:
-        self._source_state.last_formats_error_popup_key = str(value or "")
 
     @property
     def _playlist_mode(self) -> bool:
@@ -562,19 +538,13 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.use_single_video_url_button = mixed.use_single_video_url_button
         self.use_playlist_url_button = mixed.use_playlist_url_button
 
-        source_toast = ui.source_toast
-        self._source_feedback_toast_parent = source_toast.card.parentWidget() or ui.root
-        self._source_feedback_toast_placeholder = _SourceFeedbackToastEntry(
-            card=source_toast.card,
-            title_label=source_toast.title_label,
-            message_label=source_toast.message_label,
-            dismiss_button=source_toast.dismiss_button,
-            placeholder=True,
-        )
-        self._sync_source_feedback_toast_refs()
-        self.source_feedback_toast_dismiss_button.clicked.connect(
-            self._dismiss_source_feedback_toast
-        )
+        feedback = ui.feedback
+        self.feedback_row = feedback.row
+        self.feedback_message = feedback.message_label
+        self.feedback_action_button = feedback.action_button
+        self.feedback_dismiss_button = feedback.dismiss_button
+        self.feedback_action_button.clicked.connect(self._activate_feedback_action)
+        self.feedback_dismiss_button.clicked.connect(self._dismiss_feedback)
 
         downloads = ui.downloads
         self.main_page = downloads.main_page
@@ -1571,6 +1541,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         *,
         tone: str = "neutral",
         title: str | None = None,
+        action: str | None = None,
     ) -> None:
         tone_value = (
             tone
@@ -1578,68 +1549,59 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             else "neutral"
         )
         message = str(text or "").strip()
-        toast_title = str(title or "").strip()
         self._status_presenter.last_source_feedback_log = self._last_source_feedback_log
         self._status_presenter.set_source_feedback(
-            text,
-            tone=tone_value,
-            append_log=self._append_log,
+            text, tone=tone_value, append_log=self._append_log,
         )
         self._last_source_feedback_log = self._status_presenter.last_source_feedback_log
         self._current_source_feedback_message = message
         self._current_source_feedback_tone = tone_value
-        self._current_source_feedback_title = toast_title
-        self._source_feedback_version += 1
-        self._dismissed_source_feedback_version = None
+        self._current_source_feedback_title = str(title or "").strip()
+        self._feedback_dismissed = False
+        self._feedback_action = action if action is not None else (
+            "details" if tone_value in {"warning", "error"} else ""
+        )
+        self._feedback_output_dir = (
+            self._post_download_output_dir if action == "folder" else None
+        )
+        self.feedback_message.setText(message)
+        self.feedback_message.setToolTip(message)
+        self.feedback_action_button.setText(
+            "Open folder" if action == "folder" else "View details"
+        )
+        self.feedback_action_button.setVisible(
+            bool(self._feedback_action)
+            and (action != "folder" or self._feedback_output_dir is not None)
+        )
+        self._set_widget_property(self.feedback_row, "tone", tone_value)
+        self._refresh_widget_style(self.feedback_message)
         self._sync_source_feedback_visibility()
 
-    def _can_show_floating_source_feedback_toast(self) -> bool:
-        return self.panel_stack.currentIndex() == self._main_page_index
-
-    def _source_feedback_should_clear_toasts(self, tone: str, message: str) -> bool:
-        return (
-            not bool(message)
-            or tone in {"", "neutral", "hidden"}
-            or not self._can_show_floating_source_feedback_toast()
-        )
-
-    def _source_feedback_uses_toast(self, tone: str, message: str) -> bool:
-        return (
-            bool(message)
-            and tone not in {"", "neutral", "hidden"}
-            and self._can_show_floating_source_feedback_toast()
-            and self._dismissed_source_feedback_version != self._source_feedback_version
-        )
-
     def _sync_source_feedback_visibility(self) -> None:
-        tone = self._current_source_feedback_tone
-        message = self._current_source_feedback_message
-        title = self._current_source_feedback_title
-        if self._source_feedback_should_clear_toasts(tone, message):
-            self._last_toasted_source_feedback_version = None
-            self._hide_source_feedback_toast(animated=False)
-        elif (
-            self._source_feedback_uses_toast(tone, message)
-            and self._last_toasted_source_feedback_version
-            != self._source_feedback_version
-        ):
-            self._show_source_feedback_toast(message, tone=tone, title=title)
-            self._last_toasted_source_feedback_version = self._source_feedback_version
-        elif self._source_feedback_toasts:
-            self._layout_source_feedback_toast()
+        visible = (
+            bool(self._current_source_feedback_message)
+            and self._current_source_feedback_tone in {"success", "warning", "error"}
+            and not self._feedback_dismissed
+            and self._active_panel_name != "logs"
+            and not self._is_downloading
+        )
+        self.feedback_row.setVisible(visible)
 
-    def _dismiss_source_feedback_toast(
-        self,
-        toast: _SourceFeedbackToastEntry | bool | None = None,
-    ) -> None:
-        entry = toast if isinstance(toast, _SourceFeedbackToastEntry) else None
-        if entry is None:
-            if not self._source_feedback_toasts:
-                return
-            entry = self._source_feedback_toasts[0]
-        if self._source_feedback_toasts and entry is self._source_feedback_toasts[0]:
-            self._dismissed_source_feedback_version = self._source_feedback_version
-        self._remove_source_feedback_toast(entry, animated=True)
+    def _dismiss_feedback(self) -> None:
+        self._feedback_dismissed = True
+        self._sync_source_feedback_visibility()
+
+    def _activate_feedback_action(self) -> None:
+        if self._feedback_action == "details":
+            self._open_panel("logs")
+        elif self._feedback_action == "folder" and self._feedback_output_dir is not None:
+            folder = self._feedback_output_dir
+            if folder.is_dir():
+                self._effects.desktop.open_path(folder)
+            else:
+                self._set_source_feedback(
+                    "Download folder is no longer available.", tone="error",
+                )
 
     def _set_metrics_visible(self, visible: bool) -> None:
         visibility_changed = self.metrics_card.isHidden() == visible
@@ -1880,7 +1842,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             if layout is not None:
                 layout.activate()
         self._layout_mixed_url_overlay()
-        self._layout_source_feedback_toast()
         self._refresh_current_item_text()
 
     def _sync_current_panel_geometry(self) -> None:
@@ -2181,339 +2142,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if should_show:
             self.mixed_url_overlay.raise_()
 
-    def _source_feedback_toast_timeout_ms(self, tone: str) -> int:
-        if tone == "loading":
-            return 2800
-        if tone == "success":
-            return 3400
-        if tone == "warning":
-            return 4600
-        if tone == "error":
-            return 5200
-        return 0
-
-    def _source_feedback_toast_title(self, tone: str) -> str:
-        if tone == "loading":
-            return "Loading formats"
-        if tone == "success":
-            return "Formats ready"
-        if tone == "warning":
-            return "Check source"
-        if tone == "error":
-            return "Could not load formats"
-        return APP_DISPLAY_NAME
-
-    def _source_feedback_toast_anchor_rect(self) -> QRect:
-        header = getattr(self, "top_actions", None)
-        header_widget = header.parentWidget() if header is not None else None
-        if header_widget is not None:
-            return header_widget.geometry()
-        return self.panel_stack.geometry()
-
-    def _source_feedback_toast_entry(
-        self,
-        parent: QWidget | None = None,
-    ) -> _SourceFeedbackToastEntry:
-        toast_parent = (
-            parent or self._source_feedback_toast_parent or self.centralWidget()
-        )
-        if toast_parent is None:
-            toast_parent = self
-        refs = build_source_feedback_toast(toast_parent)
-        timer = QTimer(refs.card)
-        timer.setSingleShot(True)
-        entry = _SourceFeedbackToastEntry(
-            card=refs.card,
-            title_label=refs.title_label,
-            message_label=refs.message_label,
-            dismiss_button=refs.dismiss_button,
-            timer=timer,
-        )
-        refs.dismiss_button.clicked.connect(
-            lambda checked=False, toast=entry: self._dismiss_source_feedback_toast(
-                toast
-            )
-        )
-        timer.timeout.connect(
-            lambda toast=entry: self._dismiss_source_feedback_toast(toast)
-        )
-        return entry
-
-    def _sync_source_feedback_toast_refs(self) -> None:
-        entry = (
-            self._source_feedback_toasts[0]
-            if self._source_feedback_toasts
-            else self._source_feedback_toast_placeholder
-        )
-        if entry is None:
-            return
-        self.source_feedback_toast = entry.card
-        self.source_feedback_toast_title = entry.title_label
-        self.source_feedback_toast_message = entry.message_label
-        self.source_feedback_toast_dismiss_button = entry.dismiss_button
-
-    def _source_feedback_toast_target_rects(
-        self,
-        toasts: list[_SourceFeedbackToastEntry] | None = None,
-    ) -> list[QRect]:
-        toast_items = list(
-            toasts if toasts is not None else self._source_feedback_toasts
-        )
-        if not toast_items:
-            return []
-        anchor_rect = self._source_feedback_toast_anchor_rect()
-        max_width = max(260, min(340, anchor_rect.width() - 36))
-        y = anchor_rect.top() + 18
-        rects: list[QRect] = []
-        for entry in toast_items:
-            entry.card.setMaximumWidth(max_width)
-            layout = entry.card.layout()
-            if layout is not None:
-                layout.activate()
-            entry.card.adjustSize()
-            hint = entry.card.sizeHint()
-            width = max(
-                entry.card.minimumWidth(),
-                min(max_width, hint.width()),
-            )
-            height = hint.height()
-            x = anchor_rect.right() - width - 18
-            rects.append(QRect(x, y, width, height))
-            y += height + 10
-        return rects
-
-    def _source_feedback_toast_target_rect(self) -> QRect:
-        rects = self._source_feedback_toast_target_rects(
-            self._source_feedback_toasts[:1]
-        )
-        return rects[0] if rects else QRect()
-
-    def _source_feedback_toast_hidden_rect(self, target: QRect) -> QRect:
-        anchor_rect = self._source_feedback_toast_anchor_rect()
-        return QRect(
-            anchor_rect.right() + 24,
-            target.y(),
-            target.width(),
-            target.height(),
-        )
-
-    def _stop_source_feedback_toast_animation(
-        self,
-        toast: _SourceFeedbackToastEntry,
-    ) -> None:
-        if toast.animation is None:
-            return
-        toast.animation.stop()
-        toast.animation.deleteLater()
-        toast.animation = None
-
-    def _complete_source_feedback_toast_animation(
-        self,
-        toast: _SourceFeedbackToastEntry,
-        animation: QPropertyAnimation,
-    ) -> None:
-        if toast.animation is animation:
-            toast.animation = None
-        animation.deleteLater()
-
-    def _dispose_source_feedback_toast(
-        self,
-        toast: _SourceFeedbackToastEntry,
-    ) -> None:
-        self._stop_source_feedback_toast_animation(toast)
-        if toast.timer is not None:
-            toast.timer.stop()
-            toast.timer.deleteLater()
-        toast.card.hide()
-        if not toast.placeholder:
-            toast.card.deleteLater()
-
-    def _complete_source_feedback_toast_exit(
-        self,
-        toast: _SourceFeedbackToastEntry,
-        animation: QPropertyAnimation,
-    ) -> None:
-        if toast.animation is animation:
-            toast.animation = None
-        animation.deleteLater()
-        self._dispose_source_feedback_toast(toast)
-
-    def _animate_source_feedback_toast(
-        self,
-        toast: _SourceFeedbackToastEntry,
-        *,
-        start_rect: QRect,
-        end_rect: QRect,
-        duration_ms: int,
-        easing_curve: QEasingCurve.Type,
-        delete_after: bool = False,
-    ) -> None:
-        self._stop_source_feedback_toast_animation(toast)
-        if start_rect == end_rect:
-            toast.card.setGeometry(end_rect)
-            if delete_after:
-                self._dispose_source_feedback_toast(toast)
-            return
-        anim = QPropertyAnimation(toast.card, b"geometry", self)
-        anim.setDuration(duration_ms)
-        anim.setStartValue(start_rect)
-        anim.setEndValue(end_rect)
-        anim.setEasingCurve(easing_curve)
-        if delete_after:
-            anim.finished.connect(
-                lambda toast=toast, animation=anim: self._complete_source_feedback_toast_exit(
-                    toast, animation
-                )
-            )
-        else:
-            anim.finished.connect(
-                lambda toast=toast, animation=anim: self._complete_source_feedback_toast_animation(
-                    toast, animation
-                )
-            )
-        toast.animation = anim
-        anim.start()
-
-    def _trim_source_feedback_toasts(self) -> None:
-        while len(self._source_feedback_toasts) > 4:
-            oldest = self._source_feedback_toasts.pop()
-            self._dispose_source_feedback_toast(oldest)
-
-    def _remove_source_feedback_toast(
-        self,
-        toast: _SourceFeedbackToastEntry,
-        *,
-        animated: bool,
-    ) -> None:
-        if toast not in self._source_feedback_toasts:
-            return
-        self._source_feedback_toasts.remove(toast)
-        current_rect = toast.card.geometry()
-        self._sync_source_feedback_toast_refs()
-        self._reflow_source_feedback_toasts(animated=animated)
-        if not animated or not toast.card.isVisible():
-            self._dispose_source_feedback_toast(toast)
-            return
-        self._animate_source_feedback_toast(
-            toast,
-            start_rect=current_rect,
-            end_rect=self._source_feedback_toast_hidden_rect(current_rect),
-            duration_ms=220,
-            easing_curve=QEasingCurve.Type.InCubic,
-            delete_after=True,
-        )
-
-    def _reflow_source_feedback_toasts(self, *, animated: bool) -> None:
-        if not self._source_feedback_toasts:
-            return
-        for toast, target in zip(
-            self._source_feedback_toasts,
-            self._source_feedback_toast_target_rects(),
-        ):
-            current = toast.card.geometry()
-            if not toast.card.isVisible():
-                current = self._source_feedback_toast_hidden_rect(target)
-                toast.card.setGeometry(current)
-                toast.card.show()
-            if animated:
-                self._animate_source_feedback_toast(
-                    toast,
-                    start_rect=current,
-                    end_rect=target,
-                    duration_ms=240,
-                    easing_curve=QEasingCurve.Type.OutCubic,
-                )
-            else:
-                self._stop_source_feedback_toast_animation(toast)
-                toast.card.setGeometry(target)
-        for toast in reversed(self._source_feedback_toasts):
-            toast.card.raise_()
-
-    def _layout_source_feedback_toast(self) -> None:
-        if not self._source_feedback_toasts:
-            return
-        self._reflow_source_feedback_toasts(animated=False)
-
-    def _show_source_feedback_toast(
-        self,
-        text: str,
-        *,
-        tone: str,
-        title: str | None = None,
-    ) -> None:
-        clean = str(text or "").strip()
-        if not clean:
-            self._hide_source_feedback_toast()
-            return
-        toast = self._source_feedback_toast_entry()
-        toast_title = str(title or "").strip() or self._source_feedback_toast_title(
-            tone
-        )
-        toast.title_label.setText(toast_title)
-        toast.message_label.setText(clean)
-        self._set_widget_property(toast.card, "tone", str(tone or "success"))
-        self._source_feedback_toasts.insert(0, toast)
-        self._trim_source_feedback_toasts()
-        self._sync_source_feedback_toast_refs()
-        targets = self._source_feedback_toast_target_rects()
-        for entry, target in zip(self._source_feedback_toasts, targets):
-            current = entry.card.geometry()
-            if entry is toast or not entry.card.isVisible():
-                current = self._source_feedback_toast_hidden_rect(target)
-            entry.card.setGeometry(current)
-            entry.card.show()
-            self._animate_source_feedback_toast(
-                entry,
-                start_rect=current,
-                end_rect=target,
-                duration_ms=280,
-                easing_curve=QEasingCurve.Type.OutCubic,
-            )
-        for entry in reversed(self._source_feedback_toasts):
-            entry.card.raise_()
-        timeout_ms = self._source_feedback_toast_timeout_ms(tone)
-        if timeout_ms > 0 and toast.timer is not None:
-            toast.timer.start(timeout_ms)
-
-    def _hide_source_feedback_toast(self, *, animated: bool = True) -> None:
-        if not self._source_feedback_toasts:
-            return
-        toasts = list(self._source_feedback_toasts)
-        self._source_feedback_toasts.clear()
-        self._sync_source_feedback_toast_refs()
-        for toast in toasts:
-            if not animated or not toast.card.isVisible():
-                self._dispose_source_feedback_toast(toast)
-                continue
-            current_rect = toast.card.geometry()
-            self._animate_source_feedback_toast(
-                toast,
-                start_rect=current_rect,
-                end_rect=self._source_feedback_toast_hidden_rect(current_rect),
-                duration_ms=220,
-                easing_curve=QEasingCurve.Type.InCubic,
-                delete_after=True,
-            )
-
-    def _visible_source_feedback_toasts(self) -> list[_SourceFeedbackToastEntry]:
-        return [
-            toast for toast in self._source_feedback_toasts if toast.card.isVisible()
-        ]
-
-    def _show_feedback_popup(
-        self, *, title: str, message: str, critical: bool = False
-    ) -> None:
-        clean_message = str(message or "").strip() or "Something went wrong."
-        detail = str(self._last_error_log or "").strip()
-        body = clean_message
-        if detail:
-            lower_body = clean_message.lower()
-            if detail.lower() not in lower_body:
-                body = f"{clean_message}\n\nDetails:\n{detail}"
-        if critical:
-            self._effects.dialogs.critical(self, title, body)
-            return
-        self._effects.dialogs.warning(self, title, body)
 
     def _set_playlist_items_visible(self, visible: bool) -> None:
         if bool(visible):
@@ -3186,6 +2814,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
 
         self._refresh_ready_summary()
         self._refresh_advanced_summary()
+        self._sync_source_feedback_visibility()
         self._sync_current_panel_geometry()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
@@ -3205,7 +2834,6 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._apply_responsive_layout()
         self._refresh_downloads_page_geometry()
         self._layout_mixed_url_overlay()
-        self._layout_source_feedback_toast()
         self._refresh_current_item_text()
         if self._is_downloading:
             self._set_metrics_visible(True)

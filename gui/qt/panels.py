@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +27,7 @@ from ..app_meta import (
 from .widgets import (
     ButtonSpec,
     CheckBoxSpec,
+    ElidedLabel,
     LabelSpec,
     LayoutConfig,
     NativeComboBoxConfig,
@@ -55,6 +56,7 @@ class SettingsPanelRefs:
     yt_dlp_update_progress_bar: QProgressBar
     yt_dlp_update_status_label: QLabel
     yt_dlp_update_detail_label: QLabel
+    yt_dlp_update_details_button: QPushButton
     export_diagnostics_button: QPushButton
     view_logs_button: QPushButton
 
@@ -79,7 +81,7 @@ class LogsPanelRefs:
     logs_view: QPlainTextEdit
     export_logs_button: QPushButton
     logs_clear_button: QPushButton
-    back_button: QPushButton
+    back_button: QToolButton
 
 
 @dataclass(frozen=True)
@@ -336,6 +338,7 @@ def build_settings_panel(
     register_native_combo: Callable[[_NativeComboBox], None],
     on_update_yt_dlp: Callable[[], None],
     on_export_diagnostics: Callable[[], None],
+    on_view_logs: Callable[[], None],
 ) -> SettingsPanelRefs:
     shell = _build_panel_shell(
         parent=parent,
@@ -423,17 +426,27 @@ def build_settings_panel(
         update_status,
         spec=LabelSpec(widget_config=WidgetConfig(object_name="updateStatusLabel")),
     )
-    update_detail_label = build_label(
+    update_detail_label = ElidedLabel(update_status)
+    update_detail_label.setObjectName("updateDetailLabel")
+    update_detail_label.setProperty("allowToolTip", True)
+    update_heading = build_hbox(
         update_status,
-        spec=LabelSpec(widget_config=WidgetConfig(object_name="updateDetailLabel")),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
     )
+    update_details_button = build_button(update_heading.widget, spec=ButtonSpec(
+        text="View details", object_name="feedbackActionButton", on_click=on_view_logs,
+        fixed_height=24,
+    ))
+    update_details_button.hide()
+    update_heading.layout.addWidget(update_status_label, 1)
+    update_heading.layout.addWidget(update_details_button)
     update_progress_bar = QProgressBar(update_status)
     update_progress_bar.setObjectName("updateProgressBar")
     update_progress_bar.setAccessibleName("yt-dlp update progress")
     update_progress_bar.setTextVisible(False)
     update_progress_bar.setRange(0, 100)
     update_progress_bar.setValue(0)
-    update_status_shell.layout.addWidget(update_status_label)
+    update_status_shell.layout.addWidget(update_heading.widget)
     update_status_shell.layout.addWidget(update_progress_bar)
     update_status_shell.layout.addWidget(update_detail_label)
     engine_card.layout.addWidget(update_status)
@@ -514,6 +527,7 @@ def build_settings_panel(
         yt_dlp_update_progress_bar=update_progress_bar,
         yt_dlp_update_status_label=update_status_label,
         yt_dlp_update_detail_label=update_detail_label,
+        yt_dlp_update_details_button=update_details_button,
         export_diagnostics_button=export_diagnostics_button,
         view_logs_button=view_logs_button,
     )
@@ -606,13 +620,12 @@ def build_logs_panel(
         title="Activity Log",
         framed=False,
     )
-    back_button = build_button(
-        shell.panel,
-        spec=ButtonSpec(
-            text="Preferences", object_name="ghostButton", on_click=on_back,
-        ),
-    )
-    back_button.setIcon(back_button.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack))
+    back_button = QToolButton(shell.panel)
+    back_button.setObjectName("panelBackButton")
+    back_button.setText("Preferences")
+    back_button.setArrowType(Qt.ArrowType.LeftArrow)
+    back_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    back_button.clicked.connect(on_back)
     back_button.setAccessibleName("Back to Preferences")
     shell.panel.layout().insertWidget(0, back_button, alignment=Qt.AlignmentFlag.AlignLeft)
 

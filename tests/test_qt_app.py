@@ -30,6 +30,7 @@ try:
         QStyle,
         QStyleFactory,
         QStyleOptionComboBox,
+        QToolButton,
         QWidget,
     )
 
@@ -121,6 +122,7 @@ class TestQtApp(unittest.TestCase):
         scan_types = (
             QLabel,
             QPushButton,
+            QToolButton,
             QCheckBox,
             QRadioButton,
             QComboBox,
@@ -142,7 +144,7 @@ class TestQtApp(unittest.TestCase):
                         widget.minimumSizeHint().height(),
                         f"{label}: {widget.objectName() or type(widget).__name__} is vertically clipped",
                     )
-                    if isinstance(widget, (QPushButton, QCheckBox, QRadioButton)):
+                    if isinstance(widget, (QPushButton, QToolButton, QCheckBox, QRadioButton)):
                         self.assertGreaterEqual(
                             widget.geometry().width(),
                             widget.minimumSizeHint().width(),
@@ -480,6 +482,8 @@ class TestQtApp(unittest.TestCase):
         self._load_ready_preview_with_formats()
         self.window.show()
         self.assertTrue(self.window.advanced_summary.isHidden())
+        QApplication.processEvents()
+        toggle_left = self.window.advanced_toggle.geometry().left()
         QTest.mouseClick(self.window.advanced_toggle, Qt.MouseButton.LeftButton)
         self.window.container_combo.setCurrentIndex(self.window.container_combo.findData("webm"))
         self.window.codec_combo.setCurrentIndex(self.window.codec_combo.findData("av01"))
@@ -494,6 +498,7 @@ class TestQtApp(unittest.TestCase):
         self.assertIn("AV1", self.window.advanced_summary.toolTip())
         self.assertIn("custom-name", self.window.advanced_summary.toolTip())
         self.assertTrue(self.window.advanced_summary.isVisible())
+        self.assertEqual(self.window.advanced_toggle.geometry().left(), toggle_left)
 
     def test_analysis_selects_defaults_without_opening_advanced(self) -> None:
         for mode in ("video", "audio"):
@@ -1311,256 +1316,120 @@ class TestQtApp(unittest.TestCase):
             [f"[source][loading] {message}", f"[source][loading] {message}"],
         )
 
-    def test_source_feedback_visibility_tracks_current_tone(self) -> None:
+    def test_feedback_visibility_tracks_tone_without_loading_notifications(self) -> None:
         self.window.show()
-        QApplication.processEvents()
+        for tone in ("neutral", "loading", "hidden", "success", "warning", "error"):
+            with self.subTest(tone=tone):
+                self.window._set_source_feedback("Current status", tone=tone)
+                QApplication.processEvents()
+                self.assertEqual(self.window.feedback_row.isVisible(), tone in {"success", "warning", "error"})
+                self.assertEqual(self.window.feedback_action_button.isHidden(), tone not in {"warning", "error"})
 
-        loading_message = "Loading available formats..."
-        self.window._set_source_feedback(
-            loading_message,
-            tone="loading",
-        )
-        QApplication.processEvents()
-        QTest.qWait(350)
-        QApplication.processEvents()
-        self.assertTrue(self.window.source_feedback_toast.isVisible())
-        self.assertEqual(
-            self.window.source_feedback_toast_message.text(), loading_message
-        )
-        self.assertEqual(
-            self.window.source_feedback_toast_title.text(), "Loading formats"
-        )
-        self.assertEqual(len(self.window._visible_source_feedback_toasts()), 1)
-
-        message = "Formats are ready. Choose options and start the download."
-        self.window._set_source_feedback(
-            message,
-            tone="success",
-        )
-        QApplication.processEvents()
-        QTest.qWait(350)
-        QApplication.processEvents()
-        self.assertTrue(self.window.source_feedback_toast.isVisible())
-        self.assertEqual(self.window.source_feedback_toast_message.text(), message)
-        self.assertEqual(
-            self.window.source_feedback_toast_title.text(), "Formats ready"
-        )
-        self.assertEqual(
-            [
-                toast.title_label.text()
-                for toast in self.window._visible_source_feedback_toasts()
-            ],
-            ["Formats ready", "Loading formats"],
-        )
-
-        self.window._set_source_feedback(
-            "URL ready. Click Analyze URL to load formats and preview details.",
-            tone="neutral",
-        )
-        QApplication.processEvents()
-        self.assertFalse(self.window.source_feedback_toast.isVisible())
-        self.assertEqual(len(self.window._visible_source_feedback_toasts()), 0)
-
-        self.window._set_source_feedback("", tone="hidden")
-        self.window._apply_responsive_layout()
-        QApplication.processEvents()
-        self.assertFalse(self.window.source_feedback_toast.isVisible())
-
-    def test_source_feedback_toasts_stack_newest_first(self) -> None:
+    def test_new_feedback_replaces_previous_message_without_stacking(self) -> None:
         self.window.show()
-        self.window.resize(1220, 820)
+        for message in ("First message", "Second message", "Latest message"):
+            self.window._set_source_feedback(message, tone="success")
         QApplication.processEvents()
+        self.assertEqual(self.window.feedback_message.text(), "Latest message")
+        self.assertEqual(len(self.window.findChildren(QWidget, "feedbackRow")), 1)
+        self.assertEqual(self.window.findChildren(QFrame, "sourceToastCard"), [])
 
-        loading_message = "Loading available formats..."
-        ready_message = "Formats are ready. Choose options and start the download."
-        self.window._set_source_feedback(loading_message, tone="loading")
-        QApplication.processEvents()
-        QTest.qWait(350)
-        QApplication.processEvents()
-
-        self.window._set_source_feedback(ready_message, tone="success")
-        QApplication.processEvents()
-        QTest.qWait(350)
-        QApplication.processEvents()
-
-        toasts = self.window._visible_source_feedback_toasts()
-        self.assertEqual(len(toasts), 2)
-        self.assertEqual(
-            [toast.title_label.text() for toast in toasts],
-            ["Formats ready", "Loading formats"],
-        )
-        self.assertEqual(
-            [toast.message_label.text() for toast in toasts],
-            [ready_message, loading_message],
-        )
-        self.assertLess(
-            toasts[0].card.geometry().top(), toasts[1].card.geometry().top()
-        )
-
-    def test_source_feedback_loading_uses_toast_on_narrow_layouts(self) -> None:
+    def test_feedback_fits_minimum_window_without_overlaying_controls(self) -> None:
+        self._load_ready_preview_with_formats()
+        self.window.advanced_toggle.setChecked(True)
+        self.window.resize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.window.show()
-        self.window.resize(900, 800)
+        message = "A detailed failure: " + "long-error-token" * 100
+        self.window._set_source_feedback(message, tone="error")
         QApplication.processEvents()
+        self.assertEqual(self.window.width(), MIN_WINDOW_WIDTH)
+        self.assertEqual(self.window.height(), MIN_WINDOW_HEIGHT)
+        self.assertTrue(self.window.centralWidget().rect().contains(self.window.feedback_row.geometry()))
+        self.assertGreater(self.window.feedback_row.geometry().top(), self.window.panel_stack.geometry().bottom())
+        self.assertGreater(self.window.feedback_row.mapToGlobal(QPoint()).y(), self.window.start_button.mapToGlobal(self.window.start_button.rect().bottomLeft()).y())
+        self.assertEqual(self.window.feedback_message.toolTip(), message)
+        self.assertLessEqual(self.window.feedback_message.fontMetrics().horizontalAdvance(self.window.feedback_message.text()), self.window.feedback_message.width())
 
-        message = "Loading available formats..."
-        self.window._set_source_feedback(message, tone="loading")
-        QApplication.processEvents()
-        QTest.qWait(350)
-        QApplication.processEvents()
-
-        self.assertTrue(self.window.source_feedback_toast.isVisible())
-        self.assertEqual(self.window.source_feedback_toast_message.text(), message)
-        self.assertEqual(
-            self.window.source_feedback_toast_title.text(), "Loading formats"
-        )
-
-    def test_source_feedback_success_toast_stays_top_right_above_tab_bar_without_shifting_content(
-        self,
-    ) -> None:
+    def test_feedback_persists_across_queue_and_diagnostics_navigation(self) -> None:
         self.window.show()
-        self.window.resize(1220, 820)
+        self.window._set_source_feedback("Download complete.", tone="success")
+        self.window.queue_button.click()
         QApplication.processEvents()
+        self.assertTrue(self.window.feedback_row.isVisible())
+        self.window._open_panel("logs")
+        self.assertFalse(self.window.feedback_row.isVisible())
+        self.window.downloads_button.click()
+        self.assertTrue(self.window.feedback_row.isVisible())
 
-        before_row_y = self.window.source_row.geometry().y()
-        root = self.window.centralWidget()
-        self.assertIsNotNone(root)
-        assert root is not None
-        root_rect = root.rect()
-        panel_rect = self.window.panel_stack.geometry()
-
-        self.window._set_source_feedback(
-            "Formats are ready. Choose options and start the download.",
-            tone="success",
-        )
-        QApplication.processEvents()
-        QTest.qWait(350)
-        QApplication.processEvents()
-        target_rect = self.window._source_feedback_toast_target_rect()
-        toast_rect = self.window.source_feedback_toast.geometry()
-
-        self.assertEqual(self.window.source_row.geometry().y(), before_row_y)
-        self.assertTrue(self.window.source_feedback_toast.isVisible())
-        self.assertEqual(toast_rect, target_rect)
-        self.assertTrue(root_rect.contains(toast_rect))
-        self.assertGreater(toast_rect.left(), panel_rect.center().x())
-        self.assertLess(toast_rect.top(), panel_rect.top())
-
-    def test_source_feedback_toast_hides_on_secondary_panels_and_reappears_on_downloads(
-        self,
-    ) -> None:
+    def test_feedback_stays_until_dismissed_or_replaced(self) -> None:
         self.window.show()
-        self.window.resize(1220, 820)
-        QApplication.processEvents()
+        self.window._set_source_feedback("Download complete.", tone="success")
+        QTest.qWait(80)
+        self.assertTrue(self.window.feedback_row.isVisible())
+        self.window.feedback_dismiss_button.setFocus()
+        QTest.keyClick(self.window.feedback_dismiss_button, Qt.Key.Key_Space)
+        self.window.queue_button.click()
+        self.window.downloads_button.click()
+        self.assertFalse(self.window.feedback_row.isVisible())
+        self.window._set_source_feedback("Another download complete.", tone="success")
+        self.assertTrue(self.window.feedback_row.isVisible())
 
-        with patch.object(
-            self.window, "_source_feedback_toast_timeout_ms", return_value=0
-        ):
-            self.window._set_source_feedback(
-                "Formats are ready. Choose options and start the download.",
-                tone="success",
-            )
-            QApplication.processEvents()
-            QTest.qWait(350)
-            QApplication.processEvents()
+    def test_completion_opens_captured_folder_not_current_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            self.window.show()
+            self.window._set_post_download_output_dir(folder)
+            with patch.object(self.window._effects.desktop, "open_path", return_value=None) as open_path:
+                self.window._on_download_done(download.DOWNLOAD_SUCCESS)
+                self.window._set_output_dir_text("/tmp/another-destination")
+                self.window._set_post_download_output_dir(Path("/tmp/new-run"))
+                QApplication.processEvents()
+                self.assertEqual(self.window.feedback_message.text(), "Download complete.")
+                self.assertEqual(self.window.feedback_action_button.text(), "Open folder")
+                self.assertTrue(self.window.feedback_action_button.isVisible())
+                open_path.assert_not_called()
+                self.window.feedback_action_button.click()
+                open_path.assert_called_once_with(folder)
+                self.assertEqual(self.window._current_source_feedback_tone, "success")
 
-            self.assertTrue(self.window.source_feedback_toast.isVisible())
+    def test_completion_handles_removed_folder_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "removed"
+            self.window._set_post_download_output_dir(folder)
+            self.window._on_download_done(download.DOWNLOAD_SUCCESS)
+            with patch.object(self.window._effects.desktop, "open_path") as open_path:
+                self.window.feedback_action_button.click()
+                open_path.assert_not_called()
+            self.assertEqual(self.window._current_source_feedback_tone, "error")
+            self.assertIn("no longer available", self.window.feedback_message.toolTip())
 
-            self.window.queue_button.click()
-            QApplication.processEvents()
-
-            self.assertFalse(self.window.source_feedback_toast.isVisible())
-
-            self.window.downloads_button.click()
-            QApplication.processEvents()
-            QTest.qWait(350)
-            QApplication.processEvents()
-
-            self.assertTrue(self.window.source_feedback_toast.isVisible())
-            root = self.window.centralWidget()
-            self.assertIsNotNone(root)
-            assert root is not None
-            self.assertTrue(
-                root.rect().contains(self.window.source_feedback_toast.geometry())
-            )
-
-    def test_source_feedback_success_toast_auto_hides_after_timeout(self) -> None:
+    def test_download_failure_has_inline_details_without_modal_dialog(self) -> None:
         self.window.show()
-        self.window.resize(1220, 820)
-        QApplication.processEvents()
+        self.window._append_log("[error] HTTP Error 403: Forbidden")
+        with patch.object(self.window._effects.dialogs, "critical") as critical, patch.object(self.window._effects.dialogs, "warning") as warning:
+            self.window._on_download_done(download.DOWNLOAD_ERROR)
+            critical.assert_not_called()
+            warning.assert_not_called()
+        self.assertTrue(self.window.feedback_row.isVisible())
+        self.assertEqual(self.window.feedback_action_button.text(), "View details")
+        self.window.feedback_action_button.click()
+        self.assertEqual(self.window._active_panel_name, "logs")
+        self.assertIn("403", self.window.logs_view.toPlainText())
+        self.assertTrue(self.window.settings_button.isChecked())
 
-        with patch.object(
-            self.window, "_source_feedback_toast_timeout_ms", return_value=40
-        ):
-            self.window._set_source_feedback(
-                "Formats are ready. Choose options and start the download.",
-                tone="success",
-            )
-            QApplication.processEvents()
-            self.assertTrue(self.window.source_feedback_toast.isVisible())
-
-            QTest.qWait(700)
-            QApplication.processEvents()
-
-        self.assertFalse(self.window.source_feedback_toast.isVisible())
-
-    def test_source_feedback_success_toast_can_be_dismissed_manually(self) -> None:
+    def test_cancelled_download_does_not_offer_folder_or_error_details(self) -> None:
         self.window.show()
-        self.window.resize(1220, 820)
-        QApplication.processEvents()
+        self.window._set_post_download_output_dir(Path("/tmp/old-download"))
+        self.window._on_download_done(download.DOWNLOAD_CANCELLED)
+        self.assertEqual(self.window.feedback_message.text(), "Download cancelled.")
+        self.assertTrue(self.window.feedback_action_button.isHidden())
+        self.assertIsNone(self.window._feedback_output_dir)
 
-        with patch.object(
-            self.window, "_source_feedback_toast_timeout_ms", return_value=0
-        ):
-            self.window._set_source_feedback(
-                "Formats are ready. Choose options and start the download.",
-                tone="success",
-            )
-            QApplication.processEvents()
-            QTest.qWait(350)
-            QApplication.processEvents()
-
-            self.assertTrue(self.window.source_feedback_toast.isVisible())
-            self.assertTrue(
-                self.window.source_feedback_toast_dismiss_button.isVisible()
-            )
-
-            QTest.mouseClick(
-                self.window.source_feedback_toast_dismiss_button,
-                Qt.MouseButton.LeftButton,
-            )
-            QApplication.processEvents()
-            QTest.qWait(300)
-            QApplication.processEvents()
-            self.window._apply_responsive_layout()
-            QApplication.processEvents()
-
-        self.assertFalse(self.window.source_feedback_toast.isVisible())
-
-    def test_source_feedback_uses_custom_toast_title_when_provided(self) -> None:
-        self.window.show()
-        self.window.resize(1220, 820)
-        QApplication.processEvents()
-
-        with patch.object(
-            self.window, "_source_feedback_toast_timeout_ms", return_value=0
-        ):
-            self.window._set_source_feedback(
-                "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
-                tone="success",
-                title="Added to queue",
-            )
-            QApplication.processEvents()
-            QTest.qWait(350)
-            QApplication.processEvents()
-
-        self.assertTrue(self.window.source_feedback_toast.isVisible())
-        self.assertEqual(
-            self.window.source_feedback_toast_title.text(), "Added to queue"
-        )
-        self.assertEqual(
-            self.window.source_feedback_toast_message.text(),
-            "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
-        )
+    def test_formats_ready_uses_one_logged_message(self) -> None:
+        self._load_ready_preview_with_formats()
+        self.assertEqual(self.window.feedback_message.toolTip(), "Formats ready.")
+        self.assertFalse(any(line == "[status] Formats loaded" for line in self.window._log_lines))
+        self.assertEqual(sum("Formats ready." in line for line in self.window._log_lines), 1)
 
     def test_about_dialog_uses_app_metadata(self) -> None:
         with patch.object(self.window._effects.dialogs, "information") as info_mock:
@@ -3290,11 +3159,9 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.yt_dlp_update_button.text(), "Update yt-dlp")
         self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 100)
         self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update complete")
-        information.assert_called_once_with(
-            self.window,
-            "yt-dlp update",
-            "yt-dlp updated to 2026.09.01.",
-        )
+        information.assert_not_called()
+        self.assertEqual(self.window.yt_dlp_update_detail_label.toolTip(), result.message)
+        self.assertTrue(self.window.yt_dlp_update_details_button.isHidden())
 
     def test_update_progress_shows_real_download_percentage_and_eta(self) -> None:
         self.window._yt_dlp_update_in_progress = True
@@ -3302,7 +3169,7 @@ class TestQtApp(unittest.TestCase):
             "downloading", 5 * 1024**2, 10 * 1024**2, 5,
         ))
         self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 50)
-        detail = self.window.yt_dlp_update_detail_label.text()
+        detail = self.window.yt_dlp_update_detail_label.toolTip()
         self.assertIn("50% downloaded", detail)
         self.assertIn("5.0 MiB of 10.0 MiB", detail)
         self.assertIn("1.0 MiB/s", detail)
@@ -3314,30 +3181,37 @@ class TestQtApp(unittest.TestCase):
             "downloading", 1024**2, None, 2,
         ))
         self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
-        self.assertIn("1.0 MiB downloaded", self.window.yt_dlp_update_detail_label.text())
-        self.assertNotIn("left", self.window.yt_dlp_update_detail_label.text())
+        self.assertIn("1.0 MiB downloaded", self.window.yt_dlp_update_detail_label.toolTip())
+        self.assertNotIn("left", self.window.yt_dlp_update_detail_label.toolTip())
         for stage in ("checking", "verifying", "licenses", "installing"):
             with self.subTest(stage=stage):
                 self.window._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress(stage))
                 self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
-                self.assertNotIn("MiB", self.window.yt_dlp_update_detail_label.text())
+                self.assertNotIn("MiB", self.window.yt_dlp_update_detail_label.toolTip())
 
     def test_failed_update_stops_loading_and_retry_resets_progress(self) -> None:
         result = yt_dlp_binary.YtDlpUpdateResult(False, False, "2026.08.19", "Network unavailable")
         self.window._yt_dlp_update_in_progress = True
-        with patch.object(self.window._effects.dialogs, "critical"):
+        with patch.object(self.window._effects.dialogs, "critical") as critical:
             self.window._on_yt_dlp_update_done(result)
+            critical.assert_not_called()
         self.assertFalse(self.window._yt_dlp_update_in_progress)
         self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 100)
         self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 0)
         self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update failed")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
+        self.assertFalse(self.window.yt_dlp_update_details_button.isHidden())
+        self.assertEqual(self.window.yt_dlp_update_detail_label.toolTip(), "Network unavailable")
+        self.window.yt_dlp_update_details_button.click()
+        self.assertEqual(self.window._active_panel_name, "logs")
+        self.assertIn("Network unavailable", self.window.logs_view.toPlainText())
         self.window._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress("installing"))
         self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Update failed")
         with patch.object(self.window._effects.worker_executor, "submit"):
             self.window._update_yt_dlp()
         self.assertEqual(self.window.yt_dlp_update_progress_bar.maximum(), 0)
         self.assertEqual(self.window.yt_dlp_update_status_label.text(), "Checking for yt-dlp updates...")
+        self.assertTrue(self.window.yt_dlp_update_details_button.isHidden())
 
     def test_update_worker_forwards_progress_and_completion(self) -> None:
         progress_events = []
@@ -3492,7 +3366,7 @@ class TestQtApp(unittest.TestCase):
         self.window._is_fetching = True
         self.window._set_preview_title("Existing title")
 
-        with patch.object(self.window, "_show_feedback_popup"):
+        with patch.object(self.window._effects.dialogs, "warning") as warning:
             self.window._on_formats_loaded(
                 request_id=42,
                 url=url,
@@ -3500,6 +3374,7 @@ class TestQtApp(unittest.TestCase):
                 error=True,
                 is_playlist=False,
             )
+            warning.assert_not_called()
 
         self.assertFalse(self.window._is_fetching)
         self.assertTrue(
@@ -3679,22 +3554,13 @@ class TestQtApp(unittest.TestCase):
         QApplication.processEvents()
         self.assertTrue(self.window.add_queue_button.isEnabled())
 
-        with patch.object(
-            self.window, "_source_feedback_toast_timeout_ms", return_value=0
-        ):
-            QTest.mouseClick(self.window.add_queue_button, Qt.MouseButton.LeftButton)
-            QApplication.processEvents()
-            QTest.qWait(350)
-            QApplication.processEvents()
+        QTest.mouseClick(self.window.add_queue_button, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
 
         self.assertEqual(len(self.window.queue_items), 2)
         self.assertEqual(self.window.status_value.text(), "Added to queue as item 2")
         self.assertEqual(
-            self.window.source_feedback_toast_title.text(), "Added to queue"
-        )
-        self.assertEqual(
-            self.window.source_feedback_toast_message.text(),
-            "Saved as queue item 2. Queue now has 2 items. Open Queue to review, or press Download to start it.",
+            self.window.feedback_message.text(), "Added to queue as item 2",
         )
 
     def test_playlist_tooltip_explains_why_queue_add_is_disabled(self) -> None:
@@ -3945,7 +3811,7 @@ class TestQtApp(unittest.TestCase):
         self.window.show()
         QApplication.processEvents()
         for result in (download.DOWNLOAD_SUCCESS, download.DOWNLOAD_CANCELLED, download.DOWNLOAD_ERROR):
-            with self.subTest(result=result), patch.object(self.window, "_show_feedback_popup"):
+            with self.subTest(result=result):
                 self.window._is_downloading = True
                 self.window._set_metrics_visible(True)
                 self.window._update_controls_state()

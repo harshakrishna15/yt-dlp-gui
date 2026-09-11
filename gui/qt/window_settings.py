@@ -52,6 +52,7 @@ class WindowSettingsMixin:
             register_native_combo=self._register_native_combo,
             on_update_yt_dlp=self._update_yt_dlp,
             on_export_diagnostics=self._export_diagnostics,
+            on_view_logs=lambda: self._open_panel("logs"),
         )
         self.edit_friendly_encoder_combo = refs.edit_friendly_encoder_combo
         self.open_folder_after_download_check = refs.open_folder_after_download_check
@@ -61,6 +62,7 @@ class WindowSettingsMixin:
         self.yt_dlp_update_progress_bar = refs.yt_dlp_update_progress_bar
         self.yt_dlp_update_status_label = refs.yt_dlp_update_status_label
         self.yt_dlp_update_detail_label = refs.yt_dlp_update_detail_label
+        self.yt_dlp_update_details_button = refs.yt_dlp_update_details_button
         self.export_diagnostics_button = refs.export_diagnostics_button
         self.logs_button = refs.view_logs_button
         self._refresh_yt_dlp_version()
@@ -237,6 +239,8 @@ class WindowSettingsMixin:
             )
             return
         self._yt_dlp_update_in_progress = True
+        self.yt_dlp_update_details_button.hide()
+        self.yt_dlp_update_detail_label.setToolTip("")
         self.yt_dlp_update_button.setText("Updating...")
         self.yt_dlp_update_button.setEnabled(False)
         self._on_yt_dlp_update_progress(yt_dlp_release.YtDlpUpdateProgress("checking"))
@@ -281,7 +285,7 @@ class WindowSettingsMixin:
         bar = self.yt_dlp_update_progress_bar
         if progress.stage != "downloading":
             bar.setRange(0, 0)
-            self.yt_dlp_update_detail_label.setText("Please keep the app open.")
+            self.yt_dlp_update_detail_label.setText("")
             return
         details = []
         received = humanize_bytes(progress.downloaded_bytes) or "0 B"
@@ -325,25 +329,12 @@ class WindowSettingsMixin:
             "Update complete" if result.success and result.changed
             else "Already up to date" if result.success else "Update failed"
         )
-        self.yt_dlp_update_detail_label.setText(
-            f"yt-dlp {result.version} is ready." if result.success
-            else "You can retry the update. See the error message for details."
-        )
+        self.yt_dlp_update_detail_label.setText(result.message)
+        self.yt_dlp_update_detail_label.setToolTip(result.message)
+        self.yt_dlp_update_details_button.setVisible(not result.success)
         self._append_log(f"[update] {result.message}")
-        self._set_status("yt-dlp updated" if result.success else "yt-dlp update failed")
+        self._set_status("yt-dlp updated" if result.success else "yt-dlp update failed", log=False)
         self._update_controls_state()
-        if result.success:
-            self._effects.dialogs.information(
-                self,
-                "yt-dlp update",
-                result.message,
-            )
-        else:
-            self._effects.dialogs.critical(
-                self,
-                "yt-dlp update failed",
-                result.message,
-            )
 
     def _maybe_open_output_folder(self: "QtYtDlpGui") -> None:
         if not self.open_folder_after_download_check.isChecked():
