@@ -104,6 +104,12 @@ class TestQtApp(unittest.TestCase):
         self.window._refresh_queue_panel()
         self.assertTrue(self.window.queue_retry_button.isEnabled())
         self.assertIn("Completed", self.window.queue_list.item(0).data(QUEUE_META_ROLE))
+        self.window._is_fetching = True
+        self.window._update_controls_state()
+        self.assertFalse(self.window.queue_retry_button.isEnabled())
+        self.window._is_fetching = False
+        self.window._update_controls_state()
+        self.assertTrue(self.window.queue_retry_button.isEnabled())
         self.window.queue_items[1]["status"] = "completed"
         self.window._refresh_queue_panel()
         self.assertFalse(self.window.queue_retry_button.isEnabled())

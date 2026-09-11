@@ -2886,6 +2886,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if hasattr(self, "yt_dlp_update_button"):
             self._sync_yt_dlp_update_button()
         self.remove_app_data_button.setEnabled(self._app_data_cleanup_allowed())
+        self._refresh_queue_panel_state()
 
         self._refresh_ready_summary()
         self._refresh_advanced_summary()
