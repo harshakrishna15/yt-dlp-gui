@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 
 class WindowFeedbackMixin:
     def _set_metric_label_text(self: "QtYtDlpGui", label, text: str) -> None:
+        if label.text() == text:
+            return
         label.setText(text)
-        label.updateGeometry()
 
     def _set_post_download_output_dir(
         self: "QtYtDlpGui", output_path: Path
@@ -127,15 +128,45 @@ class WindowFeedbackMixin:
         error_text = core_error_feedback.error_text_from_log(clean)
         if error_text:
             self._last_error_log = error_text
+        was_empty = not self._log_lines
         self._log_lines.append(clean)
         if len(self._log_lines) > LOG_MAX_LINES:
             self._log_lines = self._log_lines[-LOG_MAX_LINES:]
-        self.logs_view.appendPlainText(clean)
-        self._refresh_logs_panel_state()
+        if self._active_panel_name != "logs":
+            self._logs_view_dirty = True
+            self._pending_log_lines.clear()
+        else:
+            self._pending_log_lines.append(clean)
+            if len(self._pending_log_lines) > LOG_MAX_LINES:
+                self._pending_log_lines = self._pending_log_lines[-LOG_MAX_LINES:]
+            if error_text:
+                self._flush_log_updates()
+            elif not self._log_update_timer.isActive():
+                self._log_update_timer.start()
+        if was_empty:
+            self._refresh_logs_panel_state()
         if self._active_panel_name != "logs" and self._is_attention_log(clean):
             self._set_logs_alert(True)
 
+    def _flush_log_updates(self: "QtYtDlpGui") -> None:
+        self._log_update_timer.stop()
+        if self._active_panel_name != "logs":
+            return
+        scrollbar = self.logs_view.verticalScrollBar()
+        position = scrollbar.value()
+        follow_tail = position >= scrollbar.maximum()
+        if self._logs_view_dirty:
+            self.logs_view.setPlainText("\n".join(self._log_lines))
+        elif self._pending_log_lines:
+            self.logs_view.appendPlainText("\n".join(self._pending_log_lines))
+        self._logs_view_dirty = False
+        self._pending_log_lines.clear()
+        scrollbar.setValue(scrollbar.maximum() if follow_tail else position)
+
     def _clear_logs(self: "QtYtDlpGui") -> None:
+        self._log_update_timer.stop()
+        self._pending_log_lines.clear()
+        self._logs_view_dirty = False
         self._log_lines.clear()
         self._last_error_log = ""
         self._status_presenter.last_source_feedback_log = None
@@ -227,6 +258,7 @@ class WindowFeedbackMixin:
         self._set_metric_label_text(self.eta_label, "ETA: -")
 
     def _reset_progress_summary(self: "QtYtDlpGui") -> None:
+        self._discard_pending_progress()
         self._stop_progress_animation()
         self.progress_bar.setValue(0)
         self._set_metric_label_text(self.progress_label, "Progress: -")
@@ -234,6 +266,29 @@ class WindowFeedbackMixin:
         self._set_metric_label_text(self.eta_label, "ETA: -")
         self._set_current_item_display(progress="-", title="-")
         self._set_metrics_visible(False)
+
+    def _discard_pending_progress(self: "QtYtDlpGui") -> None:
+        self._progress_update_timer.stop()
+        self._pending_progress = None
+
+    def _flush_progress_updates(self: "QtYtDlpGui") -> None:
+        payload = self._pending_progress
+        self._discard_pending_progress()
+        if payload is not None:
+            self._on_progress_update(payload)
+
+    def _queue_progress_update(self: "QtYtDlpGui", payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        if payload.get("status") == "downloading":
+            if self._cancel_requested:
+                return
+            self._pending_progress = dict(payload)
+            if not self._progress_update_timer.isActive():
+                self._progress_update_timer.start()
+        else:
+            self._flush_progress_updates()
+            self._on_progress_update(payload)
 
     def _on_progress_update(self: "QtYtDlpGui", payload: object) -> None:
         if not isinstance(payload, dict):

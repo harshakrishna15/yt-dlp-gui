@@ -229,7 +229,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 request_id, url, text
             )
         )
-        self._signals.progress.connect(self._on_progress_update)
+        self._signals.progress.connect(self._queue_progress_update)
         self._signals.log.connect(self._append_log)
         self._signals.download_done.connect(self._on_download_done)
         self._signals.queue_item_done.connect(self._on_queue_item_done)
@@ -243,6 +243,15 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self._analysis_timer = QTimer(self)
         self._analysis_timer.setInterval(500)
         self._analysis_timer.timeout.connect(self._update_analysis_elapsed)
+        self._progress_update_timer = QTimer(self)
+        self._progress_update_timer.setInterval(100)
+        self._progress_update_timer.setSingleShot(True)
+        self._progress_update_timer.timeout.connect(self._flush_progress_updates)
+        self._pending_progress: dict | None = None
+        self._log_update_timer = QTimer(self)
+        self._log_update_timer.setInterval(100)
+        self._log_update_timer.setSingleShot(True)
+        self._log_update_timer.timeout.connect(self._flush_log_updates)
         self._resize_sync_timer = QTimer(self)
         self._resize_sync_timer.setSingleShot(True)
         self._resize_sync_timer.timeout.connect(self._run_deferred_resize_sync)
@@ -250,6 +259,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         self.queue_empty_state = None
 
         self._log_lines: list[str] = []
+        self._pending_log_lines: list[str] = []
+        self._logs_view_dirty = False
         self._last_error_log = ""
         self._last_source_feedback_log: tuple[str, str] | None = None
         self._current_source_feedback_message = ""
@@ -2146,6 +2157,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         if name == "logs" and self._logs_alert_active:
             self._logs_alert_active = False
         self._apply_panel_selection(name)
+        if name == "logs":
+            self._flush_log_updates()
         self._sync_source_feedback_visibility()
         self._set_mixed_url_alert_visible(False)
         if self.isVisible() and self.size() != window_size:
@@ -2683,7 +2696,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
 
     def _on_download_done(self, result: str) -> None:
+        self._flush_progress_updates()
         self._run_queue_controller.on_download_done(result)
+        self._flush_log_updates()
 
     def _maybe_close_after_cancel(self) -> None:
         if self._is_downloading or not self._close_after_cancel:
@@ -2692,6 +2707,7 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         QTimer.singleShot(0, self.close)
 
     def _on_cancel(self) -> None:
+        self._discard_pending_progress()
         self._run_queue_controller.on_cancel()
 
     def _on_add_to_queue(self) -> None:
@@ -2723,7 +2739,9 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
         )
 
     def _on_queue_item_done(self, had_error: bool, cancelled: bool) -> None:
+        self._flush_progress_updates()
         self._run_queue_controller.on_queue_item_done(had_error, cancelled)
+        self._flush_log_updates()
 
     def _finish_queue(self, *, cancelled: bool = False) -> None:
         self._run_queue_controller.finish_queue(cancelled=cancelled)
@@ -2907,6 +2925,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
             return
         self._analysis_timer.stop()
         if not self._is_downloading:
+            self._discard_pending_progress()
+            self._log_update_timer.stop()
             event.accept()
             return
         if self._cancel_requested:
@@ -2917,6 +2937,8 @@ class QtYtDlpGui(WindowSettingsMixin, WindowFeedbackMixin, QMainWindow):
                 default_yes=False,
             )
             if force_quit:
+                self._discard_pending_progress()
+                self._log_update_timer.stop()
                 event.accept()
                 return
             event.ignore()

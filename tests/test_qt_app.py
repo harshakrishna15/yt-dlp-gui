@@ -3208,6 +3208,88 @@ class TestQtApp(unittest.TestCase):
         self.assertEqual(self.window.yt_dlp_version_label.text(), "yt-dlp 2026.08.19")
         self.assertTrue(self.window.yt_dlp_update_button.isEnabled())
 
+    def test_progress_burst_renders_latest_snapshot_once(self) -> None:
+        window = self.window
+        with patch.object(window, "_on_progress_update") as render:
+            for percent in range(100):
+                window._signals.progress.emit({"status": "downloading", "percent": percent})
+            render.assert_not_called()
+            self.assertTrue(window._progress_update_timer.isActive())
+            window._flush_progress_updates()
+            render.assert_called_once_with({"status": "downloading", "percent": 99})
+        self.assertIsNone(window._pending_progress)
+        self.assertFalse(window._progress_update_timer.isActive())
+
+    def test_terminal_progress_and_completion_flush_without_delay(self) -> None:
+        window = self.window
+        with patch.object(window, "_on_progress_update") as render:
+            window._queue_progress_update({"status": "downloading", "percent": 80})
+            window._queue_progress_update({"status": "finished"})
+            self.assertEqual([call.args[0]["status"] for call in render.call_args_list], ["downloading", "finished"])
+            window._queue_progress_update({"status": "downloading", "percent": 100})
+            window._on_download_done(download.DOWNLOAD_SUCCESS)
+            self.assertEqual(render.call_args.args[0]["percent"], 100)
+        self.assertIsNone(window._pending_progress)
+
+    def test_cancel_discards_pending_progress_and_rejects_late_percentages(self) -> None:
+        window = self.window
+        window._is_downloading = True
+        window._cancel_event = threading.Event()
+        window._queue_progress_update({"status": "downloading", "percent": 30})
+        window._on_cancel()
+        self.assertTrue(window._cancel_event.is_set())
+        window._queue_progress_update({"status": "downloading", "percent": 40})
+        self.assertIsNone(window._pending_progress)
+        self.assertFalse(window._progress_update_timer.isActive())
+
+    def test_hidden_logs_are_buffered_and_visible_logs_are_batched(self) -> None:
+        window = self.window
+        window._clear_logs()
+        with patch.object(window.logs_view, "appendPlainText", wraps=window.logs_view.appendPlainText) as append:
+            for i in range(1100):
+                window._append_log(f"line {i}")
+            append.assert_not_called()
+            self.assertEqual(len(window._log_lines), 1000)
+            self.assertFalse(window._log_update_timer.isActive())
+            window._open_panel("logs")
+            self.assertEqual(window.logs_view.toPlainText().splitlines(), window._log_lines)
+            for i in range(10):
+                window._append_log(f"new {i}")
+            append.assert_not_called()
+            window._flush_log_updates()
+            append.assert_called_once()
+        self.assertTrue(window.logs_view.toPlainText().endswith("new 9"))
+
+    def test_log_errors_flush_immediately_and_clear_discards_pending_lines(self) -> None:
+        window = self.window
+        window._open_panel("logs")
+        window._clear_logs()
+        window._append_log("ordinary line")
+        self.assertEqual(window.logs_view.toPlainText(), "")
+        window._append_log("[error] Immediate failure")
+        self.assertIn("Immediate failure", window.logs_view.toPlainText())
+        self.assertIn("Immediate failure", window._last_error_log)
+        window._append_log("discard this")
+        window._clear_logs()
+        window._flush_log_updates()
+        self.assertEqual(window.logs_view.toPlainText(), "")
+        self.assertEqual(window._pending_log_lines, [])
+
+    def test_log_flush_preserves_reader_scroll_position(self) -> None:
+        window = self.window
+        window.show()
+        window._open_panel("logs")
+        for i in range(100):
+            window._append_log(f"line {i}")
+        window._flush_log_updates()
+        QApplication.processEvents()
+        bar = window.logs_view.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 0)
+        bar.setValue(0)
+        window._append_log("one more")
+        window._flush_log_updates()
+        self.assertEqual(bar.value(), 0)
+
     def test_queue_progress_does_not_rebuild_or_touch_rows(self) -> None:
         window = self.window
         window.queue_items = [{"url": f"https://example.test/{i}", "title": f"Video {i}"} for i in range(500)]
