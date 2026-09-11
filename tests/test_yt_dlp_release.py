@@ -74,7 +74,7 @@ class TestYtDlpReleaseProgress(unittest.TestCase):
         checksum = release.sha256_bytes(payload)
         events = []
         with patch.object(release, "download_bytes", side_effect=(
-            f"{checksum}  yt-dlp_macos\n".encode(), payload,
+            f"{checksum}  yt-dlp_macos.zip\n".encode(), payload,
         )) as download:
             asset = release.fetch_latest_release_asset(platform="macos", on_progress=events.append)
         self.assertEqual(asset.payload, payload)

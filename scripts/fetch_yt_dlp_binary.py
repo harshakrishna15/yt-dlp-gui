@@ -33,8 +33,15 @@ def fetch_latest_binary(
     license_output: Path | None = None,
 ) -> str:
     release_asset = yt_dlp_release.fetch_latest_release_asset(platform=platform)
-    _write_atomic(output, release_asset.payload, executable=True)
-    version = _binary_version(output)
+    if release_asset.filename == "yt-dlp_macos.zip":
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".verify-", dir=output.parent) as temp:
+            executable = yt_dlp_release.extract_macos_runtime(release_asset.payload, Path(temp))
+            version = _binary_version(executable)
+        _write_atomic(output.with_suffix(".zip"), release_asset.payload, executable=False)
+    else:
+        _write_atomic(output, release_asset.payload, executable=True)
+        version = _binary_version(output)
     if not version:
         raise RuntimeError(
             f"Downloaded {release_asset.filename} did not report a version."
@@ -112,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 1
-    print(f"[ok] bundled yt-dlp {version}: {args.output}")
+    print(f"[ok] bundled yt-dlp {version}: {args.output.parent}")
     return 0
 
 

@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ _DATA_DIR_OVERRIDE_ENV = "YT_DLP_GUI_DATA_DIR"
 _BUNDLED_DIR_NAME = "yt_dlp_bin"
 _LICENSE_FILENAME = "THIRD_PARTY_LICENSES.txt"
 _VERSION_FILENAME = "VERSION"
+_RUNTIME_ARCHIVE = "yt-dlp.zip"
 _UPDATE_LOCK = threading.Lock()
 _BOOTSTRAP_LOCK = threading.Lock()
 _BOOTSTRAP_RESULT: "YtDlpBinary | None" = None
@@ -69,15 +71,29 @@ def managed_binary_dir(*, platform: str | None = None) -> Path:
 
 
 def managed_binary_path(*, platform: str | None = None) -> Path:
-    return managed_binary_dir(platform=platform) / executable_name(platform=platform)
+    directory = managed_binary_dir(platform=platform)
+    if (platform or sys.platform) == "darwin":
+        runtime = directory / "runtime" / "yt-dlp"
+        if _is_executable(runtime):
+            return runtime
+    return directory / executable_name(platform=platform)
 
 
 def managed_license_path(*, platform: str | None = None) -> Path:
-    return managed_binary_dir(platform=platform) / _LICENSE_FILENAME
+    return managed_binary_path(platform=platform).parent / _LICENSE_FILENAME
 
 
 def managed_version_path(*, platform: str | None = None) -> Path:
-    return managed_binary_dir(platform=platform) / _VERSION_FILENAME
+    return managed_binary_path(platform=platform).parent / _VERSION_FILENAME
+
+
+def bundled_runtime_archive_path() -> Path | None:
+    root = getattr(sys, "_MEIPASS", None)
+    if sys.platform == "darwin" and root:
+        candidate = Path(str(root)) / _BUNDLED_DIR_NAME / _RUNTIME_ARCHIVE
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def bundled_binary_path() -> Path | None:
@@ -186,6 +202,8 @@ def update_managed_yt_dlp(
             release = yt_dlp_release.fetch_latest_release_asset(
                 platform=_release_platform(), on_progress=on_progress
             )
+            if release.filename == "yt-dlp_macos.zip":
+                return _update_macos_runtime(resolved, release, on_progress)
             if on_progress:
                 on_progress(yt_dlp_release.YtDlpUpdateProgress("verifying"))
             _write_payload(staged_binary, release.payload, executable=True)
@@ -302,6 +320,14 @@ def _bootstrap_managed_binary() -> YtDlpBinary | None:
         if _BOOTSTRAP_COMPLETE:
             return _BOOTSTRAP_RESULT
 
+        archive = bundled_runtime_archive_path()
+        if archive is not None:
+            result = _bootstrap_macos_runtime(archive)
+            if result is not None:
+                _BOOTSTRAP_RESULT = result
+                _BOOTSTRAP_COMPLETE = True
+                return result
+
         managed = managed_binary_path()
         seed = bundled_binary_path()
         resolved_version = ""
@@ -359,6 +385,96 @@ def _bootstrap_managed_binary() -> YtDlpBinary | None:
         )
         _BOOTSTRAP_COMPLETE = True
         return _BOOTSTRAP_RESULT
+
+
+def _install_runtime(staged: Path, directory: Path) -> Path:
+    """Swap the executable and libraries as a unit, restoring the old tree on failure."""
+    target = directory / "runtime"
+    backup = directory / ".runtime.backup"
+    if backup.exists():
+        if not target.exists():
+            os.replace(backup, target)
+        else:
+            shutil.rmtree(backup)
+    had_runtime = target.exists()
+    if had_runtime:
+        os.replace(target, backup)
+    try:
+        os.replace(staged, target)
+    except OSError:
+        if had_runtime:
+            os.replace(backup, target)
+        raise
+    if had_runtime:
+        shutil.rmtree(backup, ignore_errors=True)
+    # These are the app's obsolete single-file engine and its sidecars.
+    _remove_files(directory / "yt-dlp", directory / _VERSION_FILENAME, directory / _LICENSE_FILENAME)
+    return target / "yt-dlp"
+
+
+def _bootstrap_macos_runtime(archive: Path) -> YtDlpBinary | None:
+    directory = managed_binary_dir()
+    backup = directory / ".runtime.backup"
+    if backup.is_dir() and not (directory / "runtime").exists():
+        os.replace(backup, directory / "runtime")
+    managed = managed_binary_path()
+    current_version = _read_version_metadata(managed.parent / _VERSION_FILENAME)
+    seed_version = _read_version_metadata(archive.parent / _VERSION_FILENAME)
+    if _is_executable(managed) and current_version:
+        if _version_key(current_version) > _version_key(seed_version) or (
+            managed.parent.name == "runtime" and current_version == seed_version
+        ):
+            return YtDlpBinary(managed, "managed", current_version)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".runtime-", dir=directory) as temp:
+            stage = Path(temp) / "engine"
+            executable = yt_dlp_release.extract_macos_runtime(archive.read_bytes(), stage)
+            version = _read_version(executable)
+            if not version or (seed_version and version != seed_version):
+                raise ValueError("Bundled runtime version does not match its manifest.")
+            if current_version and _version_key(version) < _version_key(current_version):
+                return YtDlpBinary(managed, "managed", current_version)
+            shutil.copy2(archive.parent / _LICENSE_FILENAME, stage / _LICENSE_FILENAME)
+            (stage / _VERSION_FILENAME).write_text(f"{version}\n", encoding="utf-8")
+            installed = _install_runtime(stage, directory)
+            return YtDlpBinary(installed, "managed", version)
+    except (OSError, ValueError):
+        # A pre-existing engine remains usable if first-run migration cannot finish.
+        return None
+
+
+def _update_macos_runtime(
+    resolved: YtDlpBinary,
+    release: yt_dlp_release.YtDlpReleaseAsset,
+    on_progress: yt_dlp_release.ProgressCallback | None,
+) -> YtDlpUpdateResult:
+    directory = managed_binary_dir()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".runtime-", dir=directory) as temp:
+            if on_progress:
+                on_progress(yt_dlp_release.YtDlpUpdateProgress("verifying"))
+            stage = Path(temp) / "engine"
+            executable = yt_dlp_release.extract_macos_runtime(release.payload, stage)
+            version = _read_version(executable)
+            if not version:
+                raise ValueError("Downloaded runtime did not report a version.")
+            if _version_key(version) < _version_key(resolved.version):
+                return YtDlpUpdateResult(True, False, resolved.version, f"yt-dlp {resolved.version} is newer than stable {version}.")
+            if on_progress:
+                on_progress(yt_dlp_release.YtDlpUpdateProgress("licenses"))
+            notices = yt_dlp_release.fetch_third_party_licenses(version)
+            (stage / _LICENSE_FILENAME).write_bytes(notices)
+            (stage / _VERSION_FILENAME).write_text(f"{version}\n", encoding="utf-8")
+            if on_progress:
+                on_progress(yt_dlp_release.YtDlpUpdateProgress("installing"))
+            installed = _install_runtime(stage, directory)
+        _set_bootstrap_cache(YtDlpBinary(installed, "managed", version))
+        changed = version != resolved.version or resolved.path != installed
+        return YtDlpUpdateResult(True, changed, version, f"yt-dlp {version} is ready.")
+    except (OSError, ValueError, RuntimeError) as exc:
+        return YtDlpUpdateResult(False, False, resolved.version, f"Could not install the yt-dlp runtime: {exc}")
 
 
 def _copy_binary(source: Path, destination: Path) -> None:

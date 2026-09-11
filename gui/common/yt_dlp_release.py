@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import shutil
 import ssl
+import stat
 import time
 import urllib.request
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 
@@ -16,7 +21,7 @@ CHECKSUM_ASSET = "SHA2-256SUMS"
 LICENSE_ASSET = "THIRD_PARTY_LICENSES.txt"
 ASSETS = {
     "linux": "yt-dlp",
-    "macos": "yt-dlp_macos",
+    "macos": "yt-dlp_macos.zip",
     "windows": "yt-dlp.exe",
 }
 
@@ -50,6 +55,48 @@ class YtDlpUpdateProgress:
 
 
 ProgressCallback = Callable[[YtDlpUpdateProgress], None]
+
+
+def extract_macos_runtime(payload: bytes, directory: Path) -> Path:
+    """Extract a verified release into an empty staging directory, never over a live engine."""
+    directory.mkdir(parents=True, exist_ok=True)
+    if any(directory.iterdir()):
+        raise ValueError("Runtime staging directory must be empty.")
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            entries = archive.infolist()
+            if len(entries) > 10000 or sum(entry.file_size for entry in entries) > 1024**3:
+                raise ValueError("Runtime archive is too large.")
+            seen = set()
+            for entry in entries:
+                path = PurePosixPath(entry.filename)
+                kind = stat.S_IFMT(entry.external_attr >> 16)
+                if (
+                    path.is_absolute() or ".." in path.parts
+                    or not path.parts or "\\" in entry.filename or ":" in entry.filename
+                    or kind not in (0, stat.S_IFREG, stat.S_IFDIR)
+                    or path in seen
+                ):
+                    raise ValueError(f"Unsafe runtime archive entry: {entry.filename}")
+                seen.add(path)
+            for entry in entries:
+                target = directory / entry.filename
+                if entry.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(entry) as source, target.open("xb") as destination:
+                    shutil.copyfileobj(source, destination)
+                target.chmod(0o644 | ((entry.external_attr >> 16) & 0o111))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Invalid yt-dlp runtime archive.") from exc
+    executable = directory / "yt-dlp_macos"
+    if not executable.is_file() or not (directory / "_internal").is_dir():
+        raise ValueError("Runtime archive is missing its executable or libraries.")
+    destination = directory / "yt-dlp"
+    os.replace(executable, destination)
+    destination.chmod(0o755)
+    return destination
 
 
 def fetch_latest_release_asset(

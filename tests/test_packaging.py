@@ -371,7 +371,7 @@ class TestPackagingConfiguration(unittest.TestCase):
         self.assertIn("--variant macos", macos_script)
         self.assertIn("scripts/fetch_yt_dlp_binary.py", macos_script)
         self.assertIn(
-            '--add-binary "build/yt-dlp-bin/yt-dlp:yt_dlp_bin"',
+            '--add-data "build/yt-dlp-bin/yt-dlp.zip:yt_dlp_bin"',
             macos_script,
         )
         self.assertIn(
@@ -405,7 +405,7 @@ class TestPackagingConfiguration(unittest.TestCase):
         self.assertNotIn("font;font", windows_script)
 
     def test_latest_release_assets_match_supported_platforms(self) -> None:
-        self.assertEqual(fetch_yt_dlp_binary.ASSETS["macos"], "yt-dlp_macos")
+        self.assertEqual(fetch_yt_dlp_binary.ASSETS["macos"], "yt-dlp_macos.zip")
         self.assertEqual(fetch_yt_dlp_binary.ASSETS["windows"], "yt-dlp.exe")
 
     def test_windows_version_info_includes_product_metadata(self) -> None:

@@ -35,7 +35,7 @@ python3 -m PyInstaller \
   --osx-bundle-identifier "$BUNDLE_ID" \
   --icon "build/yt-dlp-gui-icon.icns" \
   --hidden-import "PySide6.QtSvg" \
-  --add-binary "build/yt-dlp-bin/yt-dlp:yt_dlp_bin" \
+  --add-data "build/yt-dlp-bin/yt-dlp.zip:yt_dlp_bin" \
   --add-data "build/yt-dlp-bin/VERSION:yt_dlp_bin" \
   --add-data "build/yt-dlp-bin/THIRD_PARTY_LICENSES.txt:yt_dlp_bin" \
   --add-data "gui/qt/assets:gui/qt/assets" \
