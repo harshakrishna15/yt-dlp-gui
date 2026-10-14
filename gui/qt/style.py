@@ -108,8 +108,9 @@ def build_stylesheet(combo_arrow_path: str) -> str:
         QPushButton#topNavButton:focus, QPushButton#topIconButton:focus {{ border-color: {p['accent']}; }}
         QLabel#pageTitle, QLabel#panelHeaderTitle {{ font-size: 24px; font-weight: 600; }}
         QLabel#sourceHint, QLabel#mediaSummaryDetail, QLabel#advancedSummary, QLabel#settingsAppVersion,
-        QLabel#settingsEngineVersion, QLabel#updateDetailLabel, QLabel#analysisElapsed {{ color: {p['text_muted']}; font-size: 12px; }}
+        QLabel#settingsEngineVersion, QLabel#settingsAppName, QLabel#preferenceRowDetail, QLabel#updateDetailLabel, QLabel#analysisElapsed {{ color: {p['text_muted']}; font-size: 12px; }}
         QLabel#mediaSummaryTitle {{ font-size: 16px; font-weight: 600; }}
+        QLabel#preferenceRowTitle {{ font-size: 14px; font-weight: 500; }}
         QLabel#settingsRowTitle {{ font-size: 16px; font-weight: 600; }}
         QLabel#outputFormLabel, QLabel#sectionFormLabel, QLabel#saveBlockLabel {{ color: {p['text_label']}; font-size: 12px; font-weight: 500; }}
         QLineEdit, QComboBox {{ background: white; color: {p['field_text']}; border: 1px solid {p['border']}; border-radius: 8px; padding: 4px 12px; selection-background-color: {p['surface_selected_strong']}; selection-color: {p['text_primary']}; }}

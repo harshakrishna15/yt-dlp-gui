@@ -3409,16 +3409,18 @@ class TestQtApp(unittest.TestCase):
         self.assertFalse(self.window._yt_dlp_update_in_progress)
         self.assertEqual(self.window.yt_dlp_update_progress_bar.value(), 100)
 
-    def test_settings_support_actions_sit_below_app_details(self) -> None:
+    def test_settings_version_footer_sits_below_support_and_maintenance(self) -> None:
         self.window.show()
         self.window._open_panel("settings")
         QApplication.processEvents()
         app_card = self.window.panel_stack.currentWidget().findChild(QFrame, "settingsAppCard")
-        name = app_card.findChild(QLabel, "settingsAppName")
-        version = app_card.findChild(QLabel, "settingsAppVersion")
+        page = self.window.panel_stack.currentWidget()
+        name = page.findChild(QLabel, "settingsAppName")
+        version = page.findChild(QLabel, "settingsAppVersion")
         self.assertLessEqual(abs(name.mapToGlobal(QPoint()).y() - version.mapToGlobal(QPoint()).y()), 2)
-        self.assertGreater(self.window.logs_button.mapToGlobal(QPoint()).y(), version.mapToGlobal(QPoint()).y())
+        self.assertGreater(version.mapToGlobal(QPoint()).y(), self.window.logs_button.mapToGlobal(QPoint()).y())
         self.assertGreater(self.window.remove_app_data_button.mapToGlobal(QPoint()).y(), app_card.mapToGlobal(app_card.rect().bottomLeft()).y())
+        self.assertGreater(version.mapToGlobal(QPoint()).y(), self.window.remove_app_data_button.mapToGlobal(QPoint()).y())
 
     def test_downloads_button_is_noop_when_main_view_is_already_active(self) -> None:
         self.assertIsNone(self.window._active_panel_name)

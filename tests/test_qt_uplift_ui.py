@@ -113,6 +113,38 @@ class TestUpliftUi(unittest.TestCase):
         self.assertEqual([self.window.queue_list.item(i).data(QUEUE_STATUS_ROLE) for i in range(4)],
                          ["queued", "failed", "completed", "cancelled"])
 
+    def test_preferences_controls_align_and_fit_at_all_window_sizes(self):
+        self.window.show()
+        self.window._open_panel("settings")
+        for width, height in ((900, 610), (1200, 800), (1800, 1000)):
+            with self.subTest(size=(width, height)):
+                self.window.resize(width, height)
+                self.settle()
+                edges = [control.mapToGlobal(control.rect().topRight()).x() for control in
+                         (self.window.edit_friendly_encoder_combo, self.window.yt_dlp_update_button,
+                          self.window.export_diagnostics_button)]
+                self.assertLessEqual(max(edges) - min(edges), 2)
+                self.assertEqual(self.window.panel_stack.currentWidget().verticalScrollBar().maximum(), 0)
+                for button in (self.window.yt_dlp_update_button, self.window.logs_button,
+                               self.window.export_diagnostics_button, self.window.remove_app_data_button):
+                    self.assertTrue(button.parentWidget().rect().contains(button.geometry()), button.text())
+
+    def test_preferences_update_feedback_scrolls_without_compressing_actions(self):
+        self.window.show()
+        self.window._open_panel("settings")
+        self.window.yt_dlp_update_status.show()
+        self.window.yt_dlp_update_details_button.show()
+        self.window.yt_dlp_update_status_label.setText("Update failed")
+        self.window.yt_dlp_update_detail_label.setText("A long diagnostic detail. " * 100)
+        self.window._is_downloading = True
+        self.window._update_controls_state()
+        self.settle()
+        self.assertGreaterEqual(self.window.yt_dlp_update_details_button.height(), style.INLINE_HEIGHT)
+        self.assertTrue(self.window.cancel_button.isVisible())
+        self.assertFalse(self.window.yt_dlp_update_button.isEnabled())
+        self.assertTrue(self.window.panel_stack.currentWidget().verticalScrollBar().maximum() > 0)
+        self.window._is_downloading = False
+
     def test_reduced_motion_applies_download_progress_immediately(self):
         with patch.dict(os.environ, {"YT_DLP_GUI_REDUCE_MOTION": "1"}):
             self.window._animate_progress_bar_to(42.3)

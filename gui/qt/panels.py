@@ -236,6 +236,24 @@ def _build_panel_actions(
     return actions, tuple(buttons)
 
 
+def _build_preference_row(parent: QWidget, *, title: str, control: QWidget,
+                          detail: str = "", detail_widget: QWidget | None = None) -> QWidget:
+    row = build_hbox(parent, widget_config=WidgetConfig(object_name="preferenceRow", minimum_height=48),
+                     layout_config=LayoutConfig(spacing=24))
+    copy = build_vbox(row.widget, layout_config=LayoutConfig(spacing=4))
+    copy.widget.setMinimumWidth(0)
+    copy.layout.addWidget(build_label(copy.widget, spec=LabelSpec(
+        text=title, widget_config=WidgetConfig(object_name="preferenceRowTitle"), word_wrap=True)))
+    if detail_widget is not None:
+        copy.layout.addWidget(detail_widget)
+    elif detail:
+        copy.layout.addWidget(build_label(copy.widget, spec=LabelSpec(
+            text=detail, widget_config=WidgetConfig(object_name="preferenceRowDetail"), word_wrap=True)))
+    row.layout.addWidget(copy.widget, 1)
+    row.layout.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    return row.widget
+
+
 def build_settings_panel(
     *,
     parent: QWidget,
@@ -245,215 +263,90 @@ def build_settings_panel(
     on_view_logs: Callable[[], None],
     on_remove_app_data: Callable[[], None] = lambda: None,
 ) -> SettingsPanelRefs:
-    shell = _build_panel_shell(
-        parent=parent,
-        title="Preferences",
-        framed=False,
-    )
-
-    form_card_shell = build_vbox(
-        shell.panel,
-        widget_cls=QFrame,
+    shell = _build_panel_shell(parent=parent, title="Preferences", framed=False)
+    form = build_vbox(shell.panel, widget_cls=QFrame,
         widget_config=WidgetConfig(object_name="panelFormCard"),
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=24),
-    )
-    form_card = form_card_shell.widget
-    form_card_layout = form_card_shell.layout
+        layout_config=LayoutConfig(spacing=24))
+    downloads = _build_settings_card(form.widget, title="Downloads", spacing=12)
+    encoder = build_native_combo(downloads.card, register_native_combo=register_native_combo,
+        config=NativeComboBoxConfig(minimum_width=260, maximum_width=320, items=(
+            ("Automatic (recommended)", "auto"), ("Apple hardware encoder", "apple"),
+            ("NVIDIA hardware encoder", "nvidia"), ("AMD hardware encoder", "amd"),
+            ("Intel hardware encoder", "intel"), ("CPU software encoder", "cpu"))))
+    encoder.setAccessibleName("Edit-friendly encoder")
+    downloads.layout.addWidget(_build_preference_row(downloads.card,
+        title="Edit-friendly encoder", detail="Used when converting videos for editing.", control=encoder))
+    open_folder = build_checkbox(downloads.card, spec=CheckBoxSpec(text="Open output folder"))
+    open_folder.setAccessibleName("Open output folder after downloads")
+    downloads.layout.addWidget(_build_preference_row(downloads.card,
+        title="After downloading", control=open_folder))
+    form.layout.addWidget(downloads.card)
 
-    settings_stack_shell = build_vbox(
-        form_card,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
-    )
-    settings_stack = settings_stack_shell.widget
-    settings_stack_layout = settings_stack_shell.layout
+    app = _build_settings_card(form.widget, title="App", object_name="settingsAppCard", spacing=12)
+    engine = _build_settings_card(app.card, spacing=8)
+    version = build_label(engine.card, spec=LabelSpec(text="yt-dlp unavailable",
+        widget_config=WidgetConfig(object_name="settingsEngineVersion")))
+    update = build_button(engine.card, spec=ButtonSpec("Update yt-dlp", object_name="ghostButton",
+        role="secondary", compact=True, on_click=on_update_yt_dlp))
+    engine.layout.addWidget(_build_preference_row(engine.card, title="Download engine",
+        detail_widget=version, control=update))
 
-    encode_card = _build_settings_card(
-        settings_stack,
-        title="Downloads",
-    )
-    edit_friendly_encoder_combo = build_native_combo(
-        encode_card.card,
-        register_native_combo=register_native_combo,
-        config=NativeComboBoxConfig(
-            minimum_width=0,
-            items=(
-                ("Automatic (recommended)", "auto"),
-                ("Apple hardware encoder", "apple"),
-                ("NVIDIA hardware encoder", "nvidia"),
-                ("AMD hardware encoder", "amd"),
-                ("Intel hardware encoder", "intel"),
-                ("CPU software encoder", "cpu"),
-            ),
-        ),
-    )
-    preference_label = WidgetConfig(object_name="outputFormLabel", fixed_width=160)
-    build_labeled_fields(encode_card.card, layout=encode_card.layout, specs=(
-        LabeledFieldSpec(key="encoder", label_text="Edit-friendly encoder", field=edit_friendly_encoder_combo,
-                         label_config=preference_label),
-    ))
-    settings_stack_layout.addWidget(encode_card.card)
-
-    engine_card = _build_settings_card(
-        settings_stack,
-        title="",
-    )
-    engine_row_shell = build_hbox(
-        engine_card.card,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=10),
-    )
-    engine_row = engine_row_shell.widget
-    engine_row_layout = engine_row_shell.layout
-    yt_dlp_version_label = build_label(
-        engine_row,
-        spec=LabelSpec(
-            text="yt-dlp unavailable",
-            widget_config=WidgetConfig(object_name="settingsEngineVersion"),
-        ),
-    )
-    yt_dlp_update_button = build_button(
-        engine_row,
-        spec=ButtonSpec(
-            text="Update yt-dlp",
-            on_click=on_update_yt_dlp,
-            object_name="ghostButton", role="secondary",
-        ),
-    )
-    engine_row_layout.addWidget(yt_dlp_version_label)
-    engine_row_layout.addWidget(yt_dlp_update_button)
-    engine_row_layout.addStretch(1)
-    build_labeled_fields(engine_card.card, layout=engine_card.layout, specs=(
-        LabeledFieldSpec(key="engine", label_text="Engine", field=engine_row, label_config=preference_label),
-    ))
-    update_status_shell = build_vbox(
-        engine_card.card,
+    status = build_vbox(engine.card,
         widget_config=WidgetConfig(object_name="updateStatus", minimum_height=68, visible=False),
-        layout_config=LayoutConfig(margins=(0, 4, 0, 4), spacing=4),
-    )
-    update_status = update_status_shell.widget
-    update_status_label = build_label(
-        update_status,
-        spec=LabelSpec(widget_config=WidgetConfig(object_name="updateStatusLabel")),
-    )
-    update_detail_label = ElidedLabel(update_status)
-    update_detail_label.setObjectName("updateDetailLabel")
-    update_detail_label.setProperty("allowToolTip", True)
-    update_heading = build_hbox(
-        update_status,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
-    )
-    update_heading.widget.setMinimumHeight(32)
-    update_details_button = build_button(update_heading.widget, spec=ButtonSpec(
-        text="View details", object_name="feedbackActionButton", on_click=on_view_logs,
-        compact=True,
-    ))
-    update_details_button.hide()
-    update_heading.layout.addWidget(update_status_label, 1)
-    update_heading.layout.addWidget(update_details_button)
-    update_progress_bar = QProgressBar(update_status)
-    update_progress_bar.setObjectName("updateProgressBar")
-    update_progress_bar.setAccessibleName("yt-dlp update progress")
-    update_progress_bar.setTextVisible(False)
-    update_progress_bar.setRange(0, 100)
-    update_progress_bar.setValue(0)
-    update_status_shell.layout.addWidget(update_heading.widget)
-    update_status_shell.layout.addWidget(update_progress_bar)
-    update_status_shell.layout.addWidget(update_detail_label)
-    engine_card.layout.addWidget(update_status)
-    # Engine belongs to the App section below.
+        layout_config=LayoutConfig(margins=(0, 0, 0, 4), spacing=4))
+    heading = build_hbox(status.widget, widget_config=WidgetConfig(minimum_height=32),
+                         layout_config=LayoutConfig(spacing=8))
+    status_label = build_label(heading.widget,
+        spec=LabelSpec(widget_config=WidgetConfig(object_name="updateStatusLabel")))
+    details = build_button(heading.widget, spec=ButtonSpec("View details",
+        object_name="feedbackActionButton", compact=True, on_click=on_view_logs))
+    details.hide()
+    heading.layout.addWidget(status_label, 1)
+    heading.layout.addWidget(details)
+    progress = QProgressBar(status.widget)
+    progress.setObjectName("updateProgressBar")
+    progress.setAccessibleName("yt-dlp update progress")
+    progress.setTextVisible(False)
+    progress.setRange(0, 100)
+    progress.setValue(0)
+    detail_label = ElidedLabel(status.widget)
+    detail_label.setObjectName("updateDetailLabel")
+    detail_label.setProperty("allowToolTip", True)
+    status.layout.addWidget(heading.widget)
+    status.layout.addWidget(progress)
+    status.layout.addWidget(detail_label)
+    engine.layout.addWidget(status.widget)
+    app.layout.addWidget(engine.card)
 
-    open_folder_after_download_check = build_checkbox(
-        settings_stack,
-        spec=CheckBoxSpec(text="Open output folder after downloads"),
-    )
-    build_labeled_fields(encode_card.card, layout=encode_card.layout, specs=(
-        LabeledFieldSpec(key="after_download", label_text="", field=open_folder_after_download_check,
-                         label_config=preference_label),
-    ))
+    support = build_hbox(app.card, layout_config=LayoutConfig(spacing=8))
+    logs = build_button(support.widget, spec=ButtonSpec("View logs", object_name="ghostButton",
+                                                       role="secondary", compact=True))
+    diagnostics = build_button(support.widget, spec=ButtonSpec("Export diagnostics",
+        object_name="ghostButton", role="secondary", compact=True, on_click=on_export_diagnostics))
+    support.layout.addWidget(logs)
+    support.layout.addWidget(diagnostics)
+    app.layout.addWidget(_build_preference_row(app.card, title="Troubleshooting", control=support.widget))
+    form.layout.addWidget(app.card)
 
-    remove_app_data_button = build_button(settings_stack, spec=ButtonSpec(
-        text="Remove app data and quit...", object_name="ghostButton", role="destructive",
-        on_click=on_remove_app_data,
-    ))
-
-
-    app_card = _build_settings_card(
-        settings_stack,
-        object_name="settingsAppCard",
-        spacing=12,
-    )
-    app_card.card.setSizePolicy(
-        QSizePolicy.Policy.Preferred,
-        QSizePolicy.Policy.Fixed,
-    )
-
-    app_copy_shell = build_hbox(
-        app_card.card,
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
-    )
-    app_copy = app_copy_shell.widget
-    app_copy_layout = app_copy_shell.layout
-
-    app_name_label = build_label(
-        app_copy,
-        spec=LabelSpec(
-            text=APP_DISPLAY_NAME,
-            widget_config=WidgetConfig(object_name="settingsAppName"),
-        ),
-    )
-    version_label = build_label(
-        app_copy,
-        spec=LabelSpec(
-            text=f"Version {APP_VERSION}",
-            widget_config=WidgetConfig(object_name="settingsAppVersion"),
-        ),
-    )
-    app_copy_layout.addWidget(app_name_label)
-    app_copy_layout.addWidget(version_label)
-    view_logs_button = build_button(
-        app_copy,
-        spec=ButtonSpec(text="View logs", object_name="ghostButton", role="secondary"),
-    )
-    support = build_hbox(app_card.card, layout_config=LayoutConfig(spacing=12))
-    support.layout.addWidget(view_logs_button)
-    export_diagnostics_button = build_button(
-        app_copy,
-        spec=ButtonSpec(
-            text="Export diagnostics",
-            on_click=on_export_diagnostics,
-            object_name="ghostButton", role="secondary",
-        ),
-    )
-    support.layout.addWidget(export_diagnostics_button)
-    support.layout.addStretch(1)
-    app_copy_layout.addStretch(1)
-    app_card.layout.addWidget(app_copy)
-    app_card.layout.addWidget(support.widget)
-
-    form_card_layout.addWidget(settings_stack)
-    form_card_layout.addSpacing(12)
-    form_card_layout.addWidget(build_label(form_card, spec=LabelSpec(
-        text="App", widget_config=WidgetConfig(object_name="settingsRowTitle"))))
-    form_card_layout.addWidget(engine_card.card)
-    form_card_layout.addWidget(app_card.card)
-    build_divider(form_card, form_card_layout)
-    form_card_layout.addWidget(remove_app_data_button, alignment=Qt.AlignmentFlag.AlignLeft)
-    form_card_layout.addStretch(1)
-    shell.body_layout.addWidget(form_card, stretch=1)
-    return SettingsPanelRefs(
-        panel=shell.panel,
-        edit_friendly_encoder_combo=edit_friendly_encoder_combo,
-        open_folder_after_download_check=open_folder_after_download_check,
-        yt_dlp_version_label=yt_dlp_version_label,
-        yt_dlp_update_button=yt_dlp_update_button,
-        yt_dlp_update_status=update_status,
-        yt_dlp_update_progress_bar=update_progress_bar,
-        yt_dlp_update_status_label=update_status_label,
-        yt_dlp_update_detail_label=update_detail_label,
-        yt_dlp_update_details_button=update_details_button,
-        export_diagnostics_button=export_diagnostics_button,
-        view_logs_button=view_logs_button,
-        remove_app_data_button=remove_app_data_button,
-    )
+    build_divider(form.widget, form.layout)
+    remove = build_button(form.widget, spec=ButtonSpec("Remove app data and quit...",
+        object_name="ghostButton", role="destructive", compact=True, on_click=on_remove_app_data))
+    form.layout.addWidget(remove, alignment=Qt.AlignmentFlag.AlignLeft)
+    form.layout.addStretch(1)
+    footer = build_hbox(form.widget, layout_config=LayoutConfig(spacing=8))
+    footer.layout.addWidget(build_label(footer.widget, spec=LabelSpec(text=APP_DISPLAY_NAME,
+        widget_config=WidgetConfig(object_name="settingsAppName"))))
+    footer.layout.addWidget(build_label(footer.widget, spec=LabelSpec(text=f"Version {APP_VERSION}",
+        widget_config=WidgetConfig(object_name="settingsAppVersion"))))
+    footer.layout.addStretch(1)
+    form.layout.addWidget(footer.widget)
+    shell.body_layout.addWidget(form.widget, stretch=1)
+    return SettingsPanelRefs(panel=shell.panel, edit_friendly_encoder_combo=encoder,
+        open_folder_after_download_check=open_folder, yt_dlp_version_label=version,
+        yt_dlp_update_button=update, yt_dlp_update_status=status.widget,
+        yt_dlp_update_progress_bar=progress, yt_dlp_update_status_label=status_label,
+        yt_dlp_update_detail_label=detail_label, yt_dlp_update_details_button=details,
+        export_diagnostics_button=diagnostics, view_logs_button=logs, remove_app_data_button=remove)
 
 
 def build_queue_panel(
