@@ -6,6 +6,15 @@ from pathlib import Path
 
 REQUIRED_ASSET_FILENAMES = (
     "combo-down-arrow.svg",
+    "check.svg",
+    "download-action.svg",
+    "play-action.svg",
+    "analyze-action.svg",
+    "refresh.svg",
+    "add.svg",
+
+    "folder.svg",
+    "remove.svg",
     "downloads.svg",
     "downloads-active.svg",
     "settings.svg",

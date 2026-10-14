@@ -146,6 +146,22 @@ class TestCoreQueueLogic(unittest.TestCase):
         self.assertTrue(moved)
         self.assertEqual([item.get("url") for item in updated], ["c", "a", "b"])
 
+    def test_move_preserves_selected_blocks_at_boundaries(self) -> None:
+        items = [{"url": value} for value in "abcde"]
+        for move, selected, expected, did_move in (
+            (queue_logic.move_selected_queue_items_up, [0, 1], "abcde", False),
+            (queue_logic.move_selected_queue_items_down, [3, 4], "abcde", False),
+            (queue_logic.move_selected_queue_items_up, [0, 1, 3], "abdce", True),
+            (queue_logic.move_selected_queue_items_down, [1, 3, 4], "acbde", True),
+            (queue_logic.move_selected_queue_items_up, list(range(5)), "abcde", False),
+            (queue_logic.move_selected_queue_items_down, list(range(5)), "abcde", False),
+        ):
+            with self.subTest(move=move.__name__, selected=selected):
+                updated, moved = move(items, selected)
+                self.assertEqual("".join(item["url"] for item in updated), expected)
+                self.assertEqual(moved, did_move)
+        self.assertEqual("".join(item["url"] for item in items), "abcde")
+
     def test_clear_queue_items(self) -> None:
         updated, cleared = queue_logic.clear_queue_items([{"url": "a"}])
         self.assertTrue(cleared)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from tempfile import gettempdir
 from pathlib import Path
 
@@ -70,7 +71,8 @@ def style_asset_path(filename: str, *, size: QSize | None = None) -> str:
     cache_dir = Path(gettempdir()) / "yt-dlp-gui" / "qt-assets"
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_path = cache_dir / (
-        f"{path.stem}-{render_size.width()}x{render_size.height()}.png"
+        f"{path.stem}-{sha256(path.read_bytes()).hexdigest()[:10]}-"
+        f"{render_size.width()}x{render_size.height()}.png"
     )
     if not output_path.exists():
         pixmap.save(str(output_path), "PNG")

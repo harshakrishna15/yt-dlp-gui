@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
     QFrame,
-    QGraphicsDropShadowEffect,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .constants import OUTPUT_CARD_STACK_GAP
+from . import style as ui_style
 from .link_input import LinkInputRefs, build_link_input_module
 from .platform_paths import system_downloads_path
 from .widgets import (
@@ -56,6 +56,8 @@ from .widgets import (
     build_native_combo,
     build_segmented_rail,
     build_feedback_row,
+    build_form_scroll,
+    build_divider,
     build_vbox,
 )
 
@@ -98,6 +100,11 @@ class RunSectionRefs:
 class DownloadsViewRefs:
     main_page: QWidget
     main_page_index: int
+    form_scroll: QWidget
+    media_summary: QWidget
+    media_title: ElidedLabel
+    media_detail: ElidedLabel
+    source_hint: QLabel
     workspace_layout: QHBoxLayout
     source_row: QWidget
     url_edit: QLineEdit
@@ -157,6 +164,7 @@ class DownloadsViewRefs:
 @dataclass(frozen=True)
 class UiRefs:
     root: QWidget
+    content_column: QWidget
     panel_stack: QStackedWidget
     top_bar: TopBarRefs
     mixed_url: MixedUrlRefs
@@ -249,92 +257,28 @@ class _OutputSectionRefs:
 class TopBarBuilder:
     @staticmethod
     def build(parent: QWidget) -> TopBarRefs:
-        header_shell = build_hbox(
-            parent,
-            widget_config=WidgetConfig(object_name="topBarShell"),
-            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
-        )
-        header = header_shell.widget
-        header_layout = header_shell.layout
-
-        top_actions_shell = build_hbox(
-            header,
-            widget_config=WidgetConfig(
-                size_policy=(
-                    QSizePolicy.Policy.Expanding,
-                    QSizePolicy.Policy.Fixed,
-                ),
-            ),
-            layout_config=LayoutConfig(margins=(0, 0, 4, 0), spacing=8),
-        )
-        top_actions = top_actions_shell.widget
-        top_actions_layout = top_actions_shell.layout
-
-        classic_actions, classic_buttons = build_segmented_rail(
-            top_actions,
-            spec=SegmentedRailSpec(
-                object_name="topNavRail",
-                selection_rect_getter=_top_nav_selection_rect,
-                layout_margins=(4, 4, 4, 4),
-                layout_spacing=4,
-                button_specs=(
-                    ButtonSpec(
-                        "Downloads",
-                        object_name="topNavButton",
-                        checkable=True,
-                        size_policy=(
-                            QSizePolicy.Policy.Fixed,
-                            QSizePolicy.Policy.Fixed,
-                        ),
-                    ),
-                    ButtonSpec(
-                        "Queue (0)",
-                        object_name="topNavButton",
-                        checkable=True,
-                        size_policy=(
-                            QSizePolicy.Policy.Fixed,
-                            QSizePolicy.Policy.Fixed,
-                        ),
-                    ),
-                ),
-            ),
-        )
-        downloads_button, queue_button = classic_buttons
-
-        settings_button = build_button(
-            top_actions,
-            spec=ButtonSpec(
-                "",
-                object_name="topIconButton",
-                checkable=True,
-                size_policy=(
-                    QSizePolicy.Policy.Fixed,
-                    QSizePolicy.Policy.Fixed,
-                ),
-            ),
-        )
-        settings_button.setAccessibleName("Preferences")
-        settings_button.setProperty("allowToolTip", True)
-
-        top_actions_layout.addStretch(1)
-        top_actions_layout.addWidget(
-            classic_actions,
-            alignment=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter,
-        )
-        top_actions_layout.addStretch(1)
-        top_actions_layout.addWidget(
-            settings_button,
-            alignment=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-        )
-        header_layout.addWidget(top_actions, stretch=1)
-        return TopBarRefs(
-            header=header,
-            top_actions=top_actions,
-            classic_actions=classic_actions,
-            downloads_button=downloads_button,
-            queue_button=queue_button,
-            settings_button=settings_button,
-        )
+        sidebar = build_vbox(parent, widget_config=WidgetConfig(
+            object_name="topBarShell", fixed_width=ui_style.SIDEBAR_WIDTH),
+            layout_config=LayoutConfig(margins=(12, 24, 12, 16), spacing=16))
+        title = build_label(sidebar.widget, spec=LabelSpec(text="yt-dlp-gui",
+            widget_config=WidgetConfig(object_name="sidebarTitle")))
+        sidebar.layout.addWidget(title)
+        nav = build_vbox(sidebar.widget, layout_config=LayoutConfig(spacing=4))
+        buttons = []
+        for text in ("Downloads", "Queue (0)"):
+            button = build_button(nav.widget, spec=ButtonSpec(text,
+                object_name="topNavButton", role="quiet", checkable=True))
+            nav.layout.addWidget(button)
+            buttons.append(button)
+        sidebar.layout.addWidget(nav.widget)
+        sidebar.layout.addStretch(1)
+        settings = build_button(sidebar.widget, spec=ButtonSpec("Preferences",
+            object_name="topIconButton", role="quiet", checkable=True))
+        settings.setAccessibleName("Preferences")
+        sidebar.layout.addWidget(settings)
+        return TopBarRefs(header=sidebar.widget, top_actions=nav.widget,
+            classic_actions=nav.widget, downloads_button=buttons[0],
+            queue_button=buttons[1], settings_button=settings)
 
 
 class RunSectionBuilder:
@@ -623,11 +567,35 @@ class DownloadsViewBuilder:
         workspace_layout.addWidget(output.section, stretch=1)
         main_layout.addWidget(workspace, stretch=1)
 
-        main_page_index = panel_stack.addWidget(main_page)
+        main_page.setMaximumWidth(ui_style.FORM_MAX_WIDTH)
+        source_hint = build_label(main_page, spec=LabelSpec(
+            text="Paste a link, then analyze it to choose download settings.",
+            widget_config=WidgetConfig(object_name="sourceHint"), word_wrap=True))
+        title = build_label(main_page, spec=LabelSpec(text="Downloads",
+            widget_config=WidgetConfig(object_name="pageTitle")))
+        main_layout.insertWidget(0, title)
+        main_layout.insertWidget(1, source_hint)
+        source_hint.setText("Paste a video or playlist link to get started.")
+        summary = build_vbox(main_page, layout_config=LayoutConfig(spacing=4))
+        media_title = ElidedLabel(summary.widget)
+        media_title.setObjectName("mediaSummaryTitle")
+        media_detail = ElidedLabel(summary.widget)
+        media_detail.setObjectName("mediaSummaryDetail")
+        summary.layout.addWidget(media_title)
+        summary.layout.addWidget(media_detail)
+        summary.widget.hide()
+        output.layout.insertWidget(1, summary.widget)
+        form_scroll = build_form_scroll(main_page, panel_stack)
+        main_page_index = panel_stack.addWidget(form_scroll)
 
         return DownloadsViewRefs(
             main_page=main_page,
             main_page_index=main_page_index,
+            form_scroll=form_scroll,
+            media_summary=summary.widget,
+            media_title=media_title,
+            media_detail=media_detail,
+            source_hint=source_hint,
             workspace_layout=workspace_layout,
             source_row=output.link_input.row,
             url_edit=output.link_input.url_edit,
@@ -740,9 +708,6 @@ class DownloadsViewBuilder:
         )
         format_card = format_card_shell.widget
         format_layout = format_card_shell.layout
-        format_layout.addWidget(
-            _build_section_header(format_card, "Output", compact=True)
-        )
 
         def _handle_mode_toggle(checked: bool) -> None:
             if checked:
@@ -762,7 +727,7 @@ class DownloadsViewBuilder:
                 layout_spacing=4,
                 button_specs=(
                     ButtonSpec(
-                        "Video and Audio",
+                        "Video",
                         object_name="contentModeButton",
                         checkable=True,
                         auto_exclusive=True,
@@ -773,7 +738,7 @@ class DownloadsViewBuilder:
                         ),
                     ),
                     ButtonSpec(
-                        "Audio only",
+                        "Audio",
                         object_name="contentModeButton",
                         checkable=True,
                         auto_exclusive=True,
@@ -809,7 +774,7 @@ class DownloadsViewBuilder:
         )
         content_type_field_layout.addStretch(1)
 
-        playlist_length_group_shell = build_hbox(
+        playlist_length_group_shell = build_vbox(
             content_type_field,
             widget_config=WidgetConfig(
                 size_policy=(
@@ -900,7 +865,7 @@ class DownloadsViewBuilder:
         output_row_specs = (
             LabeledFieldSpec(
                 key="content_type",
-                label_text="Content type",
+                label_text="Type",
                 field=content_type_field,
                 label_config=label_config,
             ),
@@ -1000,10 +965,9 @@ class DownloadsViewBuilder:
         browse_button = build_button(
             folder_row,
             spec=ButtonSpec(
-                text="",
+                text="Change…",
                 object_name="folderButton",
-                fixed_width=38,
-                minimum_height=34,
+                role="secondary", compact=True,
                 tooltip="Choose download folder",
                 size_policy=(
                     QSizePolicy.Policy.Fixed,
@@ -1015,12 +979,15 @@ class DownloadsViewBuilder:
         # Preserve the full path for download/queue settings without displaying it as a field.
         output_dir_label = ElidedLabel(folder_row)
         output_dir_label.setObjectName("outputFolderName")
+        output_dir_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         output_dir_label.setProperty("allowToolTip", True)
-        browse_button.setIcon(browse_button.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
-        browse_button.setIconSize(QSize(18, 18))
+        from .icon_assets import load_icon_asset
+        folder_icon = QLabel(folder_row)
+        folder_icon.setPixmap(load_icon_asset("folder.svg", size=QSize(20, 20)).pixmap(20, 20))
+        folder_row_layout.addWidget(folder_icon)
         browse_button.setAccessibleName("Choose download folder")
         browse_button.setProperty("allowToolTip", True)
-        folder_row_layout.addWidget(output_dir_label, stretch=1)
+        folder_row_layout.addWidget(output_dir_label, 1)
         folder_row_layout.addWidget(browse_button)
 
         save_row_specs = (
@@ -1083,10 +1050,24 @@ class DownloadsViewBuilder:
             widget_config=WidgetConfig(object_name="advancedOptions"),
             layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
         )
+        pair = build_hbox(format_card, layout_config=LayoutConfig(spacing=16))
+        for key in ("content_type", "format"):
+            row = output_row_refs[key].row
+            format_layout.removeWidget(row)
+            pair.layout.addWidget(row, 1 if key == "content_type" else 2)
+        format_layout.insertWidget(0, pair.widget)
+        content_type_field_layout.removeWidget(playlist_length_group)
+        playlist_length_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        format_layout.insertWidget(1, playlist_length_group)
+        advanced_pair = build_hbox(advanced_panel.content, layout_config=LayoutConfig(spacing=16))
+        advanced_shell.layout.addWidget(advanced_pair.widget)
         for key in ("container", "codec", "post_process"):
             row = output_row_refs[key].row
             format_layout.removeWidget(row)
-            advanced_shell.layout.addWidget(row)
+            if key in {"container", "codec"}:
+                advanced_pair.layout.addWidget(row, 1)
+            else:
+                advanced_shell.layout.addWidget(row)
             row.setVisible(key != "post_process")
         filename_row = save_row_refs["file_name"].row
         save_layout.removeWidget(filename_row)
@@ -1240,20 +1221,23 @@ class MainUiBuilder:
         register_native_combo: Callable[[_NativeComboBox], None],
         callbacks: DownloadsViewCallbacks,
     ) -> UiRefs:
-        root_shell = build_vbox(
+        root_shell = build_hbox(
             window,
             widget_config=WidgetConfig(object_name="appRoot"),
-            layout_config=LayoutConfig(margins=(22, 18, 22, 18), spacing=14),
+            layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=0),
         )
         root = root_shell.widget
         root_layout = root_shell.layout
 
         top_bar = TopBarBuilder.build(root)
         root_layout.addWidget(top_bar.header)
+        content = build_vbox(root, widget_config=WidgetConfig(object_name="contentColumn"),
+            layout_config=LayoutConfig(margins=(24, 24, 24, 24), spacing=16))
+        root_layout.addWidget(content.widget, stretch=1)
 
         panel_stack = QStackedWidget(window)
         panel_stack.setObjectName("panelStack")
-        root_layout.addWidget(panel_stack, stretch=1)
+        content.layout.addWidget(panel_stack, stretch=1)
 
         mixed_url_overlay_shell = build_vbox(
             root,
@@ -1272,11 +1256,6 @@ class MainUiBuilder:
             layout_config=LayoutConfig(margins=(12, 10, 12, 14), spacing=8),
         )
         mixed_url_alert = mixed_url_alert_shell.widget
-        mixed_shadow = QGraphicsDropShadowEffect(mixed_url_alert)
-        mixed_shadow.setBlurRadius(24)
-        mixed_shadow.setOffset(0, 6)
-        mixed_shadow.setColor(QColor(15, 91, 81, 68))
-        mixed_url_alert.setGraphicsEffect(mixed_shadow)
         mixed_alert_layout = mixed_url_alert_shell.layout
         mixed_url_alert_label = build_label(
             mixed_url_alert,
@@ -1318,8 +1297,8 @@ class MainUiBuilder:
         mixed_url_overlay_layout.addStretch(1)
         mixed_url_overlay.hide()
 
-        feedback = build_feedback_row(root)
-        root_layout.addWidget(feedback.row)
+        feedback = build_feedback_row(content.widget)
+        content.layout.addWidget(feedback.row)
 
         downloads = DownloadsViewBuilder.build(
             panel_stack=panel_stack,
@@ -1329,6 +1308,7 @@ class MainUiBuilder:
 
         return UiRefs(
             root=root,
+            content_column=content.widget,
             panel_stack=panel_stack,
             top_bar=top_bar,
             mixed_url=MixedUrlRefs(

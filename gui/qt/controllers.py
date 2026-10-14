@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -91,6 +92,8 @@ class RunQueueState:
     editing_queue_index: int | None = None
     retry_failed_only: bool = False
     last_output_path: Path | None = None
+    run_indices: list[int] = field(default_factory=list)
+    cleared_queue: list[QueueItem] | None = None
 
 
 class SourceController:
@@ -417,9 +420,6 @@ class RunQueueController:
             getattr(w, "_yt_dlp_update_in_progress", False)
         ):
             return
-        if s.queue_items:
-            self.start_queue_download()
-            return
         url = w.url_edit.text().strip()
         issue = core_workflow.single_start_issue(
             url=url,
@@ -459,6 +459,7 @@ class RunQueueController:
                 str(exc),
             )
             return
+        self.invalidate_queue_undo()
         s.run_state = RunState.SINGLE
         s.last_output_path = None
         s.is_downloading = True
@@ -592,7 +593,7 @@ class RunQueueController:
     def on_queue_remove_selected(self, selected_indices: list[int]) -> None:
         s = self.state
         w = self.window
-        if s.queue_active:
+        if s.queue_active or s.is_downloading:
             return
         normalized = self._normalize_selected_indices(selected_indices)
         if not normalized:
@@ -601,6 +602,7 @@ class RunQueueController:
         clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
         if callable(clear_edit):
             clear_edit()
+        self.invalidate_queue_undo()
         s.queue_items = core_queue_logic.remove_selected_queue_items(
             s.queue_items,
             normalized,
@@ -611,7 +613,7 @@ class RunQueueController:
     def on_queue_move_up(self, selected_indices: list[int]) -> None:
         s = self.state
         w = self.window
-        if s.queue_active:
+        if s.queue_active or s.is_downloading:
             return
         updated, moved = core_queue_logic.move_selected_queue_items_up(
             s.queue_items,
@@ -623,13 +625,14 @@ class RunQueueController:
         clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
         if callable(clear_edit):
             clear_edit()
+        self.invalidate_queue_undo()
         s.queue_items = updated
         w._refresh_queue_panel()
 
     def on_queue_move_down(self, selected_indices: list[int]) -> None:
         s = self.state
         w = self.window
-        if s.queue_active:
+        if s.queue_active or s.is_downloading:
             return
         updated, moved = core_queue_logic.move_selected_queue_items_down(
             s.queue_items,
@@ -641,13 +644,14 @@ class RunQueueController:
         clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
         if callable(clear_edit):
             clear_edit()
+        self.invalidate_queue_undo()
         s.queue_items = updated
         w._refresh_queue_panel()
 
     def on_queue_reorder(self, item_order: list[int]) -> None:
         s = self.state
         w = self.window
-        if s.queue_active:
+        if s.queue_active or s.is_downloading:
             return
         updated, moved = core_queue_logic.reorder_queue_items(
             s.queue_items,
@@ -659,13 +663,14 @@ class RunQueueController:
         clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
         if callable(clear_edit):
             clear_edit()
+        self.invalidate_queue_undo()
         s.queue_items = updated
         w._refresh_queue_panel()
 
     def on_queue_clear(self) -> None:
         s = self.state
         w = self.window
-        if s.queue_active:
+        if s.queue_active or s.is_downloading:
             return
         updated, cleared = core_queue_logic.clear_queue_items(s.queue_items)
         if not cleared:
@@ -674,14 +679,30 @@ class RunQueueController:
         clear_edit = getattr(w, "_clear_queue_item_edit_mode", None)
         if callable(clear_edit):
             clear_edit()
+        s.cleared_queue = deepcopy(s.queue_items)
         s.queue_items = updated
         w._refresh_queue_panel()
         w._update_controls_state()
 
+    def invalidate_queue_undo(self) -> None:
+        self.state.cleared_queue = None
+        refresh = getattr(self.window, "_refresh_queue_panel_state", None)
+        if callable(refresh):
+            refresh()
+
+    def undo_queue_clear(self) -> None:
+        s = self.state
+        if s.is_downloading or s.cleared_queue is None:
+            return
+        s.queue_items = s.cleared_queue
+        s.cleared_queue = None
+        self.window._refresh_queue_panel()
+        self.window._update_controls_state()
+
     def on_queue_edit_item(self, row: int) -> None:
         s = self.state
         w = self.window
-        if s.queue_active:
+        if s.queue_active or s.is_downloading:
             return
         normalized = self._normalize_selected_indices([row])
         if not normalized:
@@ -726,6 +747,7 @@ class RunQueueController:
         if not item_title:
             item_title = str(existing_item.get("title") or "").strip()
         queued_item = core_queue_logic.queue_item(url, settings, title=item_title)
+        self.invalidate_queue_undo()
         if editing_index is not None and 0 <= editing_index < len(s.queue_items):
             s.queue_items[editing_index] = queued_item
             s.editing_queue_index = None
@@ -746,6 +768,7 @@ class RunQueueController:
             status_text,
             tone="success",
             title=success_title,
+            action="queue",
         )
         w._update_controls_state()
 
@@ -759,11 +782,15 @@ class RunQueueController:
             return
         if bool(getattr(w, "_yt_dlp_update_in_progress", False)) or bool(getattr(w, "_is_fetching", False)):
             return
-        if retry_failed_only and not any(item.get("status") == "failed" for item in s.queue_items):
+        indices = [i for i, item in enumerate(s.queue_items)
+                   if str(item.get("url") or "").strip()
+                   and (item.get("status") == "failed" if retry_failed_only
+                        else item.get("status") != "completed")]
+        if not indices:
             return
         queue_check = core_workflow.validate_queue_start(
             is_downloading=s.is_downloading,
-            queue_items=s.queue_items,
+            queue_items=[s.queue_items[i] for i in indices],
         )
         if not queue_check.can_start:
             if queue_check.invalid_index is None or queue_check.invalid_issue is None:
@@ -773,20 +800,22 @@ class RunQueueController:
                 "Missing settings",
                 (
                     "Queue item "
-                    f"{queue_check.invalid_index} is missing "
+                    f"{indices[queue_check.invalid_index - 1] + 1} is missing "
                     f"{core_queue_logic.queue_start_missing_detail(queue_check.invalid_issue)}."
                 ),
             )
             return
 
         s.run_state = RunState.QUEUE
+        self.invalidate_queue_undo()
+        s.run_indices = indices
         s.retry_failed_only = retry_failed_only
-        if not retry_failed_only:
-            for item in s.queue_items:
-                item["status"] = "queued"
-                item.pop("output_path", None)
+        for index in indices:
+            item = s.queue_items[index]
+            item["status"] = "queued"
+            item.pop("output_path", None)
         s.queue_active = True
-        s.queue_index = 0
+        s.queue_index = indices[0]
         s.queue_failed_items = 0
         s.queue_started_ts = self._ports.clock.now_ts()
         s.editing_queue_index = None
@@ -813,9 +842,12 @@ class RunQueueController:
         s = self.state
         if not s.queue_active or s.queue_index is None:
             return
-        if s.retry_failed_only:
-            while s.queue_index < len(s.queue_items) and s.queue_items[s.queue_index].get("status") != "failed":
-                s.queue_index += 1
+        if s.run_indices:
+            candidate = next((i for i in s.run_indices if i >= s.queue_index), None)
+            if candidate is None:
+                self.finish_queue()
+                return
+            s.queue_index = candidate
         next_item = core_workflow.next_queue_run_item(s.queue_items, s.queue_index)
         if next_item is None:
             self.finish_queue()
@@ -824,11 +856,13 @@ class RunQueueController:
         s.last_output_path = None
         s.queue_items[next_item.index]["status"] = "running"
         s.queue_items[next_item.index].pop("output_path", None)
+        display_index = s.run_indices.index(next_item.index) + 1 if s.run_indices else next_item.display_index
+        total = len(s.run_indices) if s.run_indices else next_item.total
         w._append_log(
-            f"[queue] item {next_item.display_index}/{next_item.total} {next_item.url}"
+            f"[queue] item {display_index}/{total} {next_item.url}"
         )
         w._set_current_item_display(
-            progress=f"{next_item.display_index}/{next_item.total}",
+            progress=f"{display_index}/{total}",
             title=str(s.queue_items[next_item.index].get("title") or "Resolving title..."),
         )
         next_output_dir = str(
@@ -838,14 +872,14 @@ class RunQueueController:
             w._set_post_download_output_dir(Path(next_output_dir))
         else:
             w._clear_post_download_output_dir()
-        w._refresh_queue_panel()
+        w._update_queue_row(next_item.index)
 
         self._submit_download_worker(
             self.run_queue_download_worker,
             url=next_item.url,
             settings=next_item.settings,
-            index=next_item.display_index,
-            total=next_item.total,
+            index=display_index,
+            total=total,
             default_output_dir=(
                 str(
                     settings_store.resolve_output_dir_path(
@@ -932,6 +966,7 @@ class RunQueueController:
         s = self.state
         if not s.queue_active or s.queue_index is None:
             return
+        completed_index = s.queue_index
         s.queue_items[s.queue_index]["status"] = (
             "cancelled" if cancelled else "failed" if had_error else "completed"
         )
@@ -955,6 +990,7 @@ class RunQueueController:
             w._append_log("[queue] cancelled")
             self.finish_queue()
             return
+        w._update_queue_row(completed_index)
         w._prepare_next_queue_item_progress()
         self.start_next_queue_item()
 
@@ -971,6 +1007,7 @@ class RunQueueController:
         s.retry_failed_only = False
         s.queue_index = None
         s.queue_failed_items = 0
+        s.run_indices = []
         s.queue_started_ts = None
         s.is_downloading = False
         s.show_progress_item = False

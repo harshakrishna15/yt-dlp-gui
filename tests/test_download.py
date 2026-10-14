@@ -63,6 +63,67 @@ class TestBuildYdlOptions(unittest.TestCase):
     def _update(self, payload: dict) -> None:
         self.updates.append(payload)
 
+    @patch("gui.common.download.resolve_binary", return_value=(None, "missing"))
+    def test_best_available_video_keeps_video_processing(self, _resolve) -> None:
+        for info in ({"custom_format": "bestvideo+bestaudio/best"}, {"custom_format": "best"}):
+            with self.subTest(info=info):
+                opts = download.build_ydl_opts(
+                    url="https://example.com/video", output_dir=Path("/tmp/out"),
+                    fmt_info=info, fmt_label="Best available", format_filter="mp4",
+                    convert_to_mp4=False, playlist_enabled=False, playlist_items=None,
+                    cancel_event=None, log=self._log, update_progress=self._update,
+                )
+                self.assertEqual(opts["format"], info["custom_format"])
+                self.assertEqual(opts["merge_output_format"], "mp4")
+                self.assertIn({"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}, opts["postprocessors"])
+                self.assertNotIn("FFmpegExtractAudio", [pp["key"] for pp in opts["postprocessors"]])
+                self.assertTrue(download._edit_friendly_mp4_required(format_filter="mp4", fmt_info=info))
+
+    @patch("gui.common.download.resolve_binary", return_value=(None, "missing"))
+    def test_best_audio_without_codec_metadata_still_extracts_audio(self, _resolve) -> None:
+        opts = download.build_ydl_opts(
+            url="https://example.com/video", output_dir=Path("/tmp/out"),
+            fmt_info={"custom_format": "bestaudio/best", "is_audio_only": True},
+            fmt_label="Best audio", format_filter="m4a", convert_to_mp4=False,
+            playlist_enabled=False, playlist_items=None, cancel_event=None,
+            log=self._log, update_progress=self._update,
+        )
+        self.assertEqual(opts["postprocessors"][0]["key"], "FFmpegExtractAudio")
+        self.assertIsNone(opts["merge_output_format"])
+
+    @patch("gui.common.download.resolve_binary", return_value=(None, "missing"))
+    def test_literal_percent_signs_in_output_path_and_custom_name(self, _resolve) -> None:
+        for playlist, custom_name, expected_name in (
+            (False, "100% done %(title)s", "100%% done %%(title)s_%(epoch)s.%(ext)s"),
+            (False, "", "%(title)s_%(epoch)s.%(ext)s"),
+            (True, "ignored", "%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s"),
+        ):
+            with self.subTest(playlist=playlist, custom_name=custom_name):
+                opts = download.build_ydl_opts(
+                    url="https://example.com/video", output_dir=Path("/tmp/100% %(title)s"),
+                    fmt_info={"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+                    fmt_label="Video", format_filter="mp4", convert_to_mp4=False,
+                    playlist_enabled=playlist, playlist_items=None, cancel_event=None,
+                    log=self._log, update_progress=self._update, custom_filename=custom_name,
+                )
+                self.assertEqual(opts["outtmpl"], "/tmp/100%% %%(title)s/" + expected_name)
+
+    @patch("gui.common.download.resolve_binary", return_value=(None, "missing"))
+    def test_playlist_format_has_fallback_for_missing_stream_id(self, _resolve) -> None:
+        for info, fallback in (
+            ({"format_id": "251", "vcodec": "none", "acodec": "opus", "ext": "webm"}, "bestaudio/best"),
+            ({"format_id": "22", "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"}, "bestvideo+bestaudio/best"),
+        ):
+            with self.subTest(info=info):
+                opts = download.build_ydl_opts(
+                    url="https://example.com/playlist", output_dir=Path("/tmp/out"),
+                    fmt_info=info, fmt_label="Selected", format_filter=info["ext"],
+                    convert_to_mp4=False, playlist_enabled=True, playlist_items=None,
+                    cancel_event=None, log=self._log, update_progress=self._update,
+                )
+                self.assertTrue(opts["format"].startswith(info["format_id"] + "/"))
+                self.assertTrue(opts["format"].endswith(fallback))
+
     @patch("gui.common.download.resolve_binary")
     def test_build_opts_audio_extract(self, mock_resolve_binary) -> None:
         mock_resolve_binary.return_value = (Path("/usr/bin/ffmpeg"), "system")

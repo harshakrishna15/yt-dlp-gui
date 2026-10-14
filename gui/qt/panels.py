@@ -32,6 +32,10 @@ from .widgets import (
     LayoutConfig,
     NativeComboBoxConfig,
     QueueEmptyStateWidget,
+    EmptyStateWidget,
+    build_divider,
+    build_labeled_fields,
+    LabeledFieldSpec,
     QueueListWidget,
     WidgetConfig,
     _NativeComboBox,
@@ -72,6 +76,9 @@ class QueuePanelRefs:
     queue_list: QueueListWidget
     clear_queue_button: QPushButton
     retry_failed_button: QPushButton
+    start_queue_button: QPushButton
+    undo_button: QPushButton
+    undo_row: QWidget
 
 
 @dataclass(frozen=True)
@@ -119,7 +126,7 @@ def _build_panel_shell(
         widget_config=WidgetConfig(object_name="panelPage"),
         layout_config=LayoutConfig(
             margins=(0, 0, 0, 0),
-            spacing=14 if not framed else 0,
+            spacing=24 if not framed else 0,
         ),
     )
     panel = panel_shell.widget
@@ -167,119 +174,14 @@ def _build_panel_shell(
     return _PanelShellRefs(panel=panel, body_layout=body_layout)
 
 
-def _build_empty_state(
-    parent: QWidget,
-    *,
-    badge: str,
-    title: str,
-    description: str,
-    hint: str,
-) -> _EmptyStateRefs:
-    page_shell = build_vbox(
-        parent,
-        layout_config=LayoutConfig(margins=(28, 12, 28, 12), spacing=0),
-    )
-    page = page_shell.widget
-    layout = page_shell.layout
-    layout.addStretch(1)
-
-    card_shell = build_vbox(
-        page,
-        widget_cls=QFrame,
-        widget_config=WidgetConfig(
-            object_name="panelEmptyCard",
-            maximum_width=520,
-            size_policy=(
-                QSizePolicy.Policy.Preferred,
-                QSizePolicy.Policy.Fixed,
-            ),
-        ),
-        layout_config=LayoutConfig(
-            margins=(24, 24, 24, 24),
-            spacing=10,
-            size_constraint=QLayout.SizeConstraint.SetMinimumSize,
-        ),
-    )
-    card = card_shell.widget
-    card_layout = card_shell.layout
-
-    badge_label = build_label(
-        card,
-        spec=LabelSpec(
-            text=badge,
-            widget_config=WidgetConfig(
-                object_name="panelEmptyBadge",
-                size_policy=(
-                    QSizePolicy.Policy.Fixed,
-                    QSizePolicy.Policy.Fixed,
-                ),
-            ),
-            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        ),
-    )
-
-    title_label = build_label(
-        card,
-        spec=LabelSpec(
-            text=title,
-            widget_config=WidgetConfig(
-                object_name="panelEmptyTitle",
-                size_policy=(
-                    QSizePolicy.Policy.Preferred,
-                    QSizePolicy.Policy.Fixed,
-                ),
-            ),
-            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-            word_wrap=True,
-        ),
-    )
-
-    description_label = build_label(
-        card,
-        spec=LabelSpec(
-            text=description,
-            widget_config=WidgetConfig(
-                object_name="panelEmptyDescription",
-                size_policy=(
-                    QSizePolicy.Policy.Preferred,
-                    QSizePolicy.Policy.Fixed,
-                ),
-            ),
-            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-            word_wrap=True,
-        ),
-    )
-
-    hint_label = build_label(
-        card,
-        spec=LabelSpec(
-            text=hint,
-            widget_config=WidgetConfig(
-                object_name="panelEmptyHint",
-                size_policy=(
-                    QSizePolicy.Policy.Preferred,
-                    QSizePolicy.Policy.Fixed,
-                ),
-            ),
-            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-            word_wrap=True,
-        ),
-    )
-
-    card_layout.addWidget(badge_label, alignment=Qt.AlignmentFlag.AlignLeft)
-    card_layout.addWidget(title_label)
-    card_layout.addWidget(description_label)
-    card_layout.addWidget(hint_label)
-
-    layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignLeft)
-    layout.addStretch(1)
-    return _EmptyStateRefs(
-        page=page,
-        badge_label=badge_label,
-        title_label=title_label,
-        description_label=description_label,
-        hint_label=hint_label,
-    )
+def _build_empty_state(parent: QWidget, *, badge: str, title: str,
+                       description: str, hint: str) -> _EmptyStateRefs:
+    page = EmptyStateWidget(parent, title=title, description=description or hint,
+                            icon="logs.svg" if badge == "LOGS" else "queue-active.svg")
+    empty = QLabel(page)
+    empty.hide()
+    return _EmptyStateRefs(page, page.placeholder_icon, page.placeholder_title,
+                           page.placeholder_description, empty)
 
 
 def _build_settings_card(
@@ -353,7 +255,7 @@ def build_settings_panel(
         shell.panel,
         widget_cls=QFrame,
         widget_config=WidgetConfig(object_name="panelFormCard"),
-        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=12),
+        layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=24),
     )
     form_card = form_card_shell.widget
     form_card_layout = form_card_shell.layout
@@ -367,14 +269,13 @@ def build_settings_panel(
 
     encode_card = _build_settings_card(
         settings_stack,
-        title="Edit-friendly encode",
+        title="Downloads",
     )
     edit_friendly_encoder_combo = build_native_combo(
         encode_card.card,
         register_native_combo=register_native_combo,
         config=NativeComboBoxConfig(
-            minimum_width=340,
-            maximum_width=560,
+            minimum_width=0,
             items=(
                 ("Automatic (recommended)", "auto"),
                 ("Apple hardware encoder", "apple"),
@@ -385,14 +286,16 @@ def build_settings_panel(
             ),
         ),
     )
-    encode_card.layout.addWidget(
-        edit_friendly_encoder_combo, alignment=Qt.AlignmentFlag.AlignLeft
-    )
+    preference_label = WidgetConfig(object_name="outputFormLabel", fixed_width=160)
+    build_labeled_fields(encode_card.card, layout=encode_card.layout, specs=(
+        LabeledFieldSpec(key="encoder", label_text="Edit-friendly encoder", field=edit_friendly_encoder_combo,
+                         label_config=preference_label),
+    ))
     settings_stack_layout.addWidget(encode_card.card)
 
     engine_card = _build_settings_card(
         settings_stack,
-        title="Download engine",
+        title="",
     )
     engine_row_shell = build_hbox(
         engine_card.card,
@@ -412,16 +315,18 @@ def build_settings_panel(
         spec=ButtonSpec(
             text="Update yt-dlp",
             on_click=on_update_yt_dlp,
-            object_name="ghostButton",
+            object_name="ghostButton", role="secondary",
         ),
     )
     engine_row_layout.addWidget(yt_dlp_version_label)
-    engine_row_layout.addStretch(1)
     engine_row_layout.addWidget(yt_dlp_update_button)
-    engine_card.layout.addWidget(engine_row)
+    engine_row_layout.addStretch(1)
+    build_labeled_fields(engine_card.card, layout=engine_card.layout, specs=(
+        LabeledFieldSpec(key="engine", label_text="Engine", field=engine_row, label_config=preference_label),
+    ))
     update_status_shell = build_vbox(
         engine_card.card,
-        widget_config=WidgetConfig(object_name="updateStatus", fixed_height=68, visible=False),
+        widget_config=WidgetConfig(object_name="updateStatus", minimum_height=68, visible=False),
         layout_config=LayoutConfig(margins=(0, 4, 0, 4), spacing=4),
     )
     update_status = update_status_shell.widget
@@ -436,9 +341,10 @@ def build_settings_panel(
         update_status,
         layout_config=LayoutConfig(margins=(0, 0, 0, 0), spacing=8),
     )
+    update_heading.widget.setMinimumHeight(32)
     update_details_button = build_button(update_heading.widget, spec=ButtonSpec(
         text="View details", object_name="feedbackActionButton", on_click=on_view_logs,
-        fixed_height=24,
+        compact=True,
     ))
     update_details_button.hide()
     update_heading.layout.addWidget(update_status_label, 1)
@@ -453,29 +359,27 @@ def build_settings_panel(
     update_status_shell.layout.addWidget(update_progress_bar)
     update_status_shell.layout.addWidget(update_detail_label)
     engine_card.layout.addWidget(update_status)
-    settings_stack_layout.addWidget(engine_card.card)
+    # Engine belongs to the App section below.
 
     open_folder_after_download_check = build_checkbox(
         settings_stack,
         spec=CheckBoxSpec(text="Open output folder after downloads"),
     )
-    post_download_card = _build_settings_card(
-        settings_stack,
-        title="Post-download",
-    )
-    post_download_card.layout.addWidget(open_folder_after_download_check)
-    settings_stack_layout.addWidget(post_download_card.card)
+    build_labeled_fields(encode_card.card, layout=encode_card.layout, specs=(
+        LabeledFieldSpec(key="after_download", label_text="", field=open_folder_after_download_check,
+                         label_config=preference_label),
+    ))
 
     remove_app_data_button = build_button(settings_stack, spec=ButtonSpec(
-        text="Remove app data and quit...", object_name="ghostButton",
+        text="Remove app data and quit...", object_name="ghostButton", role="destructive",
         on_click=on_remove_app_data,
     ))
-    settings_stack_layout.addWidget(remove_app_data_button, alignment=Qt.AlignmentFlag.AlignLeft)
+
 
     app_card = _build_settings_card(
         settings_stack,
         object_name="settingsAppCard",
-        spacing=0,
+        spacing=12,
     )
     app_card.card.setSizePolicy(
         QSizePolicy.Policy.Preferred,
@@ -505,26 +409,35 @@ def build_settings_panel(
     )
     app_copy_layout.addWidget(app_name_label)
     app_copy_layout.addWidget(version_label)
-    app_copy_layout.addStretch(1)
     view_logs_button = build_button(
         app_copy,
-        spec=ButtonSpec(text="View logs", object_name="ghostButton"),
+        spec=ButtonSpec(text="View logs", object_name="ghostButton", role="secondary"),
     )
-    app_copy_layout.addWidget(view_logs_button)
+    support = build_hbox(app_card.card, layout_config=LayoutConfig(spacing=12))
+    support.layout.addWidget(view_logs_button)
     export_diagnostics_button = build_button(
         app_copy,
         spec=ButtonSpec(
             text="Export diagnostics",
             on_click=on_export_diagnostics,
-            object_name="ghostButton",
+            object_name="ghostButton", role="secondary",
         ),
     )
-    app_copy_layout.addWidget(export_diagnostics_button)
+    support.layout.addWidget(export_diagnostics_button)
+    support.layout.addStretch(1)
+    app_copy_layout.addStretch(1)
     app_card.layout.addWidget(app_copy)
+    app_card.layout.addWidget(support.widget)
 
     form_card_layout.addWidget(settings_stack)
-    form_card_layout.addStretch(1)
+    form_card_layout.addSpacing(12)
+    form_card_layout.addWidget(build_label(form_card, spec=LabelSpec(
+        text="App", widget_config=WidgetConfig(object_name="settingsRowTitle"))))
+    form_card_layout.addWidget(engine_card.card)
     form_card_layout.addWidget(app_card.card)
+    build_divider(form_card, form_card_layout)
+    form_card_layout.addWidget(remove_app_data_button, alignment=Qt.AlignmentFlag.AlignLeft)
+    form_card_layout.addStretch(1)
     shell.body_layout.addWidget(form_card, stretch=1)
     return SettingsPanelRefs(
         panel=shell.panel,
@@ -548,15 +461,20 @@ def build_queue_panel(
     parent: QWidget,
     on_clear_queue: Callable[[], None],
     on_retry_failed: Callable[[], None] = lambda: None,
+    on_start_queue: Callable[[], None] = lambda: None,
+    on_downloads: Callable[[], None] = lambda: None,
+    on_undo: Callable[[], None] = lambda: None,
 ) -> QueuePanelRefs:
     shell = _build_panel_shell(
         parent=parent,
-        title="Download Queue",
+        title="Queue",
         framed=False,
     )
 
     queue_stack = QStackedWidget(shell.panel)
     empty = QueueEmptyStateWidget(queue_stack)
+    go_button = build_button(empty, spec=ButtonSpec("Go to Downloads", role="secondary", on_click=on_downloads))
+    empty.content_layout.addWidget(go_button, alignment=Qt.AlignmentFlag.AlignHCenter)
     queue_empty_index = queue_stack.addWidget(empty)
 
     content_shell = build_vbox(
@@ -571,6 +489,13 @@ def build_queue_panel(
     content_layout.addWidget(queue_list, stretch=1)
     queue_content_index = queue_stack.addWidget(content)
     shell.body_layout.addWidget(queue_stack, stretch=1)
+    undo_shell = build_hbox(shell.panel, layout_config=LayoutConfig(spacing=12))
+    undo_shell.layout.addWidget(QLabel("Queue cleared", undo_shell.widget))
+    undo_button = build_button(undo_shell.widget, spec=ButtonSpec("Undo", role="quiet", compact=True, on_click=on_undo))
+    undo_shell.layout.addWidget(undo_button)
+    undo_shell.layout.addStretch(1)
+    undo_shell.widget.hide()
+    shell.body_layout.addWidget(undo_shell.widget)
 
     clear_panel = build_button_panel(
         shell.panel,
@@ -598,6 +523,7 @@ def build_queue_panel(
                        on_click=on_retry_failed),
             ButtonSpec(
                 text="Clear all",
+                role="destructive",
                 object_name="ghostButton",
                 size_policy=(
                     QSizePolicy.Policy.Fixed,
@@ -608,7 +534,18 @@ def build_queue_panel(
         ),
     )
     clear_queue_button = clear_panel.buttons[1]
-    shell.body_layout.addWidget(clear_panel.card, alignment=Qt.AlignmentFlag.AlignRight)
+    start_queue_button = build_button(shell.panel, spec=ButtonSpec(
+        "Start queue", role="primary", object_name="primaryActionButton", on_click=on_start_queue))
+    queue_actions = build_hbox(shell.panel, layout_config=LayoutConfig(spacing=12))
+    clear_panel.buttons_layout.removeWidget(clear_queue_button)
+    clear_panel.buttons_layout.removeWidget(clear_panel.buttons[0])
+    clear_panel.card.hide()
+    queue_actions.layout.addWidget(clear_queue_button)
+    queue_actions.layout.addStretch(1)
+    queue_actions.layout.addWidget(clear_panel.buttons[0])
+    queue_actions.layout.addWidget(start_queue_button)
+    build_divider(shell.panel, shell.body_layout)
+    shell.body_layout.addWidget(queue_actions.widget)
 
     return QueuePanelRefs(
         panel=shell.panel,
@@ -619,6 +556,9 @@ def build_queue_panel(
         queue_list=queue_list,
         clear_queue_button=clear_queue_button,
         retry_failed_button=clear_panel.buttons[0],
+        start_queue_button=start_queue_button,
+        undo_button=undo_button,
+        undo_row=undo_shell.widget,
     )
 
 
@@ -632,7 +572,7 @@ def build_logs_panel(
 ) -> LogsPanelRefs:
     shell = _build_panel_shell(
         parent=parent,
-        title="Activity Log",
+        title="Logs",
         framed=False,
     )
     back_button = QToolButton(shell.panel)
@@ -720,7 +660,16 @@ def build_logs_panel(
     )
     actions = action_panel.card
     export_logs_button, logs_clear_button = action_panel.buttons
-    shell.body_layout.addWidget(actions, alignment=Qt.AlignmentFlag.AlignRight)
+    grid = action_panel.buttons_layout
+    grid.removeWidget(export_logs_button)
+    grid.removeWidget(logs_clear_button)
+    grid.addWidget(logs_clear_button, 0, 0)
+    grid.addWidget(export_logs_button, 0, 2)
+    grid.setColumnStretch(0, 0)
+    grid.setColumnStretch(1, 1)
+    grid.setColumnStretch(2, 0)
+    build_divider(shell.panel, shell.body_layout)
+    shell.body_layout.addWidget(actions)
     return LogsPanelRefs(
         panel=shell.panel,
         logs_stack=logs_stack,

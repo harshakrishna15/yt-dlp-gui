@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, Sequence, TypeVar
@@ -19,7 +20,7 @@ from PySide6.QtCore import (
     Signal,
     QVariantAnimation,
 )
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QStandardItemModel
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QStandardItemModel, QStaticText, QTransform
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QLineEdit,
     QListWidget,
+    QScrollArea,
     QPushButton,
     QProgressBar,
     QSizePolicy,
@@ -47,6 +49,7 @@ from PySide6.QtWidgets import (
 )
 
 from .icon_assets import load_icon_asset
+from . import style as ui_style
 
 
 TWidget = TypeVar("TWidget", bound=QWidget)
@@ -69,6 +72,8 @@ class _QtSignals(QObject):
 QUEUE_SOURCE_INDEX_ROLE = Qt.ItemDataRole.UserRole
 QUEUE_TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
 QUEUE_META_ROLE = Qt.ItemDataRole.UserRole + 2
+QUEUE_COMPLETED_ROLE = Qt.ItemDataRole.UserRole + 3
+QUEUE_STATUS_ROLE = Qt.ItemDataRole.UserRole + 4
 
 
 @dataclass(frozen=True)
@@ -77,7 +82,7 @@ class NativeComboBoxConfig:
     items: tuple[tuple[str, object], ...] = ()
     hint_text: str = ""
     maximum_width: int | None = None
-    fixed_height: int = 45
+    fixed_height: int = ui_style.CONTROL_HEIGHT
 
 
 @dataclass(frozen=True)
@@ -109,6 +114,11 @@ class ButtonSpec:
     focus_policy: Qt.FocusPolicy | None = None
     cursor: Qt.CursorShape | None = None
     stretch: int = 0
+    role: str | None = None
+    compact: bool = False
+    accessible_name: str = ""
+    sizing: str = "standard"
+    icon: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,6 +167,7 @@ class LineEditSpec:
     read_only: bool | None = None
     on_text_changed: Callable[..., object] | None = None
     on_return_pressed: Callable[[], None] | None = None
+    sizing: str = "standard"
 
 
 @dataclass(frozen=True)
@@ -176,7 +187,7 @@ class LabeledFieldSpec:
     block_object_name: str | None = "outputCardBlock"
     field_host_object_name: str | None = "outputFieldHost"
     row_spacing: int = 4
-    field_spacing: int = 20
+    field_spacing: int = 8
     field_alignment: Qt.Alignment | None = None
     visible: bool = True
 
@@ -495,20 +506,18 @@ class AnimatedSegmentedRail(QWidget):
         self.sync_selection(animate=False)
 
     def _set_selection_rect(self, value) -> None:
-        if isinstance(value, QRect):
+        if isinstance(value, QRect) and value != self._selection_rect:
             self._selection_rect = QRect(value)
             self._sync_selection_frame()
-            self.update()
 
     def _sync_selection_frame(self) -> None:
         if self._selection_rect.isNull():
             self._selection_frame.hide()
             return
         self._selection_frame.setGeometry(self._selection_rect)
-        self._selection_frame.show()
-        self._selection_frame.lower()
-        for button in self._buttons:
-            button.raise_()
+        if self._selection_frame.isHidden():
+            self._selection_frame.show()
+            self._selection_frame.lower()
 
     def _stop_selection_animation(self) -> None:
         if self._selection_anim is None:
@@ -691,6 +700,8 @@ def build_label(parent: QWidget, *, spec: LabelSpec) -> QLabel:
 
 def build_line_edit(parent: QWidget, *, spec: LineEditSpec) -> QLineEdit:
     line_edit = QLineEdit(spec.text, parent)
+    line_edit.setProperty("controlSizing", spec.sizing)
+    line_edit.setMinimumHeight(ui_style.control_height(spec.sizing))
     _apply_widget_config(line_edit, config=spec.widget_config)
     if spec.placeholder_text is not None:
         line_edit.setPlaceholderText(spec.placeholder_text)
@@ -735,7 +746,7 @@ def build_labeled_fields(
         block = block_shell.widget
         block_layout = block_shell.layout
 
-        row_shell = build_hbox(
+        row_shell = build_vbox(
             block,
             layout_config=LayoutConfig(
                 margins=(0, 0, 0, 0), spacing=spec.field_spacing
@@ -749,6 +760,7 @@ def build_labeled_fields(
             spec=LabelSpec(
                 text=spec.label_text,
                 widget_config=spec.label_config,
+                alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             ),
         )
 
@@ -768,8 +780,12 @@ def build_labeled_fields(
         else:
             field_host_layout.addWidget(spec.field, 0, spec.field_alignment)
 
+        label.setMinimumWidth(0)
+        label.setMaximumWidth(16777215)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        label.setVisible(bool(spec.label_text))
         row_layout.addWidget(label)
-        row_layout.addWidget(field_host, stretch=1)
+        row_layout.addWidget(field_host)
         block_layout.addWidget(row)
         block.setVisible(spec.visible)
         layout.addWidget(block)
@@ -782,6 +798,26 @@ def build_button(parent: QWidget, *, spec: ButtonSpec) -> QPushButton:
     button = StableSizeHintButton(spec.text, parent)
     if spec.object_name:
         button.setObjectName(spec.object_name)
+    role = spec.role or {
+        "primaryActionButton": "primary", "analyzeUrlButton": "primary",
+        "dangerActionButton": "destructive", "ghostButton": "quiet",
+        "folderButton": "icon", "feedbackActionButton": "quiet",
+        "feedbackDismissButton": "icon",
+    }.get(spec.object_name, "secondary")
+    if role not in {"primary", "secondary", "quiet", "destructive", "icon"}:
+        raise ValueError(f"Unknown button role: {role}")
+    button.setProperty("uiRole", role)
+    button.setProperty("inlineControl", spec.compact or spec.sizing == "inline")
+    button.setProperty("controlSizing", spec.sizing)
+    if spec.icon:
+        button.setIcon(load_icon_asset(spec.icon, size=QSize(18, 18)))
+        button.setIconSize(QSize(18, 18))
+    button.setProperty("iconOnly", role == "icon" or spec.text in {"×", "✕"})
+    button.setMinimumHeight(ui_style.control_height("inline" if spec.compact else spec.sizing))
+    button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    button.setAccessibleName(spec.accessible_name or spec.text or spec.tooltip)
+    if spec.tooltip:
+        button.setProperty("allowToolTip", True)
     button.setCheckable(spec.checkable)
     if spec.auto_exclusive:
         button.setAutoExclusive(True)
@@ -806,6 +842,37 @@ def build_button(parent: QWidget, *, spec: ButtonSpec) -> QPushButton:
     if spec.on_toggled is not None:
         button.toggled.connect(spec.on_toggled)
     return button
+
+
+def build_form_scroll(content: QWidget, parent: QWidget) -> QScrollArea:
+    """Centered, width-limited form; navigation and activity live outside it."""
+    content.setMaximumWidth(ui_style.FORM_MAX_WIDTH)
+    content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    layout = content.layout()
+    if layout is not None:
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+    shell = QWidget()
+    shell_layout = QHBoxLayout(shell)
+    shell_layout.setContentsMargins(0, 0, 0, 0)
+    shell_layout.setSpacing(0)
+    shell_layout.addStretch(1)
+    shell_layout.addWidget(content, 1000)
+    shell_layout.addStretch(1)
+    scroll = QScrollArea(parent)
+    scroll.setObjectName("formScroll")
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setWidget(shell)
+    return scroll
+
+
+def build_divider(parent: QWidget, layout: QLayout) -> QFrame:
+    divider = QFrame(parent)
+    divider.setObjectName("sectionDivider")
+    divider.setFixedHeight(1)
+    layout.addWidget(divider)
+    return divider
 
 
 def build_button_grid(
@@ -914,37 +981,49 @@ def build_segmented_rail(
 class _QueueItemDelegate(QStyledItemDelegate):
     edit_requested = Signal(int)
     remove_requested = Signal(int)
+    reveal_requested = Signal(int)
 
-    _ITEM_HEIGHT = 58
+    _ITEM_HEIGHT = 76
     _TEXT_MARGIN = 12
     _ITEM_PADDING = 7
     _REMOVE_MARGIN = 10
     _REMOVE_GAP = 10
     _EDIT_GAP = 8
-    _EDIT_WIDTH = 54
-    _EDIT_HEIGHT = 24
-    _REMOVE_SIZE = 22
-    _REMOVE_ICON_INSET = 6.2
-    _REMOVE_BG = QColor("#322523")
-    _REMOVE_BG_HOVER = QColor("#44302d")
-    _REMOVE_BORDER = QColor("#6e4741")
-    _REMOVE_BORDER_HOVER = QColor("#8b5d56")
-    _REMOVE_TEXT = QColor("#f2d6cf")
-    _REMOVE_TEXT_HOVER = QColor("#fff1ec")
-    _EDIT_BG = QColor("#18342d")
-    _EDIT_BG_HOVER = QColor("#1f443a")
-    _EDIT_BORDER = QColor("#418e75")
-    _EDIT_BORDER_HOVER = QColor("#38a27f")
-    _EDIT_TEXT = QColor("#8bdcbe")
-    _EDIT_TEXT_HOVER = QColor("#d4f6e8")
+    _EDIT_WIDTH = 60
+    _EDIT_HEIGHT = ui_style.INLINE_HEIGHT
+    _REMOVE_SIZE = ui_style.INLINE_HEIGHT
+    _REMOVE_ICON_INSET = 8
+    _REMOVE_BG, _REMOVE_BORDER, _REMOVE_TEXT = map(QColor, ui_style.button_colors("destructive"))
+    _REMOVE_BG_HOVER, _REMOVE_BORDER_HOVER, _REMOVE_TEXT_HOVER = map(QColor, ui_style.button_colors("destructive", hover=True))
+    _EDIT_BG, _EDIT_BORDER, _EDIT_TEXT = map(QColor, ui_style.button_colors("secondary"))
+    _EDIT_BG_HOVER, _EDIT_BORDER_HOVER, _EDIT_TEXT_HOVER = map(QColor, ui_style.button_colors("secondary", hover=True))
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._hovered_row = -1
         self._hovered_action: str | None = None
+        self._text_cache: OrderedDict[tuple, QStaticText] = OrderedDict()
+
+    def _draw_text(self, painter: QPainter, rect: QRect, text: str, *, centered: bool = False) -> None:
+        font = painter.font()
+        key = (text, font.key(), rect.width())
+        prepared = self._text_cache.get(key)
+        if prepared is None:
+            shown = QFontMetrics(font).elidedText(text, Qt.TextElideMode.ElideRight, rect.width())
+            prepared = QStaticText(shown)
+            prepared.setTextFormat(Qt.TextFormat.PlainText)
+            prepared.prepare(QTransform(), font)
+            self._text_cache[key] = prepared
+            if len(self._text_cache) > 1024:
+                self._text_cache.popitem(last=False)
+        else:
+            self._text_cache.move_to_end(key)
+        size = prepared.size()
+        x = rect.x() + ((rect.width() - size.width()) / 2 if centered else 0)
+        painter.drawStaticText(QPointF(x, rect.y() + (rect.height() - size.height()) / 2), prepared)
 
     def set_hovered_action(self, row: int | None, action: str | None) -> bool:
-        normalized_action = action if action in {"edit", "remove"} else None
+        normalized_action = action if action in {"edit", "remove", "reveal"} else None
         normalized_row = (
             int(row) if normalized_action is not None and row is not None else -1
         )
@@ -966,9 +1045,13 @@ class _QueueItemDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
         size = super().sizeHint(option, index)
-        if size.height() < self._ITEM_HEIGHT:
-            size.setHeight(self._ITEM_HEIGHT)
+        size.setHeight(max(size.height(), self._ITEM_HEIGHT, option.fontMetrics.height() * 2 + 16))
         return size
+
+    def _action_size(self, text: str, minimum_width: int) -> QSize:
+        metrics = self.parent().fontMetrics()
+        return QSize(max(minimum_width, metrics.horizontalAdvance(text) + 26),
+                     max(self._EDIT_HEIGHT, metrics.height() + 8))
 
     def remove_button_rect(self, rect: QRect) -> QRect:
         x = rect.x() + rect.width() - self._REMOVE_MARGIN - self._REMOVE_SIZE
@@ -977,9 +1060,16 @@ class _QueueItemDelegate(QStyledItemDelegate):
 
     def edit_button_rect(self, rect: QRect) -> QRect:
         remove_rect = self.remove_button_rect(rect)
-        x = remove_rect.left() - self._EDIT_GAP - self._EDIT_WIDTH
-        y = rect.y() + max(0, (rect.height() - self._EDIT_HEIGHT) // 2)
-        return QRect(x, y, self._EDIT_WIDTH, self._EDIT_HEIGHT)
+        size = self._action_size("Edit", self._EDIT_WIDTH)
+        x = remove_rect.left() - self._EDIT_GAP - size.width()
+        y = rect.y() + max(0, (rect.height() - size.height()) // 2)
+        return QRect(QPoint(x, y), size)
+
+    def reveal_button_rect(self, rect: QRect, *, editable: bool = True) -> QRect:
+        import sys
+        right = self.edit_button_rect(rect).left() - self._EDIT_GAP if editable else rect.right() - self._REMOVE_MARGIN
+        size = self._action_size("Show in Finder" if sys.platform == "darwin" else "Show in folder", 140)
+        return QRect(QPoint(right - size.width(), rect.center().y() - size.height() // 2), size)
 
     def _queue_editable(self, widget: object) -> bool:
         checker = getattr(widget, "queue_editable", None)
@@ -1019,22 +1109,20 @@ class _QueueItemDelegate(QStyledItemDelegate):
             -self._TEXT_MARGIN,
             -self._ITEM_PADDING,
         )
-        if editable:
-            edit_rect = self.edit_button_rect(view_option.rect)
-            text_rect.setRight(edit_rect.left() - self._REMOVE_GAP)
+        reveal = bool(index.data(QUEUE_COMPLETED_ROLE))
+        if editable or reveal:
+            action_rect = self.reveal_button_rect(view_option.rect, editable=editable) if reveal else self.edit_button_rect(view_option.rect)
+            text_rect.setRight(action_rect.left() - self._REMOVE_GAP)
         if text_rect.width() > 0:
             title_color = (
                 view_option.palette.highlightedText().color()
                 if view_option.state & QStyle.StateFlag.State_Selected
                 else view_option.palette.text().color()
             )
-            meta_color = QColor(title_color)
-            meta_color.setAlpha(
-                188 if view_option.state & QStyle.StateFlag.State_Selected else 168
-            )
+            meta_color = QColor(ui_style._PALETTE["text_muted"])
 
             title_font = painter.font()
-            title_font.setBold(True)
+            title_font.setWeight(QFont.Weight.DemiBold)
             meta_font = painter.font()
             point_size = meta_font.pointSizeF()
             if point_size > 0:
@@ -1052,29 +1140,21 @@ class _QueueItemDelegate(QStyledItemDelegate):
             painter.save()
             painter.setFont(title_font)
             painter.setPen(title_color)
-            shown_title = painter.fontMetrics().elidedText(
-                title_text,
-                Qt.TextElideMode.ElideRight,
-                title_rect.width(),
-            )
-            painter.drawText(
-                title_rect,
-                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                shown_title,
-            )
+            self._draw_text(painter, title_rect, title_text)
             if meta_text:
                 painter.setFont(meta_font)
                 painter.setPen(meta_color)
-                shown_meta = painter.fontMetrics().elidedText(
-                    meta_text,
-                    Qt.TextElideMode.ElideRight,
-                    meta_rect.width(),
-                )
-                painter.drawText(
-                    meta_rect,
-                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                    shown_meta,
-                )
+                status = str(index.data(QUEUE_STATUS_ROLE) or "queued")
+                label = {"downloading": "Downloading", "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled"}.get(status, "Queued")
+                for prefix in ("Completed · ", "Failed · ", "Cancelled · ", "Downloading · "):
+                    meta_text = meta_text.removeprefix(prefix)
+                status_rect = QRect(meta_rect)
+                status_rect.setWidth(min(meta_rect.width(), QFontMetrics(meta_font).horizontalAdvance(label) + 12))
+                painter.setPen(QColor({"completed": "#166534", "failed": "#b42318", "downloading": ui_style._PALETTE["accent_text"]}.get(status, ui_style._PALETTE["text_muted"])))
+                self._draw_text(painter, status_rect, label)
+                meta_rect.setLeft(status_rect.right() + 8)
+                painter.setPen(meta_color)
+                self._draw_text(painter, meta_rect, meta_text)
             painter.restore()
 
         if editable:
@@ -1083,18 +1163,17 @@ class _QueueItemDelegate(QStyledItemDelegate):
             edit_hovered = self._action_hovered(index.row(), "edit")
             remove_hovered = self._action_hovered(index.row(), "remove")
             painter.save()
+            action_font = painter.font()
+            action_font.setWeight(QFont.Weight(ui_style.BUTTON_WEIGHT["secondary"]))
+            painter.setFont(action_font)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             painter.setPen(
                 QPen(self._EDIT_BORDER_HOVER if edit_hovered else self._EDIT_BORDER)
             )
             painter.setBrush(self._EDIT_BG_HOVER if edit_hovered else self._EDIT_BG)
-            painter.drawRoundedRect(edit_rect.adjusted(0, 0, -1, -1), 12, 12)
+            painter.drawRoundedRect(edit_rect.adjusted(0, 0, -1, -1), ui_style.CORNER_RADIUS, ui_style.CORNER_RADIUS)
             painter.setPen(self._EDIT_TEXT_HOVER if edit_hovered else self._EDIT_TEXT)
-            painter.drawText(
-                edit_rect,
-                int(Qt.AlignmentFlag.AlignCenter),
-                "Edit",
-            )
+            self._draw_text(painter, edit_rect, "Edit", centered=True)
             remove_frame = QRectF(remove_rect).adjusted(0.5, 0.5, -0.5, -0.5)
             painter.setPen(
                 QPen(
@@ -1104,7 +1183,7 @@ class _QueueItemDelegate(QStyledItemDelegate):
             painter.setBrush(
                 self._REMOVE_BG_HOVER if remove_hovered else self._REMOVE_BG
             )
-            painter.drawEllipse(remove_frame)
+            painter.drawRoundedRect(remove_frame, ui_style.CORNER_RADIUS, ui_style.CORNER_RADIUS)
             icon_pen = QPen(
                 self._REMOVE_TEXT_HOVER if remove_hovered else self._REMOVE_TEXT,
                 1.8,
@@ -1121,7 +1200,26 @@ class _QueueItemDelegate(QStyledItemDelegate):
             painter.drawLine(icon_bounds.bottomLeft(), icon_bounds.topRight())
             painter.restore()
 
+        if reveal:
+            import sys
+            rect = self.reveal_button_rect(view_option.rect, editable=editable)
+            bg, border, text = ui_style.button_colors("secondary", hover=self._action_hovered(index.row(), "reveal"))
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setBrush(QColor(bg))
+            painter.setPen(QColor(border))
+            painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), ui_style.CORNER_RADIUS, ui_style.CORNER_RADIUS)
+            painter.setPen(QColor(text))
+            self._draw_text(painter, rect, "Show in Finder" if sys.platform == "darwin" else "Show in folder", centered=True)
+            painter.restore()
+
     def editorEvent(self, event, model, option: QStyleOptionViewItem, index) -> bool:
+        if (bool(index.data(QUEUE_COMPLETED_ROLE)) and event.type() in {QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease}
+                and hasattr(event, "position") and event.button() == Qt.MouseButton.LeftButton
+                and self.reveal_button_rect(option.rect, editable=self._queue_editable(option.widget)).contains(event.position().toPoint())):
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                self.reveal_requested.emit(index.row())
+            return True
         if (
             self._queue_editable(option.widget)
             and event.type()
@@ -1150,10 +1248,14 @@ class QueueListWidget(QListWidget):
     edit_requested = Signal(int)
     remove_requested = Signal(int)
     items_reordered = Signal(list)
+    reveal_requested = Signal(int)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._queue_editable = True
+        # Every row uses the same two-line layout; avoid measuring every title
+        # whenever the viewport changes or the list scrolls.
+        self.setUniformItemSizes(True)
+        self._queue_editable = False
         self._delegate = _QueueItemDelegate(self)
         self.setItemDelegate(self._delegate)
         self._delegate.edit_requested.connect(self._emit_edit_requested)
@@ -1164,6 +1266,27 @@ class QueueListWidget(QListWidget):
         self.setAutoScroll(True)
         self.setAutoScrollMargin(self._DRAG_EDGE_AUTOSCROLL_MARGIN)
         self.set_queue_editable(True)
+        # Native buttons for the selected row expose the same actions to Tab and
+        # assistive technology without allocating widgets for every queue item.
+        import sys
+        self._row_buttons = {}
+        for action, text, role in (("reveal", "Show in Finder" if sys.platform == "darwin" else "Show in folder", "secondary"),
+                                   ("edit", "Edit", "secondary"), ("remove", "×", "destructive")):
+            button = build_button(self.viewport(), spec=ButtonSpec(text, role=role, compact=True))
+            if action == "remove":
+                button.setText("")
+                button.setIcon(load_icon_asset("remove.svg", size=QSize(16, 16)))
+                button.setIconSize(QSize(16, 16))
+            button.hide()
+            button.clicked.connect(lambda _checked=False, a=action: self._activate_row_action(a))
+            self._row_buttons[action] = button
+        self._delegate.reveal_requested.connect(self.reveal_requested.emit)
+        self.currentRowChanged.connect(self._sync_row_actions)
+        self.verticalScrollBar().valueChanged.connect(self._sync_row_actions)
+        self.model().dataChanged.connect(self._sync_row_actions)
+        QWidget.setTabOrder(self, self._row_buttons["reveal"])
+        QWidget.setTabOrder(self._row_buttons["reveal"], self._row_buttons["edit"])
+        QWidget.setTabOrder(self._row_buttons["edit"], self._row_buttons["remove"])
 
     def _emit_edit_requested(self, row: int) -> None:
         self.edit_requested.emit(int(row))
@@ -1175,6 +1298,8 @@ class QueueListWidget(QListWidget):
         return self._queue_editable
 
     def set_queue_editable(self, editable: bool) -> None:
+        if self._queue_editable == bool(editable):
+            return
         self._queue_editable = bool(editable)
         drag_drop_mode = (
             QAbstractItemView.DragDropMode.InternalMove
@@ -1188,18 +1313,21 @@ class QueueListWidget(QListWidget):
         self.setDropIndicatorShown(self._queue_editable)
         self.setDragDropMode(drag_drop_mode)
         self.viewport().update()
+        self._sync_row_actions()
 
     def hovered_inline_action(self) -> tuple[int | None, str | None]:
         return self._delegate.hovered_action()
 
     def _inline_action_at(self, pos: QPoint) -> tuple[int | None, str | None]:
-        if not self._queue_editable:
-            return (None, None)
         index = self.indexAt(pos)
         if not index.isValid():
             return (None, None)
         row = int(index.row())
         rect = self.visualRect(index)
+        if bool(index.data(QUEUE_COMPLETED_ROLE)) and self._delegate.reveal_button_rect(rect, editable=self._queue_editable).contains(pos):
+            return (row, "reveal")
+        if not self._queue_editable:
+            return (None, None)
         if self._delegate.edit_button_rect(rect).contains(pos):
             return (row, "edit")
         if self._delegate.remove_button_rect(rect).contains(pos):
@@ -1211,6 +1339,7 @@ class QueueListWidget(QListWidget):
         row: int | None,
         action: str | None,
     ) -> None:
+        previous_row, _ = self._delegate.hovered_action()
         if not self._delegate.set_hovered_action(row, action):
             if action is None:
                 self.viewport().unsetCursor()
@@ -1221,7 +1350,11 @@ class QueueListWidget(QListWidget):
             self.viewport().unsetCursor()
         else:
             self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
-        self.viewport().update()
+        for changed_row in {previous_row, row}:
+            if changed_row is not None:
+                item = self.item(changed_row)
+                if item is not None:
+                    self.viewport().update(self.visualItemRect(item))
 
     def mouseMoveEvent(self, event) -> None:
         pos = event.position().toPoint() if hasattr(event, "position") else QPoint()
@@ -1244,6 +1377,55 @@ class QueueListWidget(QListWidget):
         if item is None:
             return QRect()
         return self._delegate.edit_button_rect(self.visualItemRect(item))
+
+    def _activate_row_action(self, action: str) -> None:
+        row = self.currentRow()
+        item = self.item(row)
+        if item is None:
+            return
+        if action == "reveal" and item.data(QUEUE_COMPLETED_ROLE):
+            self.reveal_requested.emit(row)
+        elif self._queue_editable:
+            (self.edit_requested if action == "edit" else self.remove_requested).emit(row)
+
+    def _sync_row_actions(self, *args) -> None:
+        if not hasattr(self, "_row_buttons"):
+            return
+        item = self.currentItem()
+        rect = self.visualItemRect(item) if item is not None else QRect()
+        visible = self.isVisible() and item is not None and self.viewport().rect().intersects(rect)
+        for action, button in self._row_buttons.items():
+            show = visible and (bool(item.data(QUEUE_COMPLETED_ROLE)) if action == "reveal" else self._queue_editable)
+            button.setVisible(show)
+            if not show:
+                continue
+            target = (self._delegate.reveal_button_rect(rect, editable=self._queue_editable) if action == "reveal" else
+                      self._delegate.edit_button_rect(rect) if action == "edit" else self._delegate.remove_button_rect(rect))
+            button.setGeometry(target)
+            label = "Remove" if action == "remove" else button.text()
+            button.setAccessibleName(f"{label}: {item.data(QUEUE_TITLE_ROLE) or item.text()}")
+            button.setToolTip(button.accessibleName())
+            button.setProperty("allowToolTip", True)
+            button.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_row_actions()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._sync_row_actions()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_F2 and self._queue_editable:
+            self._activate_row_action("edit")
+        elif event.key() in {Qt.Key.Key_Delete, Qt.Key.Key_Backspace} and self._queue_editable:
+            for row in sorted((self.row(i) for i in self.selectedItems()), reverse=True):
+                self.remove_requested.emit(row)
+        elif event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter} and self.currentItem() is not None and self.currentItem().data(QUEUE_COMPLETED_ROLE):
+            self._activate_row_action("reveal")
+        else:
+            super().keyPressEvent(event)
 
     def item_order(self) -> list[int]:
         order: list[int] = []
@@ -1372,8 +1554,32 @@ class WorkspaceSummaryWidget(QFrame):
         self._progress_bar.setValue(int(round(clamped * 10)))
 
 
-class QueueEmptyStateWidget(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+class _HeightForWidthWidget(QWidget):
+    """Keep wrapped copy and its actions inside the allocated group height."""
+
+    def _sync_natural_height(self) -> None:
+        layout = self.layout()
+        if layout is None or self.width() <= 0:
+            return
+        natural = max(layout.minimumSize().height(), layout.totalHeightForWidth(self.width()))
+        if self.minimumHeight() != natural:
+            self.setMinimumHeight(natural)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_natural_height()
+
+    def event(self, event) -> bool:
+        result = super().event(event)
+        if event.type() in {QEvent.Type.LayoutRequest, QEvent.Type.FontChange, QEvent.Type.StyleChange}:
+            self._sync_natural_height()
+        return result
+
+
+class EmptyStateWidget(QWidget):
+    def __init__(self, parent: QWidget | None = None, *, title: str = "Queue is empty",
+                 description: str = "Use Add to Queue on the Downloads screen to add videos here.",
+                 icon: str = "queue-active.svg") -> None:
         super().__init__(parent)
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -1394,30 +1600,31 @@ class QueueEmptyStateWidget(QWidget):
         surface_layout.setSpacing(0)
         surface_layout.addStretch(1)
 
-        content = QWidget(self.surface_card)
+        content = _HeightForWidthWidget(self.surface_card)
         content.setObjectName("queueEmptyContent")
-        content.setFixedWidth(440)
+        content.setMaximumWidth(440)
         content.setSizePolicy(
-            QSizePolicy.Policy.Fixed,
-            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Minimum,
         )
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
+        content_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
         self.placeholder_icon = QLabel("", content)
         self.placeholder_icon.setObjectName("queueEmptyIcon")
         self.placeholder_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder_icon.setFixedSize(32, 32)
-        queue_icon = load_icon_asset("queue-active.svg", size=QSize(32, 32))
+        queue_icon = load_icon_asset(icon, size=QSize(32, 32))
         if not queue_icon.isNull():
             self.placeholder_icon.setPixmap(queue_icon.pixmap(QSize(32, 32)))
-        self.placeholder_title = QLabel("Queue is empty", content)
+        self.placeholder_title = QLabel(title, content)
         self.placeholder_title.setObjectName("queueEmptyTitle")
         self.placeholder_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder_title.setWordWrap(True)
         self.placeholder_description = QLabel(
-            "Use Add to Queue on the Downloads screen to add videos here.",
+            description,
             content,
         )
         self.placeholder_description.setObjectName("queueEmptyDescription")
@@ -1437,82 +1644,19 @@ class QueueEmptyStateWidget(QWidget):
         surface_layout.addWidget(content, alignment=Qt.AlignmentFlag.AlignHCenter)
         surface_layout.addStretch(1)
         root_layout.addWidget(self.surface_card, stretch=1)
+        self.content_layout = content_layout
 
 
-def _style_combo_popup(combo: QComboBox, *, border_color: str = "#383e42") -> None:
+class QueueEmptyStateWidget(EmptyStateWidget):
+    pass
+
+
+def _style_combo_popup(combo: QComboBox, *, border_color: str | None = None) -> None:
     popup = combo.view().window()
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     popup.setAutoFillBackground(False)
     popup.setContentsMargins(0, 0, 0, 0)
-    popup.setStyleSheet(
-        f"""
-        QWidget {{
-            background: transparent;
-            border: none;
-        }}
-        QListView#nativeComboView {{
-            background: #242729;
-            border: 1px solid {border_color};
-            border-radius: 6px;
-            padding: 6px;
-            outline: 0;
-            margin: 0px;
-        }}
-        QListView#nativeComboView::item {{
-            background: transparent;
-            min-height: 30px;
-            padding: 7px 12px;
-            border-radius: 4px;
-            color: #eef0f1;
-            font-weight: 600;
-        }}
-        QListView#nativeComboView::item:hover {{
-            background: #303437;
-            color: #eef0f1;
-        }}
-        QListView#nativeComboView::item:selected {{
-            background: #393e41;
-            color: #eef0f1;
-        }}
-        QListView#nativeComboView::item:disabled {{
-            background: transparent;
-            color: #858d89;
-        }}
-        QListView#nativeComboView::item:disabled:hover {{
-            background: transparent;
-            color: #858d89;
-        }}
-        QListView#nativeComboView::item:disabled:selected {{
-            background: #252b28;
-            color: #858d89;
-        }}
-        QListView#nativeComboView QScrollBar:vertical {{
-            background: transparent;
-            width: 10px;
-            margin: 2px 0px 2px 0px;
-            border: none;
-        }}
-        QListView#nativeComboView QScrollBar::handle:vertical {{
-            background: #5b625f;
-            border-radius: 5px;
-            min-height: 24px;
-        }}
-        QListView#nativeComboView QScrollBar::handle:vertical:hover {{
-            background: #727a76;
-        }}
-        QListView#nativeComboView QScrollBar::sub-line:vertical,
-        QListView#nativeComboView QScrollBar::add-line:vertical,
-        QListView#nativeComboView QScrollBar::up-arrow:vertical,
-        QListView#nativeComboView QScrollBar::down-arrow:vertical {{
-            height: 0px;
-            width: 0px;
-        }}
-        QListView#nativeComboView QScrollBar::add-page:vertical,
-        QListView#nativeComboView QScrollBar::sub-page:vertical {{
-            background: transparent;
-        }}
-        """
-    )
+    popup.setStyleSheet(ui_style.combo_popup_stylesheet(border_color))
 
 
 class _NativeComboBox(QComboBox):
@@ -1594,9 +1738,10 @@ def build_native_combo(
 def build_feedback_row(parent: QWidget) -> FeedbackRefs:
     row = QWidget(parent)
     row.setObjectName("feedbackRow")
-    row.setFixedHeight(36)
+    row.setMinimumHeight(ui_style.CONTROL_HEIGHT)
+    row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
     layout = QHBoxLayout(row)
-    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setContentsMargins(12, 4, 4, 4)
     layout.setSpacing(8)
     message_label = ElidedLabel(row)
     message_label.setObjectName("feedbackMessage")
@@ -1614,10 +1759,10 @@ def build_feedback_row(parent: QWidget) -> FeedbackRefs:
     elapsed_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     elapsed_label.hide()
     action_button = build_button(row, spec=ButtonSpec(
-        text="View details", object_name="feedbackActionButton",
+        text="View details", object_name="feedbackActionButton", compact=True,
     ))
     dismiss_button = build_button(row, spec=ButtonSpec(
-        text="×", object_name="feedbackDismissButton", fixed_width=30, fixed_height=30,
+        text="×", object_name="feedbackDismissButton", fixed_width=ui_style.INLINE_HEIGHT, compact=True,
         tooltip="Dismiss status",
     ))
     dismiss_button.setAccessibleName("Dismiss status")

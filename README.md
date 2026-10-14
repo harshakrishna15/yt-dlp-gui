@@ -98,7 +98,7 @@ Output:
 2. Click `Analyze URL`.
 3. Choose audio or video settings.
 4. Click `Download` to start immediately, or `Add to Queue` to send it to the queue panel.
-5. Use `Queue` to manage pending downloads. Activity logs are available under `Preferences` > `View logs`.
+5. Use `Queue` > `Start queue` to download queued items. Completed items are skipped; queued, failed, and cancelled items are included. `Download` on the Downloads screen always starts the current link. Activity logs are available under `Preferences` > `View logs`.
 
 Analysis shows live yt-dlp status, an activity indicator, elapsed time, and
 `Cancel analysis` in the status row. Changing the URL cancels the previous lookup;
@@ -122,7 +122,7 @@ New queue items save a yt-dlp format selector (not media URLs), avoiding a secon
 analysis request when downloading. Older queue settings still use cancellable
 metadata resolution. Queue rows retain session-only Completed, Failed, or
 Cancelled results; `Retry failed` leaves successful items alone. Right-click a
-completed row to reveal its output file.
+completed row to reveal its output file, or use its visible Show in Finder / Show in folder action. The selected row exposes native buttons for keyboard and accessibility access; F2 edits, Delete removes, and Return reveals completed files. Clear all offers Undo until the next queue change or download start; downloaded files are never removed.
 
 Destination creation, write checks, media-tool checks, and estimated disk-space
 checks run in download workers. Known sizes include processing headroom; unknown
@@ -146,12 +146,11 @@ deleted because they may belong to other programs or were explicitly saved.
 
 ### Appearance
 
-The interface uses flat controls and the system font. Download progress and
-Cancel appear only during a download; update progress remains in Preferences.
+The interface uses a fixed light appearance with a pale gray sidebar, white content, restrained blue accents, and the system font. Shared controls use clear outlines, 8-pixel corners, 40-pixel standard sizing, and visible keyboard focus. Downloads reveals paired output settings after analysis and keeps technical options under Advanced; centered forms cap at 760 logical pixels. Content scrolls independently of the sidebar and shared download activity strip. Queue rows provide status labels and keyboard-accessible actions. Engine-update activity stays in Preferences. Unknown progress is indeterminate and unavailable metrics are omitted.
 Results use a single dismissible status row, with Show in Finder (or Show in folder) after a successful
 download and View details for errors. Update results stay in Preferences without
 an extra popup; progress and estimated download time remain visible while updating.
-The main form shows media type, quality, and destination. Container, codec, and
+After analysis, a compact summary shows the media title and available creator, duration, or playlist count. The main form shows media type, quality, and destination. Container, codec, and
 custom filename are under Advanced, with a summary of custom settings when
 collapsed. Video defaults to MP4/H.264 and audio to M4A after analysis. The folder
 name is shown inline; hover it for the full path or use the folder button to change it.

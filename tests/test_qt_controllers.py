@@ -137,6 +137,7 @@ class FakeWindow:
         self.progress_resets = 0
         self.queue_progress_preps = 0
         self.queue_refreshes = 0
+        self.queue_row_updates: list[int] = []
         self.controls_refreshes = 0
         self.source_detail_refreshes = 0
         self.current_item: tuple[str, str] = ("-", "-")
@@ -259,6 +260,9 @@ class FakeWindow:
 
     def _refresh_queue_panel(self) -> None:
         self.queue_refreshes += 1
+
+    def _update_queue_row(self, row: int) -> None:
+        self.queue_row_updates.append(row)
 
     def _edit_queue_item(self, row: int, item: dict[str, object]) -> None:
         self.edited_queue_items.append((int(row), dict(item)))
@@ -938,39 +942,18 @@ class TestRunQueueController(unittest.TestCase):
         self.assertEqual(kwargs["index"], 1)
         self.assertEqual(kwargs["total"], 1)
 
-    def test_on_start_prefers_queue_when_queue_items_exist(self) -> None:
+    def test_single_start_without_url_does_not_run_existing_queue(self) -> None:
         window = FakeWindow()
         window.url_edit.setText("")
-        state = RunQueueState(
-            queue_items=[
-                {
-                    "url": "https://example.com/watch?v=queued",
-                    "settings": {
-                        "mode": "audio",
-                        "format_filter": "mp3",
-                        "format_label": "High",
-                    },
-                },
-            ]
-        )
+        state = RunQueueState(queue_items=[{"url": "https://example.com/queued", "settings": {
+            "mode": "audio", "format_filter": "mp3", "format_label": "High"}}])
         executor = FakeExecutor()
-        ports, dialogs, _filesystem, clock = build_ports(executor=executor)
-        clock._now_ts = 77.0
+        ports, dialogs, *_ = build_ports(executor=executor)
         controller = RunQueueController(window, state=state, ports=ports)
-
         controller.on_start()
-
-        self.assertEqual(dialogs.critical_calls, [])
-        self.assertTrue(state.queue_active)
-        self.assertEqual(state.queue_index, 0)
-        self.assertEqual(window.status_value.text(), "Downloading queue...")
-        self.assertEqual(len(executor.calls), 1)
-        target, args, kwargs = executor.calls[0]
-        self.assertEqual(target, controller.run_queue_download_worker)
-        self.assertEqual(args, ())
-        self.assertEqual(kwargs["url"], "https://example.com/watch?v=queued")
-        self.assertEqual(kwargs["index"], 1)
-        self.assertEqual(kwargs["total"], 1)
+        self.assertFalse(state.queue_active)
+        self.assertEqual(executor.calls, [])
+        self.assertEqual(dialogs.critical_calls[0][0], "Missing URL")
 
     def test_queue_mutation_handlers_update_state_without_qt(self) -> None:
         window = FakeWindow()

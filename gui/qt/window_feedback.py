@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtGui import QFontMetrics
+from PySide6.QtWidgets import QStyle
 
 from ..core import error_feedback as core_error_feedback
 from ..common.types import SourceSummary
@@ -17,9 +19,10 @@ if TYPE_CHECKING:
 
 class WindowFeedbackMixin:
     def _set_metric_label_text(self: "QtYtDlpGui", label, text: str) -> None:
-        if label.text() == text:
-            return
-        label.setText(text)
+        if label.text() != text:
+            label.setText(text)
+        if hasattr(self, "metrics_card"):
+            self._sync_activity_metrics()
 
     def _set_post_download_output_dir(
         self: "QtYtDlpGui", output_path: Path
@@ -61,6 +64,15 @@ class WindowFeedbackMixin:
         return f"{trimmed}{dots}"
 
     def _refresh_current_item_text(self: "QtYtDlpGui") -> None:
+        if self._activity_stage:
+            shown = self._activity_stage
+            if self.isVisible() and self.metrics_card.isVisible():
+                shown = self._elide_text_right_with_dots(
+                    shown, width=max(80, self.item_label.width() - 4),
+                    metrics=QFontMetrics(self.item_label.font()))
+            self.item_label.setText(shown)
+            self.item_label.setToolTip(self._activity_stage)
+            return
         progress_clean = str(self._current_item_progress or "-").strip() or "-"
         title_clean = (
             re.sub(r"\s+", " ", str(self._current_item_title or "-").strip()) or "-"
@@ -101,6 +113,7 @@ class WindowFeedbackMixin:
         if not raw_title.strip():
             raw_title = "-"
         title_clean = re.sub(r"\s+", " ", raw_title.strip()) or "-"
+        self._activity_stage = ""
         self._current_item_progress = progress_clean
         self._current_item_title = title_clean
         self._current_item_title_tooltip = raw_title
@@ -182,11 +195,12 @@ class WindowFeedbackMixin:
             append_log=self._append_log,
             log=log,
         )
+        if self._is_downloading:
+            self._activity_stage = text
+            self._refresh_current_item_text()
 
-    def _set_source_summary(
-        self: "QtYtDlpGui", summary: SourceSummary | dict[str, object] | None
-    ) -> None:
-        del summary
+    def _set_source_summary(self: "QtYtDlpGui", summary: SourceSummary | dict[str, object] | None) -> None:
+        self._source_summary_data = dict(summary or {})
         self._refresh_queue_preview_card()
 
     def _set_preview_title(self: "QtYtDlpGui", title: str) -> None:
@@ -194,7 +208,22 @@ class WindowFeedbackMixin:
         self._refresh_queue_preview_card()
 
     def _refresh_queue_preview_card(self: "QtYtDlpGui") -> None:
-        return
+        if not hasattr(self, "media_summary"):
+            return
+        title = self._preview_title_raw
+        self.media_title.setText(title)
+        self.media_title.setToolTip(title)
+        summary = self._source_summary_data
+        # SourceSummary also contains instructional text; only show real metadata.
+        creator = str(summary.get("subtitle_text") or "")
+        if creator in {"Review the playlist items before downloading.", "Choose export settings to start downloading."}:
+            creator = ""
+        parts = [creator, str(summary.get("detail_two_text") or "")]
+        detail = " · ".join(p for p in parts if p)
+        self.media_detail.setText(detail)
+        self.media_detail.setVisible(bool(detail))
+        self.media_summary.setVisible(bool(title))
+        self.source_hint.setVisible(not bool(self._video_labels or self._audio_labels) or self._is_fetching)
 
     def _refresh_queue_empty_state(self: "QtYtDlpGui") -> None:
         return
@@ -213,8 +242,10 @@ class WindowFeedbackMixin:
         self: "QtYtDlpGui", percent: float, *, immediate: bool = False
     ) -> None:
         clamped = max(0.0, min(100.0, float(percent)))
+        self.progress_bar.setRange(0, 1000)
         target = int(round(clamped * 10))
-        if immediate:
+        if (immediate or os.environ.get("YT_DLP_GUI_REDUCE_MOTION") == "1"
+                or not self.style().styleHint(QStyle.StyleHint.SH_Widget_Animate, None, self)):
             self._stop_progress_animation()
             self.progress_bar.setValue(target)
             return
@@ -235,12 +266,13 @@ class WindowFeedbackMixin:
     ) -> float | None:
         if not self.queue_active or self.queue_index is None:
             return None
-        total_items = len(self.queue_items)
+        indices = self._run_queue_state.run_indices or list(range(len(self.queue_items)))
+        total_items = len(indices)
         if total_items <= 0:
             return None
         completed_before_current = max(
             0,
-            min(int(self.queue_index), total_items),
+            min(sum(i < self.queue_index for i in indices), total_items),
         )
         current_ratio = max(0.0, min(100.0, float(item_percent))) / 100.0
         return (
@@ -260,7 +292,9 @@ class WindowFeedbackMixin:
     def _reset_progress_summary(self: "QtYtDlpGui") -> None:
         self._discard_pending_progress()
         self._stop_progress_animation()
+        self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
+        self._activity_stage = ""
         self._set_metric_label_text(self.progress_label, "Progress: -")
         self._set_metric_label_text(self.speed_label, "Speed: -")
         self._set_metric_label_text(self.eta_label, "ETA: -")
@@ -298,15 +332,26 @@ class WindowFeedbackMixin:
             self._run_queue_controller.on_output_ready(str(payload["path"]))
             return
         if status == "preparing":
+            self._stop_progress_animation()
+            self.progress_bar.setRange(0, 0)
+            for label in (self.progress_label, self.speed_label, self.eta_label):
+                self._set_metric_label_text(label, label.text().split(":", 1)[0] + ": -")
             if not self._cancel_requested:
                 self._set_status(str(payload.get("message") or "Preparing..."), log=False)
             return
         if status == "downloading":
+            if not self._cancel_requested:
+                self._activity_stage = ""
+                self._refresh_current_item_text()
             self._set_metrics_visible(True)
             percent = payload.get("percent")
             speed = payload.get("speed")
             eta = payload.get("eta")
             playlist_eta = str(payload.get("playlist_eta") or "").strip()
+            if not isinstance(percent, (int, float)):
+                self._stop_progress_animation()
+                self.progress_bar.setRange(0, 0)
+                self._set_metric_label_text(self.progress_label, "Progress: -")
             if isinstance(percent, (int, float)):
                 display_percent = float(percent)
                 queue_percent = self._queue_overall_progress_percent(display_percent)
@@ -316,8 +361,7 @@ class WindowFeedbackMixin:
                 self._set_metric_label_text(
                     self.progress_label, f"Progress: {display_percent:.1f}%"
                 )
-            if isinstance(speed, str):
-                self._set_metric_label_text(self.speed_label, f"Speed: {speed or '-'}")
+            self._set_metric_label_text(self.speed_label, f"Speed: {speed if isinstance(speed, str) and speed else '-'}")
             eta_text = str(eta).strip() if isinstance(eta, str) else ""
             if playlist_eta:
                 self._set_metric_label_text(
@@ -348,7 +392,12 @@ class WindowFeedbackMixin:
                 self._set_metric_label_text(
                     self.progress_label, f"Progress: {queue_percent:.1f}%"
                 )
-            self._set_metric_label_text(self.eta_label, "ETA: Finalizing")
+            self._stop_progress_animation()
+            self.progress_bar.setRange(0, 0)
+            self._activity_stage = "Finalizing download…"
+            self._refresh_current_item_text()
+            for label in (self.progress_label, self.speed_label, self.eta_label):
+                self._set_metric_label_text(label, label.text().split(":", 1)[0] + ": -")
         elif status == "cancelled":
             self._reset_progress_summary()
         if self.queue_active and self.queue_index is not None and status == "item":

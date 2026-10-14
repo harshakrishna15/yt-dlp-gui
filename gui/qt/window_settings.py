@@ -118,6 +118,9 @@ class WindowSettingsMixin:
         refs = qt_panels.build_queue_panel(
             parent=self,
             on_clear_queue=self._run_queue_controller.on_queue_clear,
+            on_start_queue=self._start_queue_download,
+            on_downloads=self._show_main_workspace,
+            on_undo=self._run_queue_controller.undo_queue_clear,
             on_retry_failed=lambda: self._run_queue_controller.start_queue_download(retry_failed_only=True),
         )
         self.queue_stack = refs.queue_stack
@@ -127,12 +130,18 @@ class WindowSettingsMixin:
         self.queue_list = refs.queue_list
         self.queue_clear_button = refs.clear_queue_button
         self.queue_retry_button = refs.retry_failed_button
+        self.queue_start_button = refs.start_queue_button
+        self.queue_undo_button = refs.undo_button
+        self.queue_undo_row = refs.undo_row
         self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_list.customContextMenuRequested.connect(self._queue_context_menu)
         self.queue_list.itemSelectionChanged.connect(self._refresh_queue_panel_state)
         self.queue_list.edit_requested.connect(self._queue_edit_row)
         self.queue_list.remove_requested.connect(self._queue_remove_row)
         self.queue_list.items_reordered.connect(self._queue_reorder_items)
+        self.queue_list.reveal_requested.connect(lambda row: self._reveal_download(
+            Path(self.queue_items[row]["output_path"]) if 0 <= row < len(self.queue_items)
+            and self.queue_items[row].get("output_path") else None))
         return refs.panel
 
     def _reveal_action_label(self) -> str:
@@ -187,6 +196,8 @@ class WindowSettingsMixin:
     def _refresh_output_folder_display(self: "QtYtDlpGui") -> None:
         path = Path(self.output_dir_edit.text().strip() or self._default_output_dir()).expanduser()
         self.output_dir_label.setText(path.name or str(path))
+        self.output_dir_label.setMinimumWidth(0)
+        self.output_dir_label.setMaximumWidth(16777215)
         self.output_dir_label.setToolTip(str(path))
         self.output_dir_label.setAccessibleName(f"Download folder: {path}")
         self.browse_button.setToolTip(f"Choose download folder\n{path}")

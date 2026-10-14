@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from ..core import format_selection as core_format_selection
 from ..core import options as core_options
 from . import media_probe, tooling, yt_dlp_binary, yt_dlp_cli
 from .types import FormatInfo, ProgressUpdate
@@ -117,6 +118,14 @@ def _thumbnail_embed_container(
     return candidate if candidate in THUMBNAIL_EMBED_CONTAINERS else None
 
 
+def _is_audio_only(fmt_info: FormatInfo | None) -> bool:
+    # Missing codec metadata also occurs for the Best available video selector.
+    return bool(fmt_info and (
+        fmt_info.get("vcodec") == "none" or fmt_info.get("is_audio_only")
+        or fmt_info.get("custom_format") == "bestaudio/best"
+    ))
+
+
 def build_ydl_opts(
     *,
     url: str,
@@ -140,10 +149,7 @@ def build_ydl_opts(
     record_output: Callable[[Path], None] | None = None,
 ) -> dict[str, Any]:
     fmt_id = fmt_info.get("format_id") if fmt_info else None
-    is_audio_only = bool(
-        fmt_info
-        and (fmt_info.get("vcodec") in (None, "none") or fmt_info.get("is_audio_only"))
-    )
+    is_audio_only = _is_audio_only(fmt_info)
     is_video_only = bool(
         fmt_info and fmt_info.get("acodec") in (None, "none") and not is_audio_only
     )
@@ -160,6 +166,14 @@ def build_ydl_opts(
     selected_container = format_filter if format_filter in {"mp4", "webm"} else ""
     fmt_ext = (fmt_info.get("ext") or "").lower() if fmt_info else ""
     target_container = selected_container or fmt_ext or None
+
+    # A playlist preview describes only its first entry. Other entries may not
+    # offer that stream ID, so keep the selection with per-entry fallbacks.
+    if playlist_enabled and fmt_id and not (fmt_info or {}).get("custom_format"):
+        fmt = core_format_selection.queue_format_selector(
+            mode="audio" if is_audio_only else "video",
+            container=target_container or "", codec="", info=dict(fmt_info),
+        ) or f"{fmt}/{'bestaudio/best' if is_audio_only else 'bestvideo+bestaudio/best'}"
 
     postprocessors: list[dict[str, Any]] = []
     pp_args: list[str] = []
@@ -199,11 +213,13 @@ def build_ydl_opts(
 
     custom_stem = core_options.sanitize_custom_filename(custom_filename)
     if playlist_enabled:
-        outtmpl = str(output_dir / "%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s")
+        filename_template = "%(playlist_index)s - %(title)s_%(epoch)s.%(ext)s"
     elif custom_stem:
-        outtmpl = str(output_dir / f"{custom_stem}_%(epoch)s.%(ext)s")
+        filename_template = f"{custom_stem.replace('%', '%%')}_%(epoch)s.%(ext)s"
     else:
-        outtmpl = str(output_dir / "%(title)s_%(epoch)s.%(ext)s")
+        filename_template = "%(title)s_%(epoch)s.%(ext)s"
+    # yt-dlp expands the whole path, including the user-selected directory.
+    outtmpl = str(Path(str(output_dir).replace("%", "%%")) / filename_template)
 
     log(f"[start] {url}")
     if fmt_label:
@@ -813,9 +829,7 @@ def _edit_friendly_mp4_required(
         return False
     if fmt_info is None:
         return True
-    return not bool(
-        fmt_info.get("vcodec") in (None, "none") or fmt_info.get("is_audio_only")
-    )
+    return not _is_audio_only(fmt_info)
 
 
 def _unique_existing_mp4_paths(paths: list[Path]) -> list[Path]:

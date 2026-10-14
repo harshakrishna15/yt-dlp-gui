@@ -48,6 +48,7 @@ def build_link_input_module(
     url_edit = build_line_edit(
         row,
         spec=LineEditSpec(
+            sizing="url",
             widget_config=WidgetConfig(
                 object_name="urlInputField",
                 minimum_width=0,
@@ -67,6 +68,7 @@ def build_link_input_module(
         row,
         spec=ButtonSpec(
             text="Paste",
+            sizing="url",
             size_policy=(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed),
             on_click=on_paste_url,
         ),
@@ -76,6 +78,7 @@ def build_link_input_module(
         row,
         spec=ButtonSpec(
             text="Analyze URL",
+            sizing="url", icon="analyze-action.svg",
             object_name="analyzeUrlButton",
             size_policy=(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed),
             on_click=on_analyze_url,

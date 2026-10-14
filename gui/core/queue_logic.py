@@ -155,10 +155,13 @@ def move_selected_queue_items_up(
 ) -> tuple[list[QueueItem], bool]:
     items: list[QueueItem] = [dict(item or {}) for item in queue_items]
     moved = False
-    for idx in normalize_selected_indices(selected_indices, queue_length=len(items)):
-        if idx <= 0 or idx >= len(items):
+    selected = set(normalize_selected_indices(selected_indices, queue_length=len(items)))
+    for idx in sorted(selected):
+        if idx <= 0 or idx - 1 in selected:
             continue
         items[idx - 1], items[idx] = items[idx], items[idx - 1]
+        selected.remove(idx)
+        selected.add(idx - 1)
         moved = True
     return items, moved
 
@@ -169,11 +172,13 @@ def move_selected_queue_items_down(
 ) -> tuple[list[QueueItem], bool]:
     items: list[QueueItem] = [dict(item or {}) for item in queue_items]
     moved = False
-    ordered = normalize_selected_indices(selected_indices, queue_length=len(items))
-    for idx in reversed(ordered):
-        if idx < 0 or idx >= len(items) - 1:
+    selected = set(normalize_selected_indices(selected_indices, queue_length=len(items)))
+    for idx in sorted(selected, reverse=True):
+        if idx >= len(items) - 1 or idx + 1 in selected:
             continue
         items[idx + 1], items[idx] = items[idx], items[idx + 1]
+        selected.remove(idx)
+        selected.add(idx + 1)
         moved = True
     return items, moved
 
